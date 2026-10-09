@@ -308,6 +308,12 @@ type State struct {
 	// the call in question is not for. Both nil on qwen3next.
 	dLowRank, dGateWaste []float32
 	dOut, dOnes          []float32
+	// mvCalls counts mv: each one reads its weight once, the count a gate
+	// holds a batched path to (TestLinearRowsCounts).
+	mvCalls int64
+	// lin is a prompt chunk's linear-block projections, run as GEMMs before
+	// the row loop (linrows.go).
+	lin linRows
 	// dSB and dSC are a Mamba-1 block's B and C, and dZeroA the zero rates
 	// its dt goes through SSDGate32JIT against (only the softplus is kept).
 	dSB, dSC, dZeroA []float32
@@ -2916,6 +2922,7 @@ func (s *State) addBiasRows(out, b []float32, n int) {
 // mv runs one matvec on generated code. There is no fallback: a decline is an
 // error naming the tensor.
 func (s *State) mv(out []float32, w tensor, x []float32) error {
+	s.mvCalls++
 	t0 := s.tick()
 	defer func() { s.tock(opMatVec, t0) }()
 	// A container weight is read by the host in the device layout, so a block

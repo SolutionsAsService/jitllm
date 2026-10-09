@@ -27,6 +27,9 @@ type modelOpts struct {
 	// noShOverlap runs a mixture's shared expert after its routed read
 	// rather than behind it; see WithSharedOverlap.
 	noShOverlap bool
+	// linRowByRow runs a prompt's linear blocks one matvec per row
+	// (WithLinearRowByRow).
+	linRowByRow bool
 	// noStreamTrial keeps an auto-streamed placement without measuring it
 	// against the host; see WithStreamTrial.
 	noStreamTrial bool
@@ -106,6 +109,13 @@ func defaultOpts() modelOpts {
 // added where it always was, so the answer is the same float sum
 // (TestSharedOverlapIsTheSameSum); off is the other arm.
 func WithSharedOverlap(on bool) Option { return func(l *loadOpts) { l.opt.noShOverlap = !on } }
+
+// WithLinearRowByRow runs a prompt chunk's recurrent blocks (the gated delta
+// rule, KDA, Mamba-1 and -2, the short convolution) one row at a time through
+// every projection, as decode does, instead of running the projections as
+// GEMMs over the chunk around the per-row recurrence (linrows.go). Off by
+// default; on is the reference arm the batched form is held to.
+func WithLinearRowByRow(on bool) Option { return func(l *loadOpts) { l.opt.linRowByRow = on } }
 
 // WithExperts places the routed experts of every mixture block a device
 // takes: "host" (hybrid), "card" (sheets streamed every token), or "" (the
