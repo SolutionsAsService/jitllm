@@ -131,8 +131,15 @@ func speedCmd(args []string) error {
 		}
 		g0 := readGC()
 		t0 := time.Now()
-		_, err = st.Prefill(prompt)
+		// The timer stops when Prefill returns: it hands back the last row's
+		// logits read from the device, so the device has finished; that is
+		// llama-bench's pp boundary (decode of the batch with the last row's
+		// logits, then a synchronize), with no sampling and no tokenizing.
+		lg, err := st.Prefill(prompt)
 		pp = time.Since(t0)
+		if err == nil {
+			err = warmHonest(st, len(prompt), lg, m.Cfg.NVocab)
+		}
 		if *gcStats {
 			gcDelta(fmt.Sprintf("pp%d", *p), g0, readGC(), *p)
 		}
@@ -269,6 +276,10 @@ func speedCmd(args []string) error {
 		pps = append(pps, ppr)
 		tgs = append(tgs, tgr)
 	}
+	// The warm-up policy goes beside the rates, so a row says what it is.
+	fmt.Printf("warm prefill, pp%d, no prefix reuse: 1 untimed warm-up prompt and decode, then %d timed, "+
+		"every sample reported; each a fresh State at position 0, all %d rows computed (warmHonest), the "+
+		"last row's logits read back before the timer stops\n", *p, *reps, *p)
 	fmt.Printf("pp%d %s tok/s   tg%d %s tok/s\n", *p, rates(pps), *n, rates(tgs))
 	return nil
 }
@@ -461,5 +472,21 @@ func ttftRun(m *model.Model, attach func(int) (*model.State, error), p, reps int
 	slices.Sort(warm)
 	fmt.Printf("ttft %d tok   cold %.1f ms (open to the first prompt's token)   warm %s ms (median %.2f, a fresh session)\n",
 		ntok, float64(cold.Microseconds())/1e3, rates(warm), warm[len(warm)/2])
+	return nil
+}
+
+// warmHonest refuses a timed prompt that was not the whole prompt computed
+// from nothing: a fresh State at position 0 that ran every row through its
+// blocks (none restored from a prefix cache) and handed back the last row's
+// logits, which the device must have finished to return.
+func warmHonest(st *model.State, n int, logits []float32, vocab int) error {
+	switch {
+	case st.KVRestored() != 0:
+		return fmt.Errorf("speed: the timed prompt restored %d position(s) from a prefix cache", st.KVRestored())
+	case st.PrefillRows() != n || st.Pos() != n:
+		return fmt.Errorf("speed: the timed prompt ran %d of %d rows and ended at position %d", st.PrefillRows(), n, st.Pos())
+	case len(logits) != vocab:
+		return fmt.Errorf("speed: the timed prompt returned %d logits, not the %d of a row read back", len(logits), vocab)
+	}
 	return nil
 }

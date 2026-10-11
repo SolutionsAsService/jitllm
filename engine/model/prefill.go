@@ -409,6 +409,7 @@ func (s *State) prefillSrc(slot int, src []func(dst []float32) error, ids []int3
 			}); err != nil {
 				return nil, err
 			}
+			s.promptRows++
 		}
 		return lg, nil
 	}
@@ -838,6 +839,7 @@ func (s *State) prefillSrc(slot int, src []func(dst []float32) error, ids []int3
 		// rate inside it. See nn.JIT.ObserveChunk.
 		s.jit.ObserveChunk(width, n, time.Since(chunkStart))
 		ps.after(n, time.Since(chunkStart).Seconds(), s.seqPos(slot))
+		s.promptRows += n
 		base += n
 	}
 

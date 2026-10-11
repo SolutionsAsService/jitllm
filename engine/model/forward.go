@@ -143,6 +143,10 @@ type State struct {
 	spanTok []int32
 	// kvSkipped is what the last PrefillCached restored rather than computed.
 	kvSkipped int
+	// promptRows counts the prompt rows this State ran through its blocks, over
+	// its life (PrefillRows): what a benchmark checks to show a prompt was
+	// computed, not restored.
+	promptRows int
 	// interrupt, when set, is asked before every prefill chunk
 	// (SetPrefillInterrupt).
 	interrupt func() bool
@@ -2974,6 +2978,11 @@ func (s *State) mv(out []float32, w tensor, x []float32) error {
 
 // Pos is the number of positions already in the cache.
 func (s *State) Pos() int { return s.pos }
+
+// PrefillRows is how many prompt rows this State has run through its blocks
+// since it was made: a prompt restored from a prefix cache adds none, and a
+// one-row prompt (decode's path) adds one.
+func (s *State) PrefillRows() int { return s.promptRows }
 
 // stepDownKVToF32 narrows the cache from packed halves to f32 and rebuilds it.
 // It is a named method so a gate can reach it without a real card. The caller
