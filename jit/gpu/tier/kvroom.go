@@ -45,7 +45,11 @@ func (g *devTier) kvRoom() (positions, page int) {
 	}
 	g.settleRounding()
 	var grow uint64
-	if lim, used := g.limit, g.used+g.reserved(); used < lim {
+	lim := g.limit
+	if g.kvCeil > 0 {
+		lim = min(lim, g.kvCeil)
+	}
+	if used := g.used + g.reserved(); used < lim {
 		grow = lim - used
 	}
 	if g.pool != nil && g.pool.limit > 0 {

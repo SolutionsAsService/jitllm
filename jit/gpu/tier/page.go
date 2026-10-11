@@ -653,6 +653,7 @@ func (g *devTier) SetBudget(bytes uint64) int {
 		g.roomGen.Add(1)
 	}
 	g.limit = bytes
+	g.kvCeil = 0
 	// Give back whatever the new budget no longer covers. A block paged out
 	// here is demoted, not released: it keeps its owner and history and pages
 	// back in on the next token if there is a slot.

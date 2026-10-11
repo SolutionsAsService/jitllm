@@ -766,6 +766,9 @@ type Stats struct {
 	PagedPrefillLaunches int
 	// KVEvictions counts pages sent home (kvevict.go), one per layer-page.
 	KVEvictions int
+	// KVStageReads counts page reads the card refused a buffer for, which
+	// came home through the pool's reserve (readStaged).
+	KVStageReads int
 	// KVWindowReleased counts a windowed layer's pages released behind its
 	// window (devTier.windowPages), one per layer-page.
 	KVWindowReleased int
@@ -1067,6 +1070,7 @@ func (s *Stats) add(o Stats) {
 	s.PagedPrefillLaunches += o.PagedPrefillLaunches
 	s.PagedStagedLaunches += o.PagedStagedLaunches
 	s.KVEvictions += o.KVEvictions
+	s.KVStageReads += o.KVStageReads
 	s.KVWindowReleased += o.KVWindowReleased
 	s.KVStreamPasses += o.KVStreamPasses
 	s.StagedPasses += o.StagedPasses
@@ -1381,7 +1385,14 @@ type devShared struct {
 	// kvPromise is the positions of history a scheduler has admitted rows
 	// for and they have not yet taken (GPU.PromiseKV, kvroom.go).
 	kvPromise int
-	winDepth  int
+	// kvCeil is where the driver refused the KV pool's growth inside the
+	// budget, in the budget's bytes (used plus reserved), 0 when it has
+	// not: the card holds less than the budget says (other processes on it,
+	// or a budget set past what was free), and KVRoom counts no growth past
+	// it, so a scheduler holds rows back rather than admitting history the
+	// card cannot take. A growth that succeeds, or a new budget, clears it.
+	kvCeil   uint64
+	winDepth int
 	// geoUsed says a split plan was ever placed here (gemma4.go).
 	geoUsed bool
 	// reserving is set while reserveScratch probes widths, so prepBatch's

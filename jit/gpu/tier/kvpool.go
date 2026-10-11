@@ -68,8 +68,16 @@ type kvLayerPool struct {
 	// at ranges[s].off, in position order, entry 0 the dummy.
 	tab backend.Buf
 	// charged is what the layer holds against the budget: its buffers at n
-	// pages and its table arena.
+	// pages, its table arena and its read reserve.
 	charged uint64
+	// stage and stageTab are the reserve a read of the layer's pages goes
+	// through when the card refuses a buffer for it (readPages): one page of
+	// the wider half, and the gather's one-id table. They are made with the
+	// layer, while the card has room, and charged with it: a park or an
+	// eviction runs on a full card, which is exactly when an allocation for
+	// the read is refused (a 4 GiB card whose budget the server set past
+	// what the driver had free).
+	stage, stageTab backend.Buf
 	// floor is the fewest pages a shrink leaves: the dummy and a page for each
 	// session attached to the layer (its working set).
 	floor int
@@ -186,7 +194,7 @@ func (g *devTier) addKVLayer(kp *kvPool, li int, geom kvGeom, n int) error {
 	for id := n - 1; id >= 1; id-- {
 		l.free = append(l.free, uint32(id))
 	}
-	need := kp.pageBytes(l)*uint64(n) + uint64(kp.tabWords)*4
+	need := kp.pageBytes(l)*uint64(n) + uint64(kp.tabWords)*4 + kvStageBytes(geom, kp.p)
 	if !g.kvCompact(need, nil) && !g.roomOrReclaim(need) {
 		return fmt.Errorf("%w: a layer's %d page(s) and table need %d bytes", ErrKVCapacity, n, need)
 	}
@@ -197,6 +205,9 @@ func (g *devTier) addKVLayer(kp *kvPool, li int, geom kvGeom, n int) error {
 	if l.tab, err = g.dev.Alloc(kp.tabWords * 4); err == nil {
 		err = l.tab.Write(make([]byte, kp.tabWords*4))
 	}
+	if err == nil {
+		err = g.makeStage(l, kp.p)
+	}
 	if err != nil {
 		freeLayerBufs(l)
 		return err
@@ -204,6 +215,35 @@ func (g *devTier) addKVLayer(kp *kvPool, li int, geom kvGeom, n int) error {
 	g.charge(need)
 	l.charged = need
 	kp.layers[li] = l
+	return nil
+}
+
+// kvStageBytes is a layer's read reserve: a page of its wider half and a
+// one-id table.
+func kvStageBytes(geom kvGeom, p int) uint64 {
+	return uint64(max(geom.kWords(p), geom.vWords(p))+1) * 4
+}
+
+// makeStage gives l its read reserve and compiles the one-page gathers it
+// runs, so a read through it compiles and allocates nothing. Callers hold
+// g.mu.
+func (g *devTier) makeStage(l *kvLayerPool, p int) error {
+	kw, vw := l.geom.kWords(p), l.geom.vWords(p)
+	var err error
+	if l.stage, err = g.dev.Alloc(max(kw, vw) * 4); err != nil {
+		return err
+	}
+	if l.stageTab, err = g.dev.Alloc(4); err != nil {
+		return err
+	}
+	for _, w := range []int{kw, vw} {
+		if w == 0 {
+			continue
+		}
+		if _, err = g.gatherKernel(w, 1); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -260,7 +300,16 @@ func (g *devTier) allocPages(sid uint64, kp *kvPool, l *kvLayerPool, s seqID, co
 		// Growth first -- a page-out of streamed weights or more pool -- and
 		// when nothing can grow, cold history goes home (kvevict.go). A
 		// driver's refusal inside the budget is no room either.
-		if err := g.growKVLayer(kp, l, l.n+count-len(l.free)); err != nil && !g.evictForRoom(sid, kp, l, count) {
+		err := g.growKVLayer(kp, l, l.n+count-len(l.free))
+		switch {
+		case err == nil:
+			g.kvCeil = 0
+		case !errors.Is(err, ErrKVCapacity):
+			// The budget allowed it and the driver did not: the card's
+			// own ceiling, which KVRoom then reports (kvCeil).
+			g.kvCeil = g.used + g.reserved()
+		}
+		if err != nil && !g.evictForRoom(sid, kp, l, count) {
 			return err
 		}
 	}
@@ -714,20 +763,9 @@ func writePagesIn(b backend.Buf, host []byte, words int, order []uint32) error {
 // kernel is compiled per shape and kept, as restride's are.
 func (g *devTier) gatherInto(src, dst backend.Buf, order []uint32, words int) error {
 	n := len(order)
-	key := [4]int{-1, words, n, 0}
-	k := g.restrides[key]
-	if k == nil {
-		ker, err := kernels.PagedGatherPages(words, n)
-		if err == nil {
-			k, err = g.dev.Compile(ker)
-		}
-		if err != nil {
-			return err
-		}
-		if g.restrides == nil {
-			g.restrides = map[[4]int]backend.Kernel{}
-		}
-		g.restrides[key] = k
+	k, err := g.gatherKernel(words, n)
+	if err != nil {
+		return err
 	}
 	tab, err := g.dev.Alloc(n * 4)
 	if err != nil {
@@ -738,6 +776,28 @@ func (g *devTier) gatherInto(src, dst backend.Buf, order []uint32, words int) er
 		return err
 	}
 	return k.Launch((n*words+127)/128, 128, src, dst, tab)
+}
+
+// gatherKernel is the gather of n pages of words each, compiled once and kept
+// with the restrides.
+func (g *devTier) gatherKernel(words, n int) (backend.Kernel, error) {
+	key := [4]int{-1, words, n, 0}
+	if k := g.restrides[key]; k != nil {
+		return k, nil
+	}
+	ker, err := kernels.PagedGatherPages(words, n)
+	if err != nil {
+		return nil, err
+	}
+	k, err := g.dev.Compile(ker)
+	if err != nil {
+		return nil, err
+	}
+	if g.restrides == nil {
+		g.restrides = map[[4]int]backend.Kernel{}
+	}
+	g.restrides[key] = k
+	return k, nil
 }
 
 // freeKVLayer frees one layer's buffers and refunds its charge, and forgets
@@ -751,10 +811,11 @@ func (g *devTier) freeKVLayer(l *kvLayerPool) {
 
 func freeLayerBufs(l *kvLayerPool) {
 	freeKV2(l.k, l.v)
-	if l.tab != nil {
-		l.tab.Free()
+	freeKV2(l.tab, l.stage)
+	if l.stageTab != nil {
+		l.stageTab.Free()
 	}
-	l.k, l.v, l.tab = nil, nil, nil
+	l.k, l.v, l.tab, l.stage, l.stageTab = nil, nil, nil, nil, nil
 }
 
 // freeKV2 frees a K buffer and, when there is one, its V buffer.
