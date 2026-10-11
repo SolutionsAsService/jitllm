@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -38,7 +39,7 @@ func TestGemmTileMatchesTheReference(t *testing.T) {
 	if len(devs) == 0 {
 		t.Skip("no GPU backend on this host")
 	}
-	ran := 0
+	ran, split := 0, 0
 	for _, d := range devs {
 		defer d.Close()
 		for _, q := range []kernels.Quant{kernels.Q4_K, kernels.Q6_K, kernels.Q8_0, kernels.Q5_K,
@@ -61,6 +62,9 @@ func TestGemmTileMatchesTheReference(t *testing.T) {
 					break
 				}
 				ran++
+				if strings.Contains(kk.Name, "_p") {
+					split++
+				}
 				mma70Case(t, d, kern, s, fmt.Sprintf("gemmtile %+v", tl),
 					kernels.GemmTileGroups(s, tl), tl.Threads(), true)
 				kern.Close()
@@ -69,6 +73,11 @@ func TestGemmTileMatchesTheReference(t *testing.T) {
 	}
 	if ran == 0 {
 		t.Skip("no backend lowers the collective tile GEMM here")
+	}
+	// The split staging (a sub-block across threads) must have been among
+	// the kernels checked, or this gate says nothing about it.
+	if split == 0 {
+		t.Fatal("no case built the split staging")
 	}
 }
 
