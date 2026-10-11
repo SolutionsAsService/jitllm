@@ -97,15 +97,11 @@ func CompatHandlerWith(b Backend, p ImagePolicy) http.Handler {
 	c := &compat{b: b, img: p.ready()}
 	mux := http.NewServeMux()
 	c.mux = mux
-	mux.HandleFunc("/v1/files", c.openAIFiles)
-	mux.HandleFunc("/v1/files/", c.openAIFiles)
-	mux.HandleFunc("/v1/batches", c.openAIBatches)
-	mux.HandleFunc("/v1/batches/", c.openAIBatches)
-	mux.HandleFunc("/v1/chat/completions", c.openAIChatCompletions)
-	mux.HandleFunc("/v1/completions", c.openAICompletions)
-	mux.HandleFunc("/v1/models", c.openAIModels)
-	mux.HandleFunc("/v1/embeddings", c.openAIEmbeddings)
-	mux.HandleFunc("/v1/systemone", c.systemOne)
-	mux.HandleFunc("/v1/messages", c.anthropicMessages)
+	// compatRoutes (capabilities.go) is the list: the capability manifest
+	// reads the same table, so a route cannot be served and not described.
+	for _, r := range compatRoutes {
+		h := r.handle
+		mux.HandleFunc(r.path, func(w http.ResponseWriter, q *http.Request) { h(c, w, q) })
+	}
 	return mux
 }

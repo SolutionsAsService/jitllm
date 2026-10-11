@@ -139,7 +139,9 @@ func TestOnlyTheConverterReachesGGUF(t *testing.T) {
 		modPath + "/server/cmd/jitllmd": daemonConverts,
 		// docs/models.md is rendered from the converter's lists themselves
 		// (convert.Architectures, HFClasses, Projectors); it converts nothing.
-		modPath + "/internal/modelsdoc": "renders docs/models.md from the converter's own lists; converts nothing",
+		modPath + "/internal/modelsdoc":         "renders docs/models.md from the converter's own lists; converts nothing",
+		modPath + "/internal/capabilities":      "renders the capability manifest from the converter's own lists; converts nothing",
+		modPath + "/server/cmd/gencapabilities": "writes the capability manifest through internal/capabilities; converts nothing",
 	}
 	g := pkgGraph(t, filepath.Join("..", ".."))
 	if len(g) < 10 {

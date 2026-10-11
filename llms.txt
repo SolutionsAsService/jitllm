@@ -16,7 +16,8 @@ Things to know before using or changing it:
 
 - The engine reads only `.jlm`. `model.Open` refuses a GGUF and returns the convert command to run: `jitllm convert <gguf|hf-dir|hf://repo|catalog-name> out.jlm`.
 - Put flags before the model path. `jitllm run <file> -chat ...` treats `-chat` as prompt text, and the CLI refuses it.
-- Server endpoints: `POST /v1/chat/completions`, `POST /v1/completions`, `GET /v1/models` (OpenAI), `POST /v1/messages` (Anthropic), all streaming. A Connect API (`proto/jitllm/v1`) exposes models, sessions, devices, placement and telemetry.
+- Server endpoints: `POST /v1/chat/completions`, `POST /v1/completions`, `GET /v1/models`, `POST /v1/embeddings`, the Files and Batch APIs (OpenAI), `POST /v1/messages` (Anthropic), streaming where the API streams, and `GET /v1/capabilities`. A Connect API (`proto/jitllm/v1`) exposes models, sessions, devices, placement and telemetry.
+- Before choosing or integrating: `docs/capabilities.json` (or `jitllm capabilities -json`, or `GET /v1/capabilities` on a running server) says what this build converts, runs and serves -- architectures, quantization, backends verified on which hardware, every request field and its limits, and the combinations refused. `jitllm doctor -json [model.jlm]` says whether this machine and build can run, with a next action for each thing missing (exit 0 ok, 2 missing, 1 error).
 - Every engine knob is a per-model-instance Go option (`With...()`); the libraries read no environment variables. `cmd/jitllm` maps `JITLLM_*` variables onto those options.
 - Every operation a token runs is generated machine code; there is no interpreted fallback. Go reference arithmetic lives in `internal/oracle`, which only tests may import.
 - Performance claims are same-pass ratios against llama.cpp, naming host, hardware, backend and generation length.
@@ -28,6 +29,8 @@ Things to know before using or changing it:
 - [AGENTS.md](https://github.com/jitllm/jitllm/blob/main/AGENTS.md): the project's binding rules, covering measurement, correctness gates, architecture scope and the no-mmap and no-Go-compute rules
 - [ROADMAP](https://github.com/jitllm/jitllm/blob/main/ROADMAP.md): the seven planned items and where each stands
 - [Supported models](https://github.com/jitllm/jitllm/blob/main/docs/models.md): every GGUF architecture, Hugging Face class and vision projector that converts, and the models each covers; generated from the converter's lists
+- [Capabilities](https://github.com/jitllm/jitllm/blob/main/docs/capabilities.json): the machine-readable manifest of this build, generated from the code; [how it is kept true, and `jitllm doctor`](https://github.com/jitllm/jitllm/blob/main/docs/capabilities.md)
+- [Which checks a change needs](https://github.com/jitllm/jitllm/blob/main/docs/checks.md): `go run ./scripts/checks <paths or git range>` maps changed paths to the gates, and with `-run` reports pass, fail, and skips for a missing model or device distinctly
 - [Testing](https://github.com/jitllm/jitllm/blob/main/docs/testing.md): how tests find models (`JITLLM_MODELS`), and `internal/testmodels/fetch.sh`
 - [Performance scoreboard](https://github.com/jitllm/jitllm/blob/main/docs/perf/current.md): ratios against llama.cpp by host, backend and model
 
