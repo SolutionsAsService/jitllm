@@ -1,6 +1,9 @@
 package tok
 
-import "strings"
+import (
+	"strings"
+	"unicode/utf8"
+)
 
 // ChatStream is DecodeChat one id at a time: the strings Next returns,
 // concatenated, are DecodeChat of the ids it was given, byte for byte, at every
@@ -78,4 +81,21 @@ func (c *ChatStream) piece(id int32) string {
 		s = strings.TrimPrefix(s, " ")
 	}
 	return s
+}
+
+// Complete is how much of s can be shown now: all of it but a trailing
+// multi-byte rune whose remaining bytes have not arrived. Only the last three
+// bytes can be such a rune. An invalid byte anywhere else is not waiting for
+// anything and is shown as it is; holding it back would hold back every byte
+// after it.
+func Complete(s string) int {
+	for i := len(s) - 1; i >= 0 && i >= len(s)-utf8.UTFMax+1; i-- {
+		if utf8.RuneStart(s[i]) {
+			if utf8.FullRuneInString(s[i:]) {
+				return len(s)
+			}
+			return i
+		}
+	}
+	return len(s)
 }
