@@ -336,3 +336,114 @@ What it needs:
 - **Scale checks** nobody has run at this size: page-table size, open time,
   conversion time, and the expert pager under a budget a small fraction of the
   model.
+
+## 16. Application-facing contracts and serving under load
+
+**Not started**, except where noted. Each item builds on what exists rather
+than replacing it.
+
+1. **A compatibility matrix and client-level tests.** Fields whose omission
+   changes a request's meaning are refused, never ignored (non-zero
+   presence/frequency penalties and `tool_choice` already are). Left: a written
+   matrix of supported fields per API, and conformance cases for streaming and
+   non-streaming, tool-result replay, cancellation and malformed input.
+   Harmless unknown fields stay accepted.
+2. **A mixed-load serving benchmark before any scheduler redesign.** Open-loop
+   arrivals, mixed short and long prompts and outputs, concurrency 1 to 64,
+   reporting p50/p95/p99 first-token and inter-token latency, completed and
+   refused requests and throughput, beside counters that show which path ran.
+3. **Shared steps for partly placed sessions and image prompts**, chosen by
+   what that benchmark shows they cost. Today a session with blocks on both the
+   host and a device, or a prompt carrying a picture, runs outside the shared
+   step.
+4. **A stateless `/v1/responses` endpoint**, when a client that needs it is
+   the target; stateful behaviour is refused explicitly.
+5. **Standard metrics, extended rather than rebuilt.** `/metrics` carries
+   prefill and decode timings; add queue time, inter-token latency, prefix-cache
+   hits, page faults, bytes transferred and shared-step refusal reasons, with
+   labels of bounded cardinality (never a prompt or a session).
+6. **Conversion coverage, ranked by the checkpoints people are blocked on:**
+   Q2_K first for large models, then MLX 4-bit (item 8), then direct
+   safetensors classes for graphs the GGUF path already runs. Other formats
+   (IQ, AWQ, GPTQ, FP8) only for a named checkpoint.
+7. **A capability map tied to code and tests**: graph support, source formats,
+   CLI and server surface, hardware validated and real checkpoints validated,
+   kept separate. Stale statements here and in source comments are corrected in
+   place as part of it.
+8. **Features held to compose:** speculation, constrained output, batching,
+   stop strings, streaming and cancellation in combination, not only each one
+   alone.
+
+## 17. Installing from the app itself
+
+The release ships a portable desktop app for Windows and the signed app zipped
+for macOS (`packaging/README.md`); neither installs itself yet.
+
+- **Windows:** the portable `jitllm-desktop` offers "Install jitllm": it copies
+  itself (and the CLI and server, fetched from the same release and checked
+  against `checksums.txt`) into `%LOCALAPPDATA%\Programs\jitllm`, adds it to
+  the user `PATH`, creates the Start menu entry and the Add/Remove Programs
+  entry the setup writes, and optionally starts the server at login -- the
+  setup's install, reached from the app.
+- **macOS:** run from Downloads or from the mounted dmg, the app offers "Move
+  to Applications" and relaunches from there, so its PATH links and launchd
+  agent point at a bundle that stays put.
+- **Linux, if wanted later:** an AppImage, and `.deb`/`.rpm` packages.
+
+## 18. Dense blocks streamed through a device in tiles (an idea to explore)
+
+**Not started.** A dense block larger than every device's whole budget runs on
+the host today, and so does every block a partial placement leaves home. Its
+weights could be cut into page-sized tiles and streamed through a card,
+uploaded double-buffered while the previous tile computes, as the device
+already streams a mixture's routed expert sheets and a session's evicted
+history.
+
+It pays only where a tile is reused across many rows: prefill and wide batched
+steps, where a PCIe stream feeds the tensor cores. Single-sequence decode reads
+each weight once per token, and the host reads its own memory faster than PCIe
+carries it, so that stays home. The choice would be made per step from the
+measured transfer rate against the host's, and the block's home stays on the
+host. The wider prize is GPU prompt speed for the blocks a partial placement
+leaves home, the common case on consumer machines.
+
+## 19. Coding agents on a local model, one command
+
+**Not started.** `jitllm` starts a known coding agent (Claude Code, Codex,
+opencode, aider and others) already pointed at a running `jitllmd`: it finds
+the server (or a given address), picks or loads a model fit for the agent
+(tool calling, context length), and launches the agent with its base URL, key
+and model set in the way that agent reads them (its OpenAI- or
+Anthropic-compatible endpoint, environment or config), without touching the
+agent's own settings files. `jitllm agents` lists which it found installed and
+which can run against the loaded model, naming what is missing (tool calling,
+context, a vision projector) when one cannot.
+
+## 20. Relieving memory pressure across models
+
+**Not started.** The server holds several models, and today a model stays loaded
+until a caller unloads it. When memory runs short -- a new model asked for, a
+session's KV growing, another process taking RAM or VRAM -- the orchestrator
+should make room on its own: first by paging (shrink a model's resident pages and
+KV toward its floor), then by unloading a model nobody is using.
+
+Which model gives way is a policy, chosen by the caller (a `With...()` option and
+a server flag), never one fixed rule:
+- **Inputs the policy weighs:** each model's footprint per tier (weights, KV,
+  expert pages), how recently and how often it was used, its live sessions and
+  queued requests, its reload cost (container size against the disk's measured
+  read rate, plus warm-up), and a caller-given priority or pin.
+- **Policies to ship:** least recently used; least used, decayed; cost-aware
+  (the bytes freed against the time a reload would cost, weighted by the
+  model's expected next use); and never-unload with pins.
+- **Actions in order of cost:** trim pages within a model, move blocks to a
+  cheaper tier (relocation), park idle sessions' KV to disk, then unload the
+  whole model. A model with a running request is never unloaded mid-token; a
+  model is reloaded on its next request.
+- **Pressure signals:** the engine's own budgets, the device ledger, and the
+  host's (PSI memory, the cgroup's limits) so another process taking memory
+  counts as well.
+
+Every decision is reported (what was trimmed, moved or unloaded, and why) in the
+server's stats and logs. Builds on paging, relocation, session parking and the
+server's per-model instances.

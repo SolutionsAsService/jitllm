@@ -9,8 +9,6 @@
 <a href="#memory-and-placement"><img src="docs/assets/readme/experts.gif" width="400" alt="Expert pages: each expert of a mixture is its own page, so a token reads only the routed experts that are not resident"></a>
 </p>
 
-# jitllm
-
 **An operating system for LLM inference: generate the compute for your hardware,
 page models larger than memory, and move execution without losing the conversation.**
 
@@ -22,6 +20,10 @@ page models larger than memory, and move execution without losing the conversati
 - **Disk, RAM and VRAM form the memory system.** Weights, routed MoE experts
   and KV state page as needed. Blocks move between CPU and GPUs at run time,
   carrying their attention and recurrent state with them.
+- **Many sessions share the work.** Continuous batching on the CPU and the GPU
+  shares each weight read across requests, prompts are fed in chunks beside
+  running decodes, and a fairness level (`-fairness 0-100`) time-slices sessions
+  through the card when they do not all fit.
 - **Runs everywhere, depends on nothing.** One binary per platform (Linux, macOS,
   Windows; x86 and Arm) that finds CUDA, Vulkan or Metal at run time and
   otherwise runs on the CPU.
@@ -30,9 +32,44 @@ Serve it as an **OpenAI- and Anthropic-compatible API** with streaming and tool
 calling from one standalone binary, `jitllmd`, or embed it as a Go library. There
 are [desktop](#desktop-app) and [terminal](#terminal-app) apps too.
 
+| Use jitllm for | Start here |
+|---|---|
+| Serving models over an API | [Quick start](#quick-start) · [Server reference](docs/server.md) |
+| Containers | [Docker](#docker) |
+| Inference inside a Go program | [Go library guide](docs/embedding-go.md) |
+| Chatting, and watching where each block runs | [Desktop app](#desktop-app) · [Terminal app](#terminal-app) |
+
 ## Install
 
-Linux and macOS:
+**macOS:** download `jitllm_<version>_darwin_arm64.dmg` (Apple silicon) or
+`_amd64.dmg` (Intel) from the [latest release](https://github.com/jitllm/jitllm/releases/latest),
+open it and drag **jitllm** to Applications (or take the signed app alone,
+`jitllm_<version>_darwin_<arch>.app.zip`, and unzip it there). The app carries `jitllm` and
+`jitllmd`; on first launch it offers to put them on your `PATH`, and its
+Settings can start the server at login. With Homebrew (available once the tap
+is published):
+
+```sh
+brew install --cask jitllm/tap/jitllm   # the app, with jitllm and jitllmd on PATH
+brew install jitllm/tap/jitllm          # jitllm and jitllmd only
+```
+
+**Windows:** run `jitllm-setup_<version>_windows_amd64.exe` (or `_arm64.exe`)
+from the [latest release](https://github.com/jitllm/jitllm/releases/latest).
+It installs for your account only, with no administrator prompt: the CLI, the
+server and the desktop app into `%LOCALAPPDATA%\Programs\jitllm`, on your
+`PATH`, with Start menu shortcuts, an optional "start the server at login",
+and an uninstaller under Settings > Apps. With winget (available once
+published): `winget install jitllm.jitllm`. To run the desktop app without
+installing anything, download the portable
+`jitllm-desktop_<version>_windows_amd64.exe` (or `_arm64.exe`) and run it from
+anywhere; it shares its settings and chats with an installed copy.
+
+Until releases are signed, macOS and Windows warn the first time:
+[packaging/README.md](packaging/README.md#first-launch-of-an-unsigned-build)
+says what each warning means and how to open the app.
+
+**Any platform, from a script.** Linux and macOS:
 
 ```sh
 curl -fsSL https://jitllm.org/install.sh | sh
@@ -44,7 +81,7 @@ Windows (PowerShell):
 irm https://jitllm.org/install.ps1 | iex
 ```
 
-This installs the CLI, `jitllm`, and the server, `jitllmd`, from the latest
+The script installs the CLI, `jitllm`, and the server, `jitllmd`, from the latest
 release, after checking each archive against the release's checksums: into
 `~/.local/bin` (`/usr/local/bin` as root), or on Windows into
 `%LOCALAPPDATA%\Programs\jitllm`, which it adds to your `PATH`. Add the apps with
@@ -145,15 +182,13 @@ and the conversation keeps its history across the move. Install it with
 `convert` reads 65 GGUF architecture names (57 graphs), 30 Hugging Face safetensors
 classes and 17 vision projectors; anything else is refused at conversion, by name.
 
-- **Text:** Llama 2/3, Mistral, Mixtral, SmolLM2/3, Qwen2 to Qwen3.6 (dense, MoE, Next and VL text),
-  Gemma 1 to 4 and 3n, Phi-2/3/4 and Phi-3.5-MoE, DeepSeek V2/V3/R1/V3.2/V4, Kimi-K2, Kimi Linear,
-  Kimi-K3, GLM-4/4.5/4.6/4.7-Flash, gpt-oss, Llama 4, Granite, OLMo 2/3, OLMoE, ERNIE 4.5, Hunyuan,
-  MiniMax-M2/M3, Ling 2.0, dots.llm1, Apertus, EXAONE 4, Seed-OSS, Command-R/A, DBRX, Falcon,
-  StarCoder 1/2, StableLM, Nemotron
-- **State-space hybrids:** Mamba, Mamba-2, Jamba, Falcon-H1, Granite 4 hybrid, Nemotron-H, LFM2
-- **Vision:** SmolVLM, LLaVA, Qwen2/2.5/3-VL, Qwen3.5, GLM-4.xV, Kimi-VL, HunyuanOCR, Gemma 3/3n/4,
-  InternVL, MiniCPM-V, Janus-Pro, Pixtral/Mistral 3, Phi-4 vision, Llama 4
-- **Embeddings:** BERT family, nomic-embed-text, Qwen3-Embedding, EmbeddingGemma
+| Kind | Families |
+|---|---|
+| **Text and code** | Llama 2/3, Mistral, Mixtral, SmolLM2/3, Qwen2 to Qwen3.6 (dense, MoE, Next and VL text), Gemma 1 to 4 and 3n, Phi-2/3/4 and Phi-3.5-MoE, DeepSeek V2/V3/R1/V3.2/V4, Kimi-K2, Kimi Linear, Kimi-K3, GLM-4/4.5/4.6/4.7-Flash, gpt-oss, Llama 4, Granite, OLMo 2/3, OLMoE, ERNIE 4.5, Hunyuan, MiniMax-M2/M3, Ling 2.0, dots.llm1, Apertus, EXAONE 4, Seed-OSS, Command-R/A, DBRX, Falcon, StarCoder 1/2, StableLM, Nemotron |
+| **State-space and hybrid** | Mamba, Mamba-2, Jamba, Falcon-H1, Granite 4 hybrid, Nemotron-H, LFM2 |
+| **Vision** | SmolVLM, LLaVA, Qwen2/2.5/3-VL, Qwen3.5, GLM-4.xV, Kimi-VL, HunyuanOCR, Gemma 3/3n/4, InternVL, MiniCPM-V, Janus-Pro, Pixtral/Mistral 3, Phi-4 vision, Llama 4 |
+| **Embeddings** | BERT family, nomic-embed-text, Qwen3-Embedding, EmbeddingGemma |
+| **Decision models** | Laya (ModernBERT), d1-3B, Lev 4B, answering one question against fixed labels through `/v1/systemone` |
 
 Weights: F32, F16, BF16, Q4_0, Q5_0, Q5_1, Q8_0, Q3_K-Q6_K and MXFP4. The full list, generated
 from the code, is [docs/models.md](docs/models.md); the [vision guide](docs/vision.md) covers pictures.
@@ -168,8 +203,8 @@ and their limitations; [scripts/vs-llamacpp.sh](scripts/vs-llamacpp.sh) measures
 
 ## Documentation
 
-- [CLI and conversion](docs/cli.md) · [Server](docs/server.md) · [Devices](docs/devices.md)
-- [Memory and placement](docs/placement.md) · [Vision](docs/vision.md)
+- [CLI and conversion](docs/cli.md) · [Server](docs/server.md) · [Docker](docs/docker.md) · [Devices](docs/devices.md)
+- [Runtime](docs/runtime.md) · [Memory and placement](docs/placement.md) · [Vision](docs/vision.md)
 - [Go library and desktop app](docs/embedding-go.md) · [Terminal app](docs/tui.md) · [Model API](engine/model/)
 - [Project docs](docs/) · [Testing](docs/testing.md) · [Roadmap](ROADMAP.md)
 - [Contributing](CONTRIBUTING.md) · [Project rules](AGENTS.md)
@@ -178,55 +213,5 @@ and their limitations; [scripts/vs-llamacpp.sh](scripts/vs-llamacpp.sh) measures
 <a id="how-it-works"></a>
 <a id="memory-and-placement"></a>
 The [five principles](docs/runtime.md#the-five-principles) govern every execution
-path. See [how it works](docs/runtime.md#how-it-works) for the runtime and source
-layout, or [memory and placement](docs/placement.md) for budgets and relocation.
-
-## Embed it in Go
-
-The CLI, server and desktop app use the same engine. This example applies the
-model's chat template and generates a greedy response:
-
-```go
-package main
-
-import (
-    "fmt"
-    "log"
-
-    "github.com/jitllm/jitllm/engine/model"
-)
-
-func main() {
-    m, err := model.Open("models/qwen3.jlm")
-    if err != nil {
-        log.Fatal(err)
-    }
-    defer m.Close()
-
-    ids, err := m.ChatIDs([]model.ChatMessage{
-        {Role: "user", Content: "Why is the sky blue?"},
-    }, true)
-    if err != nil {
-        log.Fatal(err)
-    }
-    state := m.NewState(8192)
-    defer state.Close()
-
-    logits, err := state.Prefill(ids)
-    for err == nil && state.Pos() < 8192 {
-        id := model.Greedy(logits)
-        if m.Vocab.IsEOG(id) {
-            break
-        }
-        fmt.Print(m.Vocab.Decode([]int32{id}))
-        logits, err = state.Forward(id)
-    }
-    if err != nil {
-        log.Fatal(err)
-    }
-    fmt.Println()
-}
-```
-
-See the [Go library guide](docs/embedding-go.md) for budgets, devices, KV caching,
-embeddings and batching.
+path. See [how it works](docs/runtime.md#how-it-works) for the runtime, or
+[memory and placement](docs/placement.md) for budgets and relocation.

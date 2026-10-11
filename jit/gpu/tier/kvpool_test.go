@@ -17,8 +17,8 @@ import (
 // ErrKVCapacity by the budget or the backend's buffer limit with nothing
 // changed; a shrink compacts live pages whatever ids they held, so a hole
 // below live pages is room again; releasing a sequence in one layer leaves the
-// others alone; the charge is always the layers' sizes; and every buffer comes
-// back.
+// others alone; the charge is always the layers' sizes, their read reserves
+// with them; and every buffer comes back.
 func TestKVPoolPages(t *testing.T) {
 	dev := &fakeDev{}
 	g, err := New([]Slot{{Dev: dev, Bytes: 1 << 30}}, WithDeviceTune(TuneOff))
@@ -41,7 +41,7 @@ func TestKVPoolPages(t *testing.T) {
 		t.Helper()
 		var want uint64
 		for _, l := range kp.layers {
-			want += kp.pageBytes(l)*uint64(l.n) + uint64(kp.tabWords)*4
+			want += kp.pageBytes(l)*uint64(l.n) + uint64(kp.tabWords)*4 + kvStageBytes(l.geom, p)
 		}
 		if kp.charged() != want || d.used-used0 != want {
 			t.Fatalf("the layers say %d charged, the device %d, want %d", kp.charged(), d.used-used0, want)

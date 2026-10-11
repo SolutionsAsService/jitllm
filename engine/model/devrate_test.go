@@ -199,6 +199,7 @@ func TestDeviceDecodeRate(t *testing.T) {
 	hg0, hgN0 := metal.HostGap()
 	rt0, rtN0 := metal.RoundTrip()
 	_, _, dl0 := metal.SubmitTimes()
+	bar0 := metal.Barriers()
 	devMs0 := time.Now()
 	rate(g, -1)
 	devWall := time.Since(devMs0)
@@ -218,6 +219,10 @@ func TestDeviceDecodeRate(t *testing.T) {
 			float64(gap1-gap0)/1e6/36, gapN1-gapN0)
 	}
 	_, _, dl1 := metal.SubmitTimes()
+	if bar := metal.Barriers() - bar0; bar > 0 {
+		t.Logf("  concurrent encoder: %.0f buffer barriers a token between %.0f dispatches",
+			float64(bar)/36, float64(dl1-dl0)/36)
+	}
 	c1, w1, b1 := metal.SubmitStats()
 	if c1 > c0 {
 		t.Logf("  submission over 36 tokens: %d commits, %d Wait calls, %d BLOCKED (%.1f commits/token)",

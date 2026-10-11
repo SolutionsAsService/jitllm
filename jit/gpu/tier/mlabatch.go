@@ -232,7 +232,7 @@ func (m *mlaBatch) free() {
 		m.gatherNope, m.quantNope, m.copyAbs, m.copyPE, m.acc, m.gatherAcc, m.quantAcc,
 		m.gatherOut, m.quantOut, m.scores70, m.acc70} {
 		if k != nil {
-			k.Close()
+			closeKern(k)
 		}
 	}
 	for _, b := range []backend.Buf{m.kv, m.kvLat, m.kvn, m.kvPart, m.kpe, m.pOff, m.qa, m.qan,

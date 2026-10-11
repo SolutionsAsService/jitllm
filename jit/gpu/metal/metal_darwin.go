@@ -89,25 +89,26 @@ var (
 // Hot selectors are resolved once: sel() allocates and calls sel_registerName
 // on every use, and the encode path sends about nine messages per dispatch.
 var (
-	selSetPSO      SEL
-	selSetBuffers  SEL
-	selSetBuffer   SEL
-	selDispatchTG  SEL
-	selEndEncoding SEL
-	selCommit      SEL
-	selWaitDone    SEL
-	selStatus      SEL
-	selError       SEL
-	selCmdBuf      SEL
-	selCmdBufUnret SEL
-	selComputeEnc  SEL
-	selRetain      SEL
-	selRelease     SEL
-	selGPUStart    SEL
-	selGPUEnd      SEL
-	selResCommit   SEL
-	selResRequest  SEL
-	selResponds    SEL
+	selSetPSO                        SEL
+	selSetBuffers                    SEL
+	selSetBuffer                     SEL
+	selDispatchTG                    SEL
+	selEndEncoding                   SEL
+	selCommit                        SEL
+	selWaitDone                      SEL
+	selStatus                        SEL
+	selError                         SEL
+	selCmdBuf                        SEL
+	selCmdBufUnret                   SEL
+	selComputeEnc                    SEL
+	selComputeEncType, selMemBarrier SEL
+	selRetain                        SEL
+	selRelease                       SEL
+	selGPUStart                      SEL
+	selGPUEnd                        SEL
+	selResCommit                     SEL
+	selResRequest                    SEL
+	selResponds                      SEL
 )
 
 var loaded bool
@@ -163,6 +164,8 @@ func load() error {
 	selCmdBuf = sel("commandBuffer")
 	selCmdBufUnret = sel("commandBufferWithUnretainedReferences")
 	selComputeEnc = sel("computeCommandEncoder")
+	selComputeEncType = sel("computeCommandEncoderWithDispatchType:")
+	selMemBarrier = sel("memoryBarrierWithScope:")
 	selRetain = sel("retain")
 	selRelease = sel("release")
 	loaded = true
@@ -238,6 +241,8 @@ type Ctx struct {
 	opts ID
 	// spin is how long await polls before it blocks; Opts.Spin.
 	spin time.Duration
+	// concurrent is Opts.Concurrent.
+	concurrent bool
 }
 
 func Open() (*Ctx, error) { return OpenWith(Opts{}) }
@@ -256,11 +261,12 @@ func OpenWith(o Opts) (*Ctx, error) {
 		return nil, fmt.Errorf("metal: newCommandQueue returned nil")
 	}
 	c := &Ctx{
-		dev:     d,
-		name:    gostr(send0(d, sel("name"))),
-		unified: sendBool(d, sel("hasUnifiedMemory")).ok(),
-		opts:    strictMath(o.FastMath),
-		spin:    o.spin(),
+		dev:        d,
+		name:       gostr(send0(d, sel("name"))),
+		unified:    sendBool(d, sel("hasUnifiedMemory")).ok(),
+		opts:       strictMath(o.FastMath),
+		spin:       o.spin(),
+		concurrent: o.Concurrent,
 	}
 	c.sub = sub{c: c, queue: q}
 	return c, nil
@@ -422,7 +428,15 @@ type Kernel struct {
 	fn   ID
 	pso  ID
 	name string
+	// writes is a bit per buffer argument the kernel stores into; see
+	// SetWrites. All set until told otherwise.
+	writes uint64
 }
+
+// SetWrites records which buffer arguments the kernel writes (bit i for
+// argument i), which a concurrent encoder orders dispatches by. A kernel never
+// told is taken to write every argument.
+func (k *Kernel) SetWrites(m uint64) { k.writes = m }
 
 // Compile builds a pipeline state from MSL source. Metal compiles at runtime,
 // the way the CUDA driver JITs PTX.
@@ -460,6 +474,11 @@ type Batch struct {
 	// (the fused q/k/v matvec binds seventeen) so no dispatch allocates.
 	ids  [32]ID
 	offs [32]uint64
+	// rd and wr are the buffers the dispatches since the last barrier read
+	// and wrote, in a concurrent encoder (Encode).
+	rd, wr   [64]ID
+	nrd, nwr int
+	conc     bool
 }
 
 // Unretained selects -commandBufferWithUnretainedReferences for every batch
@@ -558,8 +577,13 @@ func (q *sub) newBatch() *Batch {
 		b = &Batch{q: q}
 	}
 	b.cb, b.enc = cb, 0
+	b.nrd, b.nwr, b.conc = 0, 0, c.concurrent
 	if cb != 0 {
-		b.enc = send0(cb, selComputeEnc)
+		if b.conc {
+			b.enc = sendIdxID(cb, selComputeEncType, mtlDispatchConcurrent)
+		} else {
+			b.enc = send0(cb, selComputeEnc)
+		}
 	}
 	return b
 }
@@ -574,6 +598,9 @@ func (b *Batch) Encode(k *Kernel, groups, width int, bufs ...*Buf) error {
 	}
 	t0 := time.Now()
 	statLaunch.Add(1)
+	if b.conc {
+		b.order(k, bufs)
+	}
 	send1id(b.enc, selSetPSO, k.pso)
 	// One message for the whole argument list, from fixed arrays so no
 	// dispatch allocates. A kernel with more buffers than len(b.ids) uses the
@@ -594,6 +621,58 @@ func (b *Batch) Encode(k *Kernel, groups, width int, bufs ...*Buf) error {
 	statEncodeNs.Add(uint64(time.Since(t0)))
 	return nil
 }
+
+// MTLDispatchTypeConcurrent and MTLBarrierScopeBuffers.
+const (
+	mtlDispatchConcurrent = 1
+	mtlBarrierBuffers     = 1
+)
+
+// order puts a buffer barrier before a dispatch that depends on one encoded
+// since the last barrier: it reads or writes a buffer one of them wrote, or
+// writes one they read. Everything else runs beside what came before it,
+// which is what fills the device with a block's small, independent kernels
+// (k and v, gate and up) that a serial encoder ran one after another.
+func (b *Batch) order(k *Kernel, bufs []*Buf) {
+	has := func(set []ID, id ID) bool {
+		for _, x := range set {
+			if x == id {
+				return true
+			}
+		}
+		return false
+	}
+	hazard := b.nrd+len(bufs) > len(b.rd) || b.nwr+len(bufs) > len(b.wr)
+	for i, buf := range bufs {
+		if hazard {
+			break
+		}
+		w := i >= 64 || k.writes&(1<<uint(i)) != 0
+		hazard = has(b.wr[:b.nwr], buf.id) || w && has(b.rd[:b.nrd], buf.id)
+	}
+	if hazard {
+		sendIdxID(b.enc, selMemBarrier, mtlBarrierBuffers)
+		statBarrier.Add(1)
+		b.nrd, b.nwr = 0, 0
+	}
+	for i, buf := range bufs {
+		if i >= 64 || k.writes&(1<<uint(i)) != 0 {
+			b.wr[b.nwr] = buf.id
+			b.nwr++
+		} else {
+			b.rd[b.nrd] = buf.id
+			b.nrd++
+		}
+	}
+}
+
+// statBarrier counts the buffer barriers concurrent encoders put in.
+var statBarrier atomic.Uint64
+
+// Barriers is how many buffer barriers concurrent encoders have put between
+// dispatches; against SubmitTimes' dispatch count it says how much of a token
+// runs side by side.
+func Barriers() uint64 { return statBarrier.Load() }
 
 // Commit ends encoding and submits. It does not wait: blocking here made every
 // batch a full GPU round trip with the CPU idle. The wait is in Ctx.Wait, which
