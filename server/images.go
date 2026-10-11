@@ -216,11 +216,11 @@ func (p ImagePolicy) decodeImage(b []byte, mt string) (image.Image, error) {
 		err error
 	}
 	done := make(chan result, 1)
+	start := time.Now()
 	go func() {
 		img, _, err := image.Decode(bytes.NewReader(b))
 		done <- result{img, err}
 	}()
-	start := time.Now()
 	t := time.NewTimer(p.DecodeTimeout)
 	defer t.Stop()
 	select {
