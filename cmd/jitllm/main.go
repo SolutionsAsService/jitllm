@@ -82,6 +82,11 @@ func numaNodes() []int {
 // (-ldflags "-X main.version=v0.1.0"; see .goreleaser.yaml).
 var version = "dev"
 
+// procStart is as near process start as Go code runs: package variables are
+// initialised before main. speed -ttft's load row counts from it, as
+// llama.cpp's log timestamps count from its logger's start.
+var procStart = time.Now()
+
 func main() {
 	alignGOMAXPROCS()
 	// Page frames and the dense region live off the Go heap (jlm.SetOffHeap).

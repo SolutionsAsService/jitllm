@@ -84,6 +84,11 @@ type Config struct {
 	// for the default search (jit/gpu/hip). jitllmd fills it from JITLLM_ROCM.
 	ROCm string
 
+	// TuneCache is the directory the device tuners keep their answers in
+	// (tier.WithTuneCache), or empty for none. jitllmd passes the user cache
+	// directory.
+	TuneCache string
+
 	// DefaultMaxSeq is the KV capacity a session gets when it asks for none.
 	// Zero takes the model's own context length.
 	DefaultMaxSeq int
@@ -526,6 +531,8 @@ func (e *Engine) LoadModel(o LoadOptions) (*LoadedModel, error) {
 			g, err := tier.OpenWith(
 				tier.WithDevices(spec),
 				tier.WithROCm(e.cfg.ROCm),
+				tier.WithTuneCache(e.cfg.TuneCache),
+				tier.WithLazyTune(e.cfg.TuneCache != ""),
 				tier.WithHostBudget(hostBudget),
 				tier.WithConfig(func(c *tier.Config) {
 					c.Sessions = o.Sessions

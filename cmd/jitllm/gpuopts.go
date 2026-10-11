@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -30,6 +31,13 @@ func gpuOptions() []tier.Option {
 	}
 	set := func(k string) bool { return os.Getenv(k) != "" }
 
+	// The tuners' answers persist under the user cache directory, keyed by
+	// device UUID, driver and executable (tier.WithTuneCache).
+	if d, err := os.UserCacheDir(); err == nil {
+		// A shape not in it runs the table's split while the tuner measures
+		// it in the background (tier.WithLazyTune).
+		o = append(o, tier.WithTuneCache(filepath.Join(d, "jitllm")), tier.WithLazyTune(true))
+	}
 	if v := str("JITLLM_GPU_API"); v != "" {
 		o = append(o, tier.WithAPI(v))
 	}
@@ -195,6 +203,7 @@ func gpuOptions() []tier.Option {
 		{"JITLLM_GPU_NO_TILE_TAIL", set("JITLLM_GPU_NO_TILE_TAIL"), func(c *tier.Config) { c.NoTileTail = true }},
 		{"JITLLM_GPU_NO_EXACT_PROMPT", set("JITLLM_GPU_NO_EXACT_PROMPT"), func(c *tier.Config) { c.NoExactPrompt = true }},
 		{"JITLLM_GPU_NO_VOLTA_MOE", set("JITLLM_GPU_NO_VOLTA_MOE"), func(c *tier.Config) { c.NoVoltaMoE = true }},
+		{"JITLLM_GPU_GEMM_INT8", set("JITLLM_GPU_GEMM_INT8"), func(c *tier.Config) { c.PreferGemmInt8 = true }},
 		{"JITLLM_GPU_NO_RAG_GROUP", set("JITLLM_GPU_NO_RAG_GROUP"), func(c *tier.Config) { c.NoRagGroup = true }},
 		{"JITLLM_GPU_NO_RAG_FUSE", set("JITLLM_GPU_NO_RAG_FUSE"), func(c *tier.Config) { c.NoRagFuse = true }},
 		{"JITLLM_GPU_NO_RAG_HEAD_ONE", set("JITLLM_GPU_NO_RAG_HEAD_ONE"), func(c *tier.Config) { c.NoRagHeadOne = true }},

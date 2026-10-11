@@ -146,6 +146,10 @@ type State struct {
 	spanTok []int32
 	// kvSkipped is what the last PrefillCached restored rather than computed.
 	kvSkipped int
+	// promptRows counts the prompt rows this State ran through its blocks, over
+	// its life (PrefillRows): what a benchmark checks to show a prompt was
+	// computed, not restored.
+	promptRows int
 	// interrupt, when set, is asked before every prefill chunk
 	// (SetPrefillInterrupt).
 	interrupt func() bool
@@ -1168,7 +1172,16 @@ func (s *State) SetDeviceLayers(d nn.Device, max int) error {
 	if err := s.finishPlacement(); err != nil {
 		return err
 	}
-	return s.reserveRows()
+	if err := s.reserveRows(); err != nil {
+		return err
+	}
+	// Last, so the blocks, the head and the prompt's scratch have taken their
+	// room first: the pool grows ahead into what is left, one prompt chunk's
+	// worth at most.
+	if pw, ok := d.(nn.KVPrewarmer); ok && s.devCount() > 0 && !s.m.opt.noKVPrewarm {
+		pw.PrewarmKV(min(s.maxSeq, nn.MaxDevicePrefillChunk))
+	}
+	return nil
 }
 
 // reserveRows makes the devices hold every row's history before any is
@@ -2985,6 +2998,11 @@ func (s *State) mv(out []float32, w tensor, x []float32) error {
 
 // Pos is the number of positions already in the cache.
 func (s *State) Pos() int { return s.pos }
+
+// PrefillRows is how many prompt rows this State has run through its blocks
+// since it was made: a prompt restored from a prefix cache adds none, and a
+// one-row prompt (decode's path) adds one.
+func (s *State) PrefillRows() int { return s.promptRows }
 
 // stepDownKVToF32 narrows the cache from packed halves to f32 and rebuilds it.
 // It is a named method so a gate can reach it without a real card. The caller
