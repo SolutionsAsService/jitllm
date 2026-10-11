@@ -7417,6 +7417,9 @@ func (g *devTier) layersSession(s backend.Session) {
 						if err == nil {
 							err = pk.pf.prefillAttn(s, lc, qAtt, kDst, vDst, bs.n, bs.xb, pgTab, win, sk)
 							g.PagedPrefillLaunches++
+							if pk.pf.flash != nil {
+								g.FlashPrefills++ // the paged one-kernel form, on any backend
+							}
 							g.PagedPrefillPasses += pk.pf.passes(win)
 							if pk.pf.on70() {
 								g.PagedPrefill70++
