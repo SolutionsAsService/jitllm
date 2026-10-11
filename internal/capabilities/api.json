@@ -16,7 +16,7 @@
         {
           "name": "messages",
           "type": "array",
-          "note": "role and content; content is a string or content parts, of which only text parts are read (an image part is dropped, not refused: no HTTP route takes a picture on this build); tool_calls and tool_call_id carry a tool turn"
+          "note": "role and content; content is a string or content parts: text, and image_url (a data: URL in base64, or an https URL when the server lists hosts it may fetch from); PNG, JPEG, WebP or GIF, at most 20 MiB each, 64 MiB and 8 pictures a request, 16777216 pixels each, on a model with a vision tower; audio and file parts are refused. tool_calls and tool_call_id carry a tool turn"
         },
         {
           "name": "max_tokens",
@@ -385,7 +385,7 @@
         {
           "name": "messages",
           "type": "array",
-          "note": "role and content; content is a string or blocks: text, tool_use and tool_result are read, any other block (an image) is dropped, not refused"
+          "note": "role and content; content is a string or blocks: text, image (source base64 with media_type image/png, image/jpeg, image/webp or image/gif, or url when the server lists hosts it may fetch from; at most 20 MiB each and 8 pictures a request, on a model with a vision tower), tool_use and tool_result; a document block is refused"
         },
         {
           "name": "system",
@@ -630,6 +630,67 @@
       ],
       "when": "the model is not an embedding model",
       "message": "is not an embedding model"
+    },
+    {
+      "id": "unsupported-part",
+      "endpoints": [
+        "/v1/chat/completions"
+      ],
+      "when": "a content part of type input_audio, file or input_file",
+      "message": "which this server does not take"
+    },
+    {
+      "id": "document-block",
+      "endpoints": [
+        "/v1/messages"
+      ],
+      "when": "a document content block",
+      "message": "is a document block, which this server does not take"
+    },
+    {
+      "id": "image-non-vision",
+      "endpoints": [
+        "/v1/chat/completions",
+        "/v1/messages"
+      ],
+      "when": "a picture for a model whose container carries no vision tower",
+      "message": "does not accept images"
+    },
+    {
+      "id": "image-fetch-off",
+      "endpoints": [
+        "/v1/chat/completions",
+        "/v1/messages"
+      ],
+      "when": "a picture named by a remote URL on a server that lists no host to fetch from",
+      "message": "names a picture by a remote URL, and this server does not fetch"
+    },
+    {
+      "id": "image-too-many",
+      "endpoints": [
+        "/v1/chat/completions",
+        "/v1/messages"
+      ],
+      "when": "more pictures than the server's limit (default 8)",
+      "message": "a request carries at most"
+    },
+    {
+      "id": "image-oversize",
+      "endpoints": [
+        "/v1/chat/completions",
+        "/v1/messages"
+      ],
+      "when": "a picture over the byte or pixel limit, or a request's pictures over the request byte limit",
+      "message": "over the limit of"
+    },
+    {
+      "id": "image-format",
+      "endpoints": [
+        "/v1/chat/completions",
+        "/v1/messages"
+      ],
+      "when": "a picture that is not PNG, JPEG, WebP or GIF",
+      "message": "the pictures accepted are"
     },
     {
       "id": "decision-non-decider",

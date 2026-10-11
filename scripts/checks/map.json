@@ -176,6 +176,7 @@
     {"prefix": "Dockerfile", "evidence": "docs/testing.md", "checks": [], "manual": ".github/scripts/docker-smoke.sh"},
     {"prefix": ".dockerignore", "evidence": "docs/testing.md", "checks": [], "manual": ".github/scripts/docker-smoke.sh"},
     {"prefix": ".gitignore", "evidence": "README.md", "checks": [], "manual": "none"},
+    {"prefix": "packaging/", "evidence": "packaging/README.md", "checks": [], "manual": "the installers: build them with the scripts there on the platform each targets"},
     {"prefix": "website/", "evidence": "README.md", "checks": [], "manual": "the site: build and view it locally"}
   ]
 }

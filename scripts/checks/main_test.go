@@ -181,7 +181,7 @@ func TestMapGateFires(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A top-level path no entry names.
-	if len(uncovered(m, append(files, "newsubsystem/x.go"))) != 1 {
+	if len(uncovered(m, append(files, "newsubsystem/x.go"))) != len(uncovered(m, files))+1 {
 		t.Error("a new top-level path passed the coverage gate")
 	}
 	breakers := map[string]func(*Map){
