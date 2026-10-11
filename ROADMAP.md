@@ -447,3 +447,45 @@ a server flag), never one fixed rule:
 Every decision is reported (what was trimmed, moved or unloaded, and why) in the
 server's stats and logs. Builds on paging, relocation, session parking and the
 server's per-model instances.
+
+## 21. The pre-tokenizer runs the model's own pattern
+
+**Not started.** The pre-tokenizer recognises known `tokenizer.json` Split
+patterns by their text (`tok/pretok/parse.go` `parseSplit`, `isolatedSplits`),
+hand-writes a matcher per family (`tok/hunyuan.go`), maps a GGUF's
+`tokenizer.ggml.pre` name to stages through a generated table, and keeps legacy
+name families in `tok/bpe.go` for containers that stored no stages. Every
+engine that reads `tokenizer.json` (HF tokenizers and everything on it: vLLM,
+SGLang, MLX, ExLlamaV3, TensorRT-LLM; mistral.rs and candle with fancy-regex;
+Ollama on rewritten RE2) runs the pattern on a regex engine; only llama.cpp
+hand-codes matchers, and that is what this copied.
+
+- **First, a bug:** `parseSplit` turns any Split pattern that is not an exact
+  known text into an `OpSplit` with whatever flags its substring checks set, so
+  `\S+` or `[^\n]+|[\n]+` silently runs as the llama3 splitter, against its own
+  comment. An unknown pattern must be refused, naming it.
+- **A matcher of our own** for the constructs these patterns use (alternation,
+  classes, `\p{..}`, quantifiers, `(?i)` with full case folding, lookahead such
+  as `\s+(?!\S)`), with its Unicode classes from `tok/unicodedata.go` so the
+  15.1.0 pin holds, refusing anything else by name; generated like the rest of
+  the JIT if that measures better. It is the definition of the split.
+  Oniguruma's behaviours to reproduce: Unicode `\s`, `\d`, `\w`; `$` is end of
+  line; an empty match is a split point that yields no piece.
+- **The container stores the pattern text**, and the GGUF name table carries
+  llama.cpp's pattern per name rather than ops.
+- **Fast paths** (llama3, o200k) stay only where a gate proves them equal to
+  the matcher; `hunyuan.go`, the other recognisers and the legacy name families
+  go.
+- **Oracle:** HF tokenizers on the model's own `tokenizer.json` (tiktoken for a
+  model that ships a `pat_str`) replaces llama.cpp for tokenization (RULE 7m),
+  llama.cpp staying the source of a GGUF name's pattern. Golden ids per
+  vocabulary from a `scripts/` generator over an adversarial corpus and real
+  multi-script text, zero differing ids; a split-level gate over every pattern
+  on the model disk and in llama.cpp; run against a violation (dropping
+  multi-line `$` or the Unicode `\w` must fail it).
+- **Invalid UTF-8** (U+FFFD per bad byte, which no reference accepts as input)
+  is pinned in a test and in RULE 7m's divergence table.
+
+A spike compared `dlclark/regexp2`, adjusted for those behaviours, with HF
+tokenizers on 50 patterns and 20,000 strings each: 0 differences, but 7-17x
+slower than the hand splitters, so it is a test reference, not the engine.
