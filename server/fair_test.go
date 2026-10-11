@@ -287,6 +287,7 @@ func fairEngine(t *testing.T, dev string, cfg Config) (*Engine, *LoadedModel, cl
 	if dev == "" {
 		return hostBatchEngine(t, deviceModel, cfg)
 	}
+	requireDevice(t, dev)
 	path := modelPath(t, deviceModel)
 	cfg.Version = "test"
 	if cfg.DefaultMaxSeq == 0 {
