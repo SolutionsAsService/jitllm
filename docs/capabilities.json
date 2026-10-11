@@ -566,6 +566,48 @@
             "TestLayerRelocatesToAnotherDevice",
             "TestSynthLlama4OnEveryDevice"
           ]
+        },
+        {
+          "hardware": "NVIDIA T4 (sm_75)",
+          "evidence": [
+            "TestLayerRelocatesToAnotherDevice",
+            "TestSynthLlama4OnEveryDevice"
+          ]
+        },
+        {
+          "hardware": "NVIDIA A10G (sm_86)",
+          "evidence": [
+            "TestLayerRelocatesToAnotherDevice",
+            "TestSynthLlama4OnEveryDevice"
+          ]
+        },
+        {
+          "hardware": "NVIDIA L4 (sm_89)",
+          "evidence": [
+            "TestLayerRelocatesToAnotherDevice",
+            "TestSynthLlama4OnEveryDevice"
+          ]
+        },
+        {
+          "hardware": "NVIDIA L40S (sm_89)",
+          "evidence": [
+            "TestLayerRelocatesToAnotherDevice",
+            "TestSynthLlama4OnEveryDevice"
+          ]
+        },
+        {
+          "hardware": "NVIDIA A100 (sm_80)",
+          "evidence": [
+            "TestLayerRelocatesToAnotherDevice",
+            "TestSynthLlama4OnEveryDevice"
+          ]
+        },
+        {
+          "hardware": "NVIDIA H100 (sm_90)",
+          "evidence": [
+            "TestLayerRelocatesToAnotherDevice",
+            "TestSynthLlama4OnEveryDevice"
+          ]
         }
       ]
     },
