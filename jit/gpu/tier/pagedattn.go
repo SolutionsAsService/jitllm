@@ -103,7 +103,7 @@ type pagedVariant struct {
 func (v *pagedVariant) close() {
 	for _, k := range []backend.Kernel{v.k, v.scores, v.soft, v.acc, v.merge} {
 		if k != nil {
-			k.Close()
+			closeKern(k)
 		}
 	}
 }
@@ -161,7 +161,7 @@ func (g *devTier) initPagedScratch(bs *blockScratch) error {
 		if err != nil {
 			return err
 		}
-		c, err := g.dev.Compile(k)
+		c, err := g.compileShared(k)
 		if err != nil {
 			return err
 		}
@@ -329,7 +329,7 @@ func freePaged(pg *pagedScratch) {
 	}
 	for _, k := range []backend.Kernel{pg.copyK, pg.ropeK, pg.copyV, pg.copyLat, pg.copyPE} {
 		if k != nil {
-			k.Close()
+			closeKern(k)
 		}
 	}
 	for _, v := range pg.vars {
@@ -444,7 +444,7 @@ func (g *devTier) pagedBuild(bs *blockScratch, plan kernels.DecodePlan) (*pagedV
 	}
 	comp := func(dst *backend.Kernel, k *ir.Kernel, err error) error {
 		if err == nil {
-			*dst, err = g.dev.Compile(k)
+			*dst, err = g.compileShared(k)
 		}
 		return err
 	}
@@ -943,7 +943,8 @@ func (g *devTier) pagedLayerBytes(p *nn.LayerPlan) uint64 {
 	if g.kvp != nil {
 		words = g.kvp.tabWords
 	}
-	n := uint64(geom.kWords(g.kvPage())+geom.vWords(g.kvPage()))*4*uint64(1+g.sessions()) + uint64(words)*4
+	n := uint64(geom.kWords(g.kvPage())+geom.vWords(g.kvPage()))*4*uint64(1+g.sessions()) + uint64(words)*4 +
+		kvStageBytes(geom, g.kvPage())
 	if d := p.DS4; d != nil && p.Comp != nn.DS4CompNone {
 		// The block's entries, a pool of their own (ds4.go).
 		e := kvGeom{kvRow: d.EntRowAt(p.Comp, p.HeadDim), mla: true}
@@ -1164,13 +1165,13 @@ func (g *devTier) pagedMigrate(sid uint64, li, base int, k, v []float32, pos int
 		}
 		return nil
 	}
-	kAll, err := g.readPages(pl.k, ids[e:npages], kw)
+	kAll, err := g.readPages(pl, pl.k, ids[e:npages], kw)
 	if err != nil {
 		return err
 	}
 	var vAll []float32
 	if vw > 0 {
-		if vAll, err = g.readPages(pl.v, ids[e:npages], vw); err != nil {
+		if vAll, err = g.readPages(pl, pl.v, ids[e:npages], vw); err != nil {
 			return err
 		}
 	}
@@ -1211,22 +1212,50 @@ func (g *devTier) pagedMigrate(sid uint64, li, base int, k, v []float32, pos int
 	return nil
 }
 
-// readPages gathers pages ids of a pool buffer, words each, into one staging
-// buffer on the device and reads it home.
-func (g *devTier) readPages(src backend.Buf, ids []uint32, words int) ([]float32, error) {
+// readPages gathers pages ids of one of layer l's buffers, words each, into
+// one staging buffer on the device and reads it home. When the card refuses
+// that buffer the pages come home a page at a time through the layer's
+// reserve (kvLayerPool.stage): a park or an eviction is how a full card makes
+// room, so it must not need room of its own.
+func (g *devTier) readPages(l *kvLayerPool, src backend.Buf, ids []uint32, words int) ([]float32, error) {
 	if len(ids) == 0 || words == 0 {
 		return nil, nil
 	}
+	out := make([]float32, len(ids)*words)
 	dst, err := g.dev.Alloc(len(ids) * words * 4)
 	if err != nil {
-		return nil, err
+		if l.stage == nil {
+			return nil, err
+		}
+		g.KVStageReads++
+		return out, g.readStaged(l, src, ids, words, out)
 	}
 	defer dst.Free()
 	if err := g.gatherInto(src, dst, ids, words); err != nil {
 		return nil, err
 	}
-	out := make([]float32, len(ids)*words)
 	return out, dst.Read(f32b(out))
+}
+
+// readStaged is readPages through l's reserve, a page a pass, with the gather
+// makeStage compiled: nothing is allocated or compiled on the device.
+func (g *devTier) readStaged(l *kvLayerPool, src backend.Buf, ids []uint32, words int, out []float32) error {
+	k, err := g.gatherKernel(words, 1)
+	if err != nil {
+		return err
+	}
+	for i := range ids {
+		if err := l.stageTab.Write(u32view(ids[i : i+1])); err != nil {
+			return err
+		}
+		if err := k.Launch((words+127)/128, 128, src, l.stage, l.stageTab); err != nil {
+			return err
+		}
+		if err := l.stage.Read(f32b(out[i*words : (i+1)*words])); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // PerSequenceKV reports that this device pages its history (nn.SeqKVDevice).

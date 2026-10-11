@@ -25,6 +25,10 @@ import (
 // table's answer stands.
 const splitTuneIQR = 0.10
 
+// splitTieBand is the margin by which tuneSplit's later candidate must beat
+// the best so far: the narrower split and the partial-writing form win a tie.
+const splitTieBand = 0.01
+
 type splitKey struct {
 	q       kernels.Quant
 	rows, k int
@@ -99,7 +103,12 @@ func (g *devTier) tuneSplit(q kernels.Quant, rows, k int, r *resident) int {
 			// plane, but it launches the same grid as the arm it is compared
 			// against: `grp` says the output contract, `split` the grid.
 			rate, ok := g.timeSplitMode(kern, red, r, d, out, rows, split, grp)
-			if ok && rate > bestRate {
+			// A later candidate (a wider split, or the in-group form) must
+			// beat the best by splitTieBand: within it the trial cannot tell
+			// them apart, and the pick went by noise. Ministral-3-3B's Q6_K head
+			// measured 308/s at split 3 and 309/s at 24 in-group in one trial,
+			// and the token ran 1.5% slower when the wide one won.
+			if ok && rate > bestRate*(1+splitTieBand) {
 				best, bestRate, bestGroup = split, rate, grp
 			}
 		}

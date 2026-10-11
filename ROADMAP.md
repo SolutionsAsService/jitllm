@@ -374,6 +374,22 @@ than replacing it.
    stop strings, streaming and cancellation in combination, not only each one
    alone.
 
+## 17. Installing from the app itself
+
+The release ships a portable desktop app for Windows and the signed app zipped
+for macOS (`packaging/README.md`); neither installs itself yet.
+
+- **Windows:** the portable `jitllm-desktop` offers "Install jitllm": it copies
+  itself (and the CLI and server, fetched from the same release and checked
+  against `checksums.txt`) into `%LOCALAPPDATA%\Programs\jitllm`, adds it to
+  the user `PATH`, creates the Start menu entry and the Add/Remove Programs
+  entry the setup writes, and optionally starts the server at login -- the
+  setup's install, reached from the app.
+- **macOS:** run from Downloads or from the mounted dmg, the app offers "Move
+  to Applications" and relaunches from there, so its PATH links and launchd
+  agent point at a bundle that stays put.
+- **Linux, if wanted later:** an AppImage, and `.deb`/`.rpm` packages.
+
 ## 18. Dense blocks streamed through a device in tiles (an idea to explore)
 
 **Not started.** A dense block larger than every device's whole budget runs on
@@ -390,3 +406,44 @@ carries it, so that stays home. The choice would be made per step from the
 measured transfer rate against the host's, and the block's home stays on the
 host. The wider prize is GPU prompt speed for the blocks a partial placement
 leaves home, the common case on consumer machines.
+
+## 19. Coding agents on a local model, one command
+
+**Not started.** `jitllm` starts a known coding agent (Claude Code, Codex,
+opencode, aider and others) already pointed at a running `jitllmd`: it finds
+the server (or a given address), picks or loads a model fit for the agent
+(tool calling, context length), and launches the agent with its base URL, key
+and model set in the way that agent reads them (its OpenAI- or
+Anthropic-compatible endpoint, environment or config), without touching the
+agent's own settings files. `jitllm agents` lists which it found installed and
+which can run against the loaded model, naming what is missing (tool calling,
+context, a vision projector) when one cannot.
+
+## 20. Relieving memory pressure across models
+
+**Not started.** The server holds several models, and today a model stays loaded
+until a caller unloads it. When memory runs short -- a new model asked for, a
+session's KV growing, another process taking RAM or VRAM -- the orchestrator
+should make room on its own: first by paging (shrink a model's resident pages and
+KV toward its floor), then by unloading a model nobody is using.
+
+Which model gives way is a policy, chosen by the caller (a `With...()` option and
+a server flag), never one fixed rule:
+- **Inputs the policy weighs:** each model's footprint per tier (weights, KV,
+  expert pages), how recently and how often it was used, its live sessions and
+  queued requests, its reload cost (container size against the disk's measured
+  read rate, plus warm-up), and a caller-given priority or pin.
+- **Policies to ship:** least recently used; least used, decayed; cost-aware
+  (the bytes freed against the time a reload would cost, weighted by the
+  model's expected next use); and never-unload with pins.
+- **Actions in order of cost:** trim pages within a model, move blocks to a
+  cheaper tier (relocation), park idle sessions' KV to disk, then unload the
+  whole model. A model with a running request is never unloaded mid-token; a
+  model is reloaded on its next request.
+- **Pressure signals:** the engine's own budgets, the device ledger, and the
+  host's (PSI memory, the cgroup's limits) so another process taking memory
+  counts as well.
+
+Every decision is reported (what was trimmed, moved or unloaded, and why) in the
+server's stats and logs. Builds on paging, relocation, session parking and the
+server's per-model instances.

@@ -201,7 +201,8 @@ func (lp *stepLoop) victims(r *row, need, room, page int) []*row {
 }
 
 // parkRow takes a decoding row out of the step and parks its session, the
-// row going back into the queue. lp.mu held.
+// row going back into the queue. A refused park leaves the row where it was.
+// lp.mu held.
 func (lp *stepLoop) parkRow(r *row) error {
 	// The next token is sampled from these logits after the resume; the
 	// State's buffer behind them may be reused meanwhile.
@@ -211,6 +212,9 @@ func (lp *stepLoop) parkRow(r *row) error {
 		clear(r.held)
 	}
 	before, t0 := lp.room(), time.Now()
+	if lp.parkFault != nil {
+		return lp.parkFault
+	}
 	if err := lp.e.parkLocked(r.s); err != nil {
 		return err
 	}
