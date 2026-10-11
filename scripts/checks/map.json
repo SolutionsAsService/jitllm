@@ -1,0 +1,181 @@
+{
+  "checks": {
+    "vet": {
+      "command": ["./scripts/vet"],
+      "note": "go vet with the argued unsafe.Pointer allowlist, the engine module"
+    },
+    "vet-server": {
+      "command": ["./scripts/vet", "server"],
+      "note": "go vet over the server module"
+    },
+    "srcgate": {
+      "module": ".", "packages": ["./internal/srcgate", "./internal/oracle", "./internal/testmodels"], "cap": "8G",
+      "note": "the source gates: docs/models.md and docs/capabilities.json generated, no oracle import, the README"
+    },
+    "capabilities": {
+      "module": ".", "packages": ["./internal/capabilities", "./internal/srcgate"], "run": "TestMaintainedEvidenceExists|TestMaintainedGateFires|TestManifestIsDerived|TestCapabilitiesDocIsGenerated", "cap": "8G",
+      "note": "the capability manifest against the code; regenerate with: cd server && go run ./cmd/gencapabilities"
+    },
+    "capabilities-api": {
+      "module": "server", "packages": ["."], "run": "TestAPIManifestIsGenerated|TestAPIManifestCoversEveryField|TestRouteTableIsWhatIsServed|TestCapabilitiesEndpoint|TestRefusalsAreRefused", "cap": "8G",
+      "note": "the server's half of the manifest against its route table and handlers"
+    },
+    "checks-map": {
+      "module": ".", "packages": ["./scripts/checks"], "cap": "4G",
+      "note": "this map covers the tree and names gates that exist"
+    },
+    "cmd": {
+      "module": ".", "packages": ["./cmd/..."], "cap": "8G",
+      "note": "the CLI: flags, environment, doctor, capabilities"
+    },
+    "jit-cpu": {
+      "module": ".", "packages": ["./jit/cpu/..."], "cap": "8G",
+      "note": "every host emitter against the oracle at ragged widths (RULE 8), and no assembly but the trampolines"
+    },
+    "nn": {
+      "module": ".", "packages": ["./engine/nn/...", "./engine/grammar/..."], "cap": "8G"
+    },
+    "sched": {
+      "module": ".", "packages": ["./engine/sched/..."], "cap": "8G",
+      "note": "the pool, core sets and memory budgets"
+    },
+    "format": {
+      "module": ".", "packages": ["./format/..."], "cap": "8G",
+      "note": "the container, its pager and the quant decoders"
+    },
+    "convert": {
+      "module": ".", "packages": ["./convert/..."], "cap": "16G",
+      "needs": {"models": true},
+      "note": "conversion; some gates read GGUFs from JITLLM_MODELS"
+    },
+    "tok": {
+      "module": ".", "packages": ["./tok/..."], "cap": "8G",
+      "needs": {"models": true},
+      "note": "tokenizers against their references"
+    },
+    "model-correctness": {
+      "module": ".", "packages": ["./engine/model"], "run": "TestGreedyMatchesLlamaCpp|TestBatchMatchesForward|TestPrefillMatchesForward|TestEveryModelRunsGenerated|TestSafetensorsMatchTransformers|TestTowerEncodes", "cap": "16G",
+      "needs": {"models": true},
+      "note": "the engine against llama.cpp, transformers and its own batched path (RULE 7, RULE 11d); run the same on the arm64 host"
+    },
+    "five-principles": {
+      "module": ".", "packages": ["./engine/model"], "run": "TestEveryModelRunsGenerated|TestDecodeDoesNotAllocate|TestPagingDoesNotChangeTheAnswer|TestOpenHonoursAPageBudget|TestForwardBatchFaultsItsBlocksIn|TestTwoPagedModels|TestWindowedLayersHoldTheirWindow|TestPrefixCacheRestoresAWindowedLayer", "cap": "16G",
+      "needs": {"models": true},
+      "note": "the five principles' host gates: generated code, paging and zero-allocation decode"
+    },
+    "relocation": {
+      "module": ".", "packages": ["./engine/model"], "run": "TestLayerRelocatesToAnotherDevice|TestRelocatedBlocksComeBack|TestKVPagesRelocateWithTheLayer|TestBatchSeamMovesCarryEveryRow|TestMLASeamMovesWithItsHistory|TestShrinkingTheSeamBringsTheSummaryHome", "cap": "16G",
+      "needs": {"models": true, "device": true},
+      "note": "relocation, host <-> device and between devices"
+    },
+    "device-model": {
+      "module": ".", "packages": ["./engine/model"], "run": "OnEveryDevice|TestDeviceMatchesHost|TestTowerOnDeviceMatchesHost", "cap": "16G",
+      "needs": {"models": true, "device": true},
+      "note": "every graph feature on the device, every block placed against the host (RULE 11c)"
+    },
+    "gpu-lowering": {
+      "module": ".", "packages": ["./jit/gpu/ir/...", "./jit/gpu/ptx/...", "./jit/gpu/spirv/...", "./jit/gpu/msl/...", "./jit/gpu/amdgpu/...", "./jit/gpu/lowertest/...", "./jit/gpu/kernels/..."], "cap": "8G",
+      "note": "the IR and its four lowerings; runs with no GPU"
+    },
+    "gpu-backend": {
+      "module": ".", "packages": ["./jit/gpu/backend/...", "./jit/gpu/cuda/...", "./jit/gpu/vulkan/...", "./jit/gpu/metal/...", "./jit/gpu/hip/...", "./jit/gpu/ffi/..."], "cap": "8G",
+      "needs": {"device": true},
+      "note": "the backends against the oracle on a real device"
+    },
+    "gpu-tier": {
+      "module": ".", "packages": ["./jit/gpu/tier/..."], "cap": "16G",
+      "needs": {"device": true},
+      "note": "placement, budgets and multi-device"
+    },
+    "server": {
+      "module": "server", "packages": ["./..."], "cap": "8G",
+      "needs": {"models": true},
+      "note": "the HTTP and Connect surfaces; the end-to-end gates load stories260K"
+    },
+    "common": {
+      "module": "common", "packages": ["./..."], "cap": "8G"
+    },
+    "ui": {
+      "module": "ui", "packages": ["./..."], "cap": "8G"
+    },
+    "tui": {
+      "module": "tui", "packages": ["./..."], "cap": "8G"
+    },
+    "dev-tools": {
+      "module": ".", "packages": ["./dev/tools/...", "./dev/probe/...", "./dev/httpbench/...", "./dev/decisionbench/..."], "cap": "8G",
+      "note": "the harnesses' own tests; dev/bench's perf floors are measured serially by the main session (RULE 2, RULE 4) and are not run here"
+    },
+    "scripts": {
+      "module": ".", "packages": ["./scripts/..."], "cap": "8G",
+      "note": "the generators and runners written in Go"
+    },
+    "proto": {
+      "command": ["buf", "lint"],
+      "note": "and `buf generate` must leave server/gen unchanged; generated code is never edited by hand"
+    }
+  },
+  "entries": [
+    {"prefix": "engine/model/", "evidence": "docs/engineering-history/model-correctness.md", "checks": ["model-correctness", "five-principles", "relocation", "device-model", "vet"]},
+    {"prefix": "engine/nn/", "evidence": "docs/engineering-history/cpu-kernels.md", "checks": ["nn", "jit-cpu", "model-correctness", "five-principles", "vet"]},
+    {"prefix": "engine/grammar/", "evidence": "docs/engineering-history/model-correctness.md", "checks": ["nn", "server", "vet"]},
+    {"prefix": "engine/sched/", "evidence": "docs/engineering-history/scheduling-and-measurement.md", "checks": ["sched", "five-principles", "vet"]},
+    {"prefix": "jit/cpu/", "evidence": "docs/engineering-history/cpu-kernels.md", "checks": ["jit-cpu", "nn", "model-correctness", "five-principles", "vet"]},
+    {"prefix": "jit/gpu/ir/", "evidence": "docs/engineering-history/gpu-kernels.md", "checks": ["gpu-lowering", "gpu-backend", "device-model", "vet"]},
+    {"prefix": "jit/gpu/ptx/", "evidence": "docs/engineering-history/gpu-kernels.md", "checks": ["gpu-lowering", "gpu-backend", "device-model", "vet"]},
+    {"prefix": "jit/gpu/spirv/", "evidence": "docs/engineering-history/gpu-kernels.md", "checks": ["gpu-lowering", "gpu-backend", "device-model", "vet"]},
+    {"prefix": "jit/gpu/msl/", "evidence": "docs/engineering-history/gpu-kernels.md", "checks": ["gpu-lowering", "gpu-backend", "device-model", "vet"]},
+    {"prefix": "jit/gpu/amdgpu/", "evidence": "docs/design/amd-hip.md", "checks": ["gpu-lowering", "gpu-backend", "vet"]},
+    {"prefix": "jit/gpu/lowertest/", "evidence": "docs/engineering-history/gpu-kernels.md", "checks": ["gpu-lowering", "gpu-backend", "vet"]},
+    {"prefix": "jit/gpu/kernels/", "evidence": "docs/engineering-history/gpu-kernels.md", "checks": ["gpu-lowering", "gpu-backend", "device-model", "five-principles", "vet"]},
+    {"prefix": "jit/gpu/backend/", "evidence": "docs/engineering-history/gpu-kernels.md", "checks": ["gpu-backend", "device-model", "relocation", "capabilities", "vet"]},
+    {"prefix": "jit/gpu/cuda/", "evidence": "docs/engineering-history/gpu-kernels.md", "checks": ["gpu-backend", "device-model", "vet"]},
+    {"prefix": "jit/gpu/vulkan/", "evidence": "docs/engineering-history/gpu-kernels.md", "checks": ["gpu-backend", "device-model", "vet"]},
+    {"prefix": "jit/gpu/metal/", "evidence": "docs/engineering-history/gpu-kernels.md", "checks": ["gpu-backend", "device-model", "vet"]},
+    {"prefix": "jit/gpu/hip/", "evidence": "docs/design/amd-hip.md", "checks": ["gpu-backend", "vet"]},
+    {"prefix": "jit/gpu/ffi/", "evidence": "docs/engineering-history/gpu-kernels.md", "checks": ["gpu-backend", "vet"]},
+    {"prefix": "jit/gpu/tier/", "evidence": "docs/engineering-history/placement.md", "checks": ["gpu-tier", "relocation", "device-model", "five-principles", "vet"]},
+    {"prefix": "format/jlm/", "evidence": "docs/engineering-history/placement.md", "checks": ["format", "five-principles", "model-correctness", "capabilities", "vet"]},
+    {"prefix": "format/quant/", "evidence": "docs/engineering-history/cpu-kernels.md", "checks": ["format", "jit-cpu", "capabilities", "srcgate", "vet"]},
+    {"prefix": "convert/", "evidence": "docs/engineering-history/model-correctness.md", "checks": ["convert", "srcgate", "capabilities", "model-correctness", "vet"]},
+    {"prefix": "tok/", "evidence": "docs/engineering-history/model-correctness.md", "checks": ["tok", "model-correctness", "vet"]},
+    {"prefix": "internal/capabilities/", "evidence": "docs/capabilities.md", "checks": ["capabilities", "capabilities-api", "vet"]},
+    {"prefix": "internal/modelsdoc/", "evidence": "docs/models.md", "checks": ["srcgate", "vet"]},
+    {"prefix": "internal/oracle/", "evidence": "docs/engineering-history/cpu-kernels.md", "checks": ["srcgate", "jit-cpu", "nn", "vet"]},
+    {"prefix": "internal/testmodels/", "evidence": "docs/testing.md", "checks": ["srcgate", "vet"]},
+    {"prefix": "internal/", "evidence": "docs/testing.md", "checks": ["srcgate", "vet"]},
+    {"prefix": "cmd/", "evidence": "README.md", "checks": ["cmd", "vet"]},
+    {"prefix": "server/capabilities.go", "evidence": "docs/capabilities.md", "checks": ["capabilities-api", "capabilities"]},
+    {"prefix": "server/gen/", "evidence": "proto/jitllm/v1", "checks": ["proto", "server"]},
+    {"prefix": "server/", "evidence": "docs/engineering-history/scheduling-and-measurement.md", "checks": ["server", "capabilities-api", "vet-server"]},
+    {"prefix": "proto/", "evidence": "proto/jitllm/v1", "checks": ["proto", "server", "capabilities-api"]},
+    {"prefix": "common/", "evidence": "README.md", "checks": ["common"]},
+    {"prefix": "ui/", "evidence": "README.md", "checks": ["ui"]},
+    {"prefix": "tui/", "evidence": "README.md", "checks": ["tui"]},
+    {"prefix": "dev/bench/", "evidence": "docs/perf/current.md", "checks": ["vet"], "manual": "perf floors: measured serially by the main session under RULE 1 and RULE 2, never by a parallel agent"},
+    {"prefix": "dev/", "evidence": "docs/engineering-history/scheduling-and-measurement.md", "checks": ["dev-tools", "vet"]},
+    {"prefix": "scripts/checks/", "evidence": "docs/checks.md", "checks": ["checks-map"]},
+    {"prefix": "scripts/genmodels/", "evidence": "docs/models.md", "checks": ["srcgate"]},
+    {"prefix": "scripts/", "evidence": "docs/engineering-history/scheduling-and-measurement.md", "checks": ["scripts"], "manual": "a shell or Python harness has no Go test: run it once on the host it targets"},
+    {"prefix": "testdata/", "evidence": "docs/testing.md", "checks": ["model-correctness", "server"]},
+    {"prefix": "docs/models.md", "evidence": "docs/models.md", "checks": ["srcgate"]},
+    {"prefix": "docs/capabilities.json", "evidence": "docs/capabilities.md", "checks": ["capabilities"]},
+    {"prefix": "docs/", "evidence": "AGENTS.md", "checks": [], "manual": "prose: read it against the code it describes (RULE 12)"},
+    {"prefix": "AGENTS.md", "evidence": "AGENTS.md", "checks": ["checks-map"], "manual": "a binding rule changed: check every gate it names still exists"},
+    {"prefix": "README.md", "evidence": "README.md", "checks": ["srcgate"]},
+    {"prefix": "llms.txt", "evidence": "llms.txt", "checks": [], "manual": "the index: every link it names exists"},
+    {"prefix": "ROADMAP.md", "evidence": "ROADMAP.md", "checks": [], "manual": "prose"},
+    {"prefix": "CONTRIBUTING.md", "evidence": "CONTRIBUTING.md", "checks": [], "manual": "prose"},
+    {"prefix": "COPYRIGHT", "evidence": "COPYRIGHT", "checks": [], "manual": "the user's decision (licensing)"},
+    {"prefix": "LICENSE", "evidence": "LICENSE", "checks": [], "manual": "the user's decision (licensing)"},
+    {"prefix": "go.mod", "evidence": "docs/testing.md", "checks": ["vet", "vet-server", "srcgate", "cmd", "server"]},
+    {"prefix": "go.sum", "evidence": "docs/testing.md", "checks": ["vet", "vet-server"]},
+    {"prefix": "buf.yaml", "evidence": "proto/jitllm/v1", "checks": ["proto"]},
+    {"prefix": "buf.gen.yaml", "evidence": "proto/jitllm/v1", "checks": ["proto"]},
+    {"prefix": ".github/", "evidence": "docs/testing.md", "checks": [], "manual": "CI: the workflow runs on push; it is model-free (docs/testing.md, \"What CI runs\")"},
+    {"prefix": ".goreleaser.yaml", "evidence": "docs/testing.md", "checks": ["cmd"], "manual": "a release build: run goreleaser's snapshot locally"},
+    {"prefix": "Dockerfile", "evidence": "docs/testing.md", "checks": [], "manual": ".github/scripts/docker-smoke.sh"},
+    {"prefix": ".dockerignore", "evidence": "docs/testing.md", "checks": [], "manual": ".github/scripts/docker-smoke.sh"},
+    {"prefix": ".gitignore", "evidence": "README.md", "checks": [], "manual": "none"},
+    {"prefix": "website/", "evidence": "README.md", "checks": [], "manual": "the site: build and view it locally"}
+  ]
+}
