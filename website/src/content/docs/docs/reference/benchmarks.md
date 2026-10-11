@@ -1,6 +1,6 @@
 ---
 title: Benchmarks
-description: jitllm against llama.cpp, vLLM, mistral.rs and ZML on V100s, a Xeon and an M4, with the method behind every number.
+description: jitllm against llama.cpp, vLLM, mistral.rs and ZML on V100s, a Xeon and an M4 (with MLX on the M4), with the method behind every number.
 ---
 
 Every figure here names its host, its backend and the engine it is compared with, and every comparison was taken in the same pass on the same machine. Ratios are jitllm divided by the other engine, so above 1 means jitllm is faster. The full record, including every row below parity and what was measured about it, is [`docs/perf/current.md`](https://github.com/jitllm/jitllm/blob/main/docs/perf/current.md) in the repository.
@@ -10,6 +10,7 @@ Every figure here names its host, its backend and the engine it is compared with
 - **jitllm:** `jitllm speed -p 512 -n 128 -r 2`, the better of the two runs (the second is warm, after the tuners have settled).
 - **llama.cpp:** `llama-bench -p 512 -n 128 -r 3`, its mean (it discards its own warm-up), on the same GGUF that jitllm's `.jlm` was converted from.
 - Prefill is a 512-token prompt and decode is 128 generated tokens, in tokens per second. Weights are Q4_K_M unless the row says otherwise.
+- The M4 Metal section for 3B to 7B models states its own method: a paired, interleaved harness and a separate three-engine pass.
 - One pass per host: each table is a single sweep, so a row within a few percent of parity is inside the box's pass-to-pass spread.
 
 ## Tesla V100, CUDA
@@ -157,9 +158,45 @@ One socket, 12 cores, every engine pinned with `numactl --membind=0 taskset -c 0
 
 Dense decode on this CPU was 5–8% behind llama.cpp in this pass; a 12-byte scale plane (container v27) and a per-shape prefetch distance have since brought it to 0.95–0.97. Both engines are bound by memory bandwidth there. Mixtures are at parity or ahead. ZML's XLA CPU path decoded Llama-3.2-1B at 0.9 tok/s on the same socket.
 
-## Apple M4, Metal and CPU
+## Apple M4, Metal: 3B to 7B models
 
-Mac mini, 4 performance and 6 efficiency cores, 10-core GPU. jitllm against llama.cpp b10985: Metal is `-devices metal` against `-ngl 99`, CPU is `-devices cpu` against `-ngl 0 -dev none`, whose CPU prefill uses Apple's Accelerate BLAS.
+Mac mini M4, 10-core GPU. Q4_K_M GGUF converted to `.jlm`, every block on the GPU (`JITLLM_VRAM=0`), against llama.cpp b10825 on Metal.
+
+### jitllm against llama.cpp, paired
+
+`scripts/vs-llamacpp.sh gpu`, 40 interleaved rounds, the A/A self-control run first (Gemma-3-4B against itself: prefill 0.9999, decode 0.9997). Prefill is a warm ~415-token prompt; decode is 128 tokens. Ratio is jitllm divided by llama.cpp.
+
+| Model | Prefill ratio | Decode ratio |
+|---|---:|---:|
+| Ministral-3-3B-Instruct | 1.019× (486 vs 477 tok/s) | 1.095× (46.1 vs 42.2 tok/s) |
+| Qwen3-4B | 1.012× | 1.030× |
+| Llama-3.2-3B | 1.017× | 1.030× |
+| Gemma-3-4B | 0.955× | 1.018× |
+| Mistral-7B | 0.981× (noisy: IQR/median 0.057) | 1.030× |
+
+jitllm decodes faster than llama.cpp on all five models (1.02–1.10×). Prefill is at parity except Gemma-3-4B, 4.5% behind.
+
+### Three engines, same pass
+
+jitllm, llama.cpp b10825 (`llama-bench`) and MLX (`mlx_lm` benchmark on the mlx-community 4-bit checkpoints), median of 3. Decode is 128 tokens; prefill is a ~415-token prompt (507 for Mistral-7B). tok/s.
+
+| Model | Decode jitllm | llama.cpp | MLX | Prefill jitllm | llama.cpp | MLX |
+|---|---:|---:|---:|---:|---:|---:|
+| Ministral-3-3B | 46.18 | 41.70 | 49.99 | 490.4 | 509.6 | 519.3 |
+| Qwen3-4B | 38.88 | 37.86 | 41.74 | 401.2 | 418.3 | 423.0 |
+| Llama-3.2-3B | 48.61 | 47.09 | 52.78 | 524.8 | 548.9 | 598.6 |
+| Gemma-3-4B | 38.89 | 38.07 | 43.15 | 429.9 | 479.0 | 458.9 |
+| Mistral-7B | 23.69 | 23.16 | 24.69 | 229.3 | 224.9 | 243.0 |
+
+Read this table with three caveats:
+
+- **Use the paired table above for jitllm against llama.cpp.** Each jitllm number here is a fresh process, while `llama-bench` and `mlx_lm` warm up in-process, which flatters them on prefill: llama.cpp's Ministral prefill reads 510 tok/s here and 477 in the paired harness.
+- **MLX does not run the same weights.** Its 4-bit files are smaller than Q4_K_M, so it reads fewer bytes per token. On these files MLX is 4–10% ahead of jitllm on decode and 5–12% on prefill.
+- Running MLX checkpoints converted to `.jlm`, which would make that a same-weights comparison, is on the roadmap.
+
+## Apple M4, Metal and CPU: small models, an earlier pass
+
+These rows predate the Metal changes measured above and have not been re-measured. Mac mini, 4 performance and 6 efficiency cores, 10-core GPU. jitllm against llama.cpp b10985: Metal is `-devices metal` against `-ngl 99`, CPU is `-devices cpu` against `-ngl 0 -dev none`, whose CPU prefill uses Apple's Accelerate BLAS.
 
 | Model | Tier | jitllm prefill | llama.cpp | Ratio | jitllm decode | llama.cpp | Ratio |
 |---|---|---:|---:|---:|---:|---:|---:|
@@ -176,7 +213,7 @@ Mac mini, 4 performance and 6 efficiency cores, 10-core GPU. jitllm against llam
 | gemma-2b | Metal | 758 | 847 | 0.89× | 59.5 | 58.6 | 1.01× |
 | | CPU | 251 | 297 | 0.85× | 40.9 | 42.6 | 0.96× |
 
-The Mac is where jitllm is furthest behind: Metal prefill trails llama.cpp by 5–11% on most models, and CPU decode by up to 10%. mistral.rs v0.9.4 trailed both engines everywhere it ran.
+In that pass Metal prefill trailed llama.cpp by 5–11% on most of these small models, and CPU decode by up to 10%. mistral.rs v0.9.4 trailed both engines everywhere it ran.
 
 ## Measure it yourself
 

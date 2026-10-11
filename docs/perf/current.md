@@ -37,6 +37,9 @@ so a second process on the same card times nothing; on the RTX 3050 Ti
 
 ## ★ THE FINAL BOARD: THREE HOSTS, FIVE ENGINES, ONE PASS PER HOST
 
+The M4 Metal 3B-7B section below has its own method (a paired harness and a
+separate three-engine pass with MLX) and says so.
+
 Every number names its host and backend. Ratios are jitllm / llama.cpp from
 the same pass on the same GGUF (jitllm reads the `.jlm` converted from it).
 jitllm is the better of its two `speed -r 2` runs (the second is warm: the
@@ -573,7 +576,51 @@ prefill / decode tok/s.
 ZML (XLA CPU, bf16 safetensors, same socket): Llama-3.2-1B decodes at
 0.9 tok/s and Llama-3.1-8B at 0.2 tok/s.
 
-### M4 (Mac mini, 4P+6E, 10-core GPU, Metal)
+### M4 Metal, 3B to 7B models (Mac mini M4, 10-core GPU, Metal)
+
+Q4_K_M GGUF converted to `.jlm`, every block on the GPU (`JITLLM_VRAM=0`),
+against llama.cpp b10825 on Metal.
+
+**Paired:** `scripts/vs-llamacpp.sh gpu`, n=40 interleaved, the A/A
+self-control first (Gemma-3-4B against itself: prefill 0.9999, decode 0.9997).
+Warm prefill of a ~415-token prompt; decode 128 tokens. Ratio jitllm /
+llama.cpp, median of per-round ratios.
+
+| model | prefill | decode |
+|---|---|---|
+| Ministral-3-3B-Instruct | 1.019 (486 vs 477 tok/s) | 1.095 (46.1 vs 42.2 tok/s) |
+| Qwen3-4B | 1.012 | 1.030 |
+| Llama-3.2-3B | 1.017 | 1.030 |
+| Gemma-3-4B | **0.955** | 1.018 |
+| Mistral-7B | **0.981** (noisy, IQR/median 0.057) | 1.030 |
+
+**Three engines, same pass:** jitllm, llama.cpp b10825 `llama-bench`, MLX
+(`mlx_lm` benchmark on the mlx-community 4-bit checkpoints), median of 3,
+tok/s. Decode 128 tokens; prefill ~415 tokens (Mistral-7B 507).
+
+| model | tg jitllm | llama.cpp | MLX | pp jitllm | llama.cpp | MLX |
+|---|---|---|---|---|---|---|
+| Ministral-3-3B | 46.18 | 41.70 | 49.99 | 490.4 | 509.6 | 519.3 |
+| Qwen3-4B | 38.88 | 37.86 | 41.74 | 401.2 | 418.3 | 423.0 |
+| Llama-3.2-3B | 48.61 | 47.09 | 52.78 | 524.8 | 548.9 | 598.6 |
+| Gemma-3-4B | 38.89 | 38.07 | 43.15 | 429.9 | 479.0 | 458.9 |
+| Mistral-7B | 23.69 | 23.16 | 24.69 | 229.3 | 224.9 | 243.0 |
+
+Caveats on the three-engine table:
+- Each jitllm number is a fresh process, while `llama-bench` and `mlx_lm` warm
+  up in-process, which flatters them on prefill (llama.cpp's Ministral prefill
+  reads 510 here and 477 in the paired harness). jitllm against llama.cpp is
+  the paired table.
+- MLX's 4-bit files are smaller than Q4_K_M (fewer bytes per token), so the
+  MLX comparison is not same-weights. On them MLX is 4-10% ahead on decode
+  (jitllm/MLX 0.90-0.96) and 5-12% on prefill (0.88-0.95).
+- Converting MLX checkpoints to `.jlm`, which would make it same-weights, is
+  roadmap item 8.
+
+### M4, small models, an earlier pass (Mac mini, 4P+6E, 10-core GPU, Metal)
+
+These rows predate the Metal changes behind the table above and have not been
+re-measured.
 
 jitllm `speed -r 2` against llama.cpp b10985 `llama-bench -r 3`, same pass,
 idle box. Metal is `-devices metal` against `-ngl 99`; CPU is
@@ -664,7 +711,7 @@ super-block where GGUF packs 12, and it sustains 2.3% less read bandwidth.
   single pinned distance (11.44, 11.34, 57.8). Not yet taken on the laptop.
 - `docs/engineering-history/cpu-kernels.md` has the measurements.
 
-**M4 Metal prefill 0.86-0.95.** GemmTile's large shapes run 3.1-3.3 TFLOP/s of
+**M4 Metal prefill 0.86-0.95 (the small models' earlier pass; on 3B-7B models it is now 0.955-1.019, above).** GemmTile's large shapes run 3.1-3.3 TFLOP/s of
 a ~3.76 peak. The thin projections (1.0-1.4 TFLOP/s) and the FMA-tile attention
 are what is left: Metal's simdgroup_matrix is unreachable from the IR's
 fragment-shaped MMA (`docs/engineering-history/gpu-kernels.md`). tinyllama wins
