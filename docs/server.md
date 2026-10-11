@@ -22,7 +22,9 @@ with no `max_tokens` runs until the model ends its reply or fills the context;
 either way a reply that reaches the end of the context finishes as `length`. Generates of one model placed wholly on one device, or wholly on the host,
 decode together as rows of one step (`-max-batch`). A model's queue holds
 `-max-queue` requests (64 by default) before it answers 429 with a
-`Retry-After`. Under a model's KV budget (`Engine.SetKVBudget`, an embedding
+`Retry-After`. `-fairness 0-100` (100 by default) sets how they share the
+steps: 0 serves them first come first served, each to its end; higher
+time-slices running rows for waiting ones. Under a model's KV budget (`Engine.SetKVBudget`, an embedding
 API with no flag yet) a generate parks idle sessions of the model, lowest
 priority then least recently stepped, into its memory cache, and a parked
 session resumes byte for byte at its next generate.
@@ -151,7 +153,7 @@ prompt store a Speculator does not use).
 |---|---|
 | `serve` | run the daemon (`-addr`, `-models`, `-load`, `-id`, `-devices`, `-maxmem`, `-max-batch`, `-max-queue`, `-kv-cache`; `jitllmd serve -h` lists every flag) |
 | `run` | stream a generation from a running daemon |
-| `models` | list, describe, load and unload models |
+| `models` | list, describe, load and unload models (`-unload ID -force` closes sessions holding it instead of refusing) |
 | `devices` | the hardware and the memory that is actually spendable |
 | `sessions` | create, list, describe, reset and close sessions |
 | `place` | read and move the CPU/device seam and the pager budget |

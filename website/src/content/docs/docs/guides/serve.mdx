@@ -42,6 +42,7 @@ jitllmd serve -addr 127.0.0.1:8080 -models ./models \
 | `-prompt-chunk N` | 0 | prompt tokens a joining request feeds into one shared step; 0 is one device prefill chunk |
 | `-step-prompt-tokens N` | 0 | prompt tokens one step carries beside decoding rows; 0 measures it: the tokens that cost one decode step's time |
 | `-step-cost X` | 0 | with `-step-prompt-tokens 0`, how many decode steps' time a step carrying prompt tokens may take; 0 is the engine's default |
+| `-fairness N` | 100 | 0 to 100: 0 serves requests first come first served, each to its end (the most tokens a second); higher time-slices running rows for waiting ones and feeds the next prompts beside the oldest (shorter, evener waits for a first token) |
 | `-joint-steps MODE` | `auto` | `auto` times a joint step against the rows one after another, per row count, and runs the faster; `always` or `never` force it |
 | `-warm` | true | after every load, run a short prefill and a decode step so the first request does not pay for them |
 | `-no-mem-cache` | false | turn off each model's memory cache of prompt prefixes: every request prefills its whole prompt |
@@ -217,7 +218,7 @@ A request may also name a session instead of a model with `"jitllm_session"` and
 ```sh
 jitllmd models                           # the model directory, and what is loaded
 jitllmd models -load gemma-3-4b.jlm -id gemma -devices cuda:0
-jitllmd models -unload gemma
+jitllmd models -unload gemma            # -force closes sessions holding it instead of refusing
 
 jitllmd devices                          # hardware and spendable memory
 jitllmd stats -watch                     # engine counters, streamed

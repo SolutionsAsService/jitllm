@@ -135,6 +135,7 @@ Every client command takes `-addr` (`host:port`, `:port` or a full URL; default 
 | `-prompt-chunk N` | 0 | prompt tokens a joining request feeds into one shared step; 0 is one device prefill chunk |
 | `-step-prompt-tokens N` | 0 | prompt tokens one step carries beside decoding rows; 0 measures the tokens that cost one decode step's time |
 | `-step-cost X` | 0 | with `-step-prompt-tokens 0`, how many decode steps' time a step carrying prompt tokens may take |
+| `-fairness N` | 100 | 0 to 100: 0 serves requests first come first served, each to its end (the most tokens a second); higher time-slices running rows for waiting ones and feeds the next prompts beside the oldest (shorter, evener waits for a first token) |
 | `-joint-steps MODE` | `auto` | `auto` times a joint step against the rows one after another and runs the faster; `always` or `never` |
 | `-warm` | true | after every load, run a short prefill and a decode step so the first request does not pay for them |
 | `-no-mem-cache` | false | turn off each model's memory cache: every request prefills its whole prompt |
