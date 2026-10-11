@@ -7,14 +7,14 @@ The terminal app is the desktop app's screens in a terminal: chat, models, disco
 
 ## Install and run
 
-Install it with the [install script](/docs/install/#install-a-release):
+Install it with the [install script](/docs/install/#from-a-script):
 
 ```sh
 curl -fsSL https://jitllm.org/install.sh | sh -s -- tui
 jitllm-tui models/qwen3.jlm
 ```
 
-On Windows, set `$env:JITLLM_PROGRAMS = "tui"` before the PowerShell line. Its archive, `jitllm-tui_<version>_<os>_<arch>`, is also on the [latest release](https://github.com/samyfodil/jitllm/releases/latest). It is a separate Go module; to build it from source:
+On Windows, set `$env:JITLLM_PROGRAMS = "tui"` before the PowerShell line. Its archive, `jitllm-tui_<version>_<os>_<arch>`, is also on the [latest release](https://github.com/jitllm/jitllm/releases/latest). It is a separate Go module; to build it from source:
 
 ```sh
 cd jitllm/tui

@@ -8,11 +8,11 @@ import (
 	"strings"
 	"unsafe"
 
-	"github.com/samyfodil/jitllm/format/quant"
+	"github.com/jitllm/jitllm/format/quant"
 
-	"github.com/samyfodil/jitllm/engine/nn"
-	"github.com/samyfodil/jitllm/jit/gpu/backend"
-	"github.com/samyfodil/jitllm/jit/gpu/kernels"
+	"github.com/jitllm/jitllm/engine/nn"
+	"github.com/jitllm/jitllm/jit/gpu/backend"
+	"github.com/jitllm/jitllm/jit/gpu/kernels"
 )
 
 // This file is the router: which device gets a block, in what order they are
@@ -563,6 +563,12 @@ func (g *GPU) DeclineSize(li int, total, bank uint64) string {
 	}
 	// No block index or byte count in the text: placement groups identical
 	// reasons, and ninety-two lines that differ by a number say one thing.
+	// A block with no routed bank has nothing to stream, so its reason names
+	// neither experts nor a streaming placement.
+	if bank == 0 {
+		return fmt.Sprintf("the block is above every device's whole budget (the largest %.2f GiB), "+
+			"so it runs on the host", float64(widest)/(1<<30))
+	}
 	return fmt.Sprintf("the block with its routed experts is above every device's whole budget "+
 		"(the largest %.2f GiB), so it runs on the host unread by the device "+
 		"(a placement that streams it -- JITLLM_GPU_STREAM, -placement N=DEV~ -- puts it on a card)",

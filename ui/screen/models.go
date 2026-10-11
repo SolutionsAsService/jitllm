@@ -12,10 +12,11 @@ import (
 	"github.com/gogpu/ui/state"
 	"github.com/gogpu/ui/widget"
 
-	"github.com/samyfodil/jitllm/common/catalog"
-	"github.com/samyfodil/jitllm/common/discover"
-	"github.com/samyfodil/jitllm/ui/app"
-	"github.com/samyfodil/jitllm/ui/widgets"
+	"github.com/jitllm/jitllm/common/catalog"
+	"github.com/jitllm/jitllm/common/crash"
+	"github.com/jitllm/jitllm/common/discover"
+	"github.com/jitllm/jitllm/ui/app"
+	"github.com/jitllm/jitllm/ui/widgets"
 )
 
 // The Models screen: the containers on disk, what each says about itself, and
@@ -209,6 +210,7 @@ func (m *modelsScreen) rescan() {
 	dirs := append([]string(nil), m.sh.Cfg.ModelDirs...)
 
 	go func() {
+		defer crash.Recover("model scan")
 		defer func() {
 			m.mu.Lock()
 			m.scanRunning = false

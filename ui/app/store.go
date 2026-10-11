@@ -4,8 +4,10 @@ import (
 	"sync"
 
 	"github.com/gogpu/ui/state"
-	"github.com/samyfodil/jitllm/common/catalog"
-	"github.com/samyfodil/jitllm/common/session"
+
+	"github.com/jitllm/jitllm/common/catalog"
+	"github.com/jitllm/jitllm/common/crash"
+	"github.com/jitllm/jitllm/common/session"
 )
 
 // Store is every piece of state the screens share.
@@ -24,6 +26,9 @@ type Store struct {
 	Dialog state.Signal[DialogReq]
 	// Problem is the session's error banner; see [Problem].
 	Problem state.Signal[Problem]
+	// Crash is a crash report to show over every screen; the zero value
+	// shows nothing. See crash.go.
+	Crash state.Signal[crash.Report]
 
 	// --- the loaded model ---
 	ModelPath state.Signal[string]
@@ -158,6 +163,7 @@ func NewStore() *Store {
 		Status:  state.NewSignal("ready"),
 		Dialog:  state.NewSignal(DialogReq{}),
 		Problem: state.NewSignal(Problem{}),
+		Crash:   state.NewSignal(crash.Report{}),
 
 		ModelPath:    state.NewSignal(""),
 		Models:       state.NewSignal([]LoadedModel(nil)),

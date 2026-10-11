@@ -4,9 +4,9 @@
 package config
 
 import (
-	"github.com/samyfodil/jitllm/common/api"
-	"github.com/samyfodil/jitllm/common/catalog"
-	"github.com/samyfodil/jitllm/common/session"
+	"github.com/jitllm/jitllm/common/api"
+	"github.com/jitllm/jitllm/common/catalog"
+	"github.com/jitllm/jitllm/common/session"
 
 	"encoding/json"
 	"os"
@@ -59,6 +59,11 @@ type Config struct {
 	// API serves jitllm's API (common/api) while the app runs, on APIAddr.
 	API     bool   `json:"api"`
 	APIAddr string `json:"api_addr"`
+
+	// CLIOffered is set once the macOS app has offered to put its
+	// command-line programs on PATH, so the offer is made on the first
+	// launch only; the settings page keeps the choice reachable after.
+	CLIOffered bool `json:"cli_offered"`
 
 	path string
 }

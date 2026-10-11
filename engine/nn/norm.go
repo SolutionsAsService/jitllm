@@ -6,7 +6,7 @@ import (
 	"sync/atomic"
 	"unsafe"
 
-	"github.com/samyfodil/jitllm/jit/cpu"
+	"github.com/jitllm/jitllm/jit/cpu"
 )
 
 // RMSNorm on generated code.
@@ -375,6 +375,7 @@ type ActKind = cpu.ActKind
 const (
 	ActSiLU      = cpu.ActSiLU
 	ActGELU      = cpu.ActGELU
+	ActGELUErf   = cpu.ActGELUErf
 	ActQuickGELU = cpu.ActQuickGELU
 	ActReLU2     = cpu.ActReLU2
 	ActReLU      = cpu.ActReLU

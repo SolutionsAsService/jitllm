@@ -6,10 +6,10 @@ import (
 	"slices"
 	"unsafe"
 
-	"github.com/samyfodil/jitllm/engine/nn"
-	"github.com/samyfodil/jitllm/jit/gpu/backend"
-	"github.com/samyfodil/jitllm/jit/gpu/ir"
-	"github.com/samyfodil/jitllm/jit/gpu/kernels"
+	"github.com/jitllm/jitllm/engine/nn"
+	"github.com/jitllm/jitllm/jit/gpu/backend"
+	"github.com/jitllm/jitllm/jit/gpu/ir"
+	"github.com/jitllm/jitllm/jit/gpu/kernels"
 )
 
 // Paged attention history on the device (docs/design/device-kv-paging.md).
@@ -408,6 +408,12 @@ func (g *devTier) pagedPlanFor(bs *blockScratch, keys int) (*pagedVariant, error
 	if plan.Path == kernels.PathFlashKV && g.pickLanes() != ir.SubgroupLanes {
 		plan = kernels.DecodePlan{Path: kernels.PathStaged, Shape: kernels.PagedStagedPlan(pg.shape, keys, g.dev.Slots())}
 	}
+	// A staged plan's planes grow with its keys: past the pass width it is
+	// built for the pass, and a deeper call goes in passes (pagedStreamPrep).
+	if pk := g.stagedPassKeys(bs); plan.Path == kernels.PathStaged && pk > 0 && keys > pk {
+		keys = pk
+		plan.Shape = kernels.PagedStagedPlan(pg.shape, keys, g.dev.Slots())
+	}
 	v, err := g.pagedBuild(bs, plan)
 	// The split count only divides the work, and the partials are rows x
 	// heads x splits x the value's width: a 530-row prompt chunk at 8 splits
@@ -634,6 +640,13 @@ func (g *devTier) heldLayers(sid uint64, f func(li int, l *kvLayerPool) error) e
 // Callers hold g.mu.
 func (g *devTier) pagedAppend(sid uint64, seqs []seqEnd) error {
 	kp := g.kvPages()
+	for _, se := range seqs {
+		if se.start >= 0 {
+			if err := g.rewind(sid, kp, se.s, se.start); err != nil {
+				return err
+			}
+		}
+	}
 	err := g.heldLayers(sid, func(li int, l *kvLayerPool) error {
 		for _, se := range seqs {
 			need := (l.positions(se.end) + kp.p - 1) / kp.p
@@ -1072,6 +1085,15 @@ func (g *devTier) pagedMigrate(sid uint64, li, base int, k, v []float32, pos int
 	npages := (pos + P - 1) / P
 	// The sequence's oldest pages may be at home (kvevict.go): the same count
 	// in every layer, so a layer joining keeps them there too.
+	// Sent up, the host's position is the history: past it the device's
+	// record is a sequence that has since restarted lower. Read home, pos is
+	// only how much of the history is wanted (a prefix a store saves), and the
+	// device keeps the rest.
+	if toDevice {
+		if err := g.rewind(sid, kp, s, pos); err != nil {
+			return err
+		}
+	}
 	e := min(kp.evicted[s], npages)
 	if toDevice && e > 0 && len(pl.owned[s]) == 0 {
 		if err := g.ensureRange(kp, s, e); err != nil {

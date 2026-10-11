@@ -11,7 +11,7 @@ commit, all but one: `internal/testmodels/fetch.sh` downloads the rest (see
 | `JITLLM_MODEL_FREE` | `1`: a missing model skips instead of failing (CI only, see "What CI runs") | a missing model fails |
 
 The fallback is located by walking up from the test's working directory to the
-`go.mod` that declares `github.com/samyfodil/jitllm` -- so it is the same
+`go.mod` that declares `github.com/jitllm/jitllm` -- so it is the same
 directory from every package, including the nested `ui/` and `server/` modules.
 `models/` may be a symlink to a model disk; otherwise point the variable at
 the models instead of faking the link:
@@ -173,6 +173,7 @@ sweep by name and are never resolved.
 | `JITLLM_TPL_MODEL` | `jinja.TestGGUFChatTemplatesRender` | substring | every GGUF |
 | `JITLLM_SERVER_MODEL` | `server.TestEndToEndAgainstARealContainer` | a `.jlm` container | test skips |
 | `JITLLM_SERVER_BATCH_MODELS` | `server.TestBatch*` | comma-separated `.jlm` names or paths, each run beside the default | `stories15M-q8_0.jlm` only |
+| `JITLLM_TOOL_MODELS` | `server.TestToolChoiceForcesACall` | comma-separated `.jlm` names, in place of the default | `Qwen3-0.6B-Q8_0.jlm` and `Llama-3.2-1B-Instruct-Q4_K_M.jlm`; also run with Qwen3.5-0.8B-f16, DeepSeek-R1-Distill-Qwen-1.5B-Q4_K_M and gpt-oss-20b-Q4_K_M |
 | `JITLLM_STEP_MIXTURE` | `model.TestStepAcrossSessionsMixture*` | comma-separated names or paths | Qwen3-MoE-4x0.6B and olmoe; a card that cannot place every block skips |
 | `JITLLM_ALLOC_MODELS` | `model.TestDecodeDoesNotAllocate` | comma-separated names or paths, each run beside the default | Llama-3.2-1B, olmoe and Qwen3.5-0.8B only |
 | `JITLLM_SLOW` | several `model` sweeps | `1` admits models over 2 GiB | small models only |
@@ -236,6 +237,12 @@ variable it needs and did not find.
 | `CV_TOK`, `CV_HF` | the family tokenizers the fixtures copy, and where their HuggingFace directories are written | default `$JITLLM_MODELS/tok` and `$JITLLM_MODELS/hf` |
 | `BAILING_PY`, `BAILING_REF` | the python of a second venv with transformers 4.52.3, and inclusionAI's Ling 2.0 remote code | `moegold.py`'s `synth-bailingmoe2` only |
 | `L4_TOK` | the directory holding Llama 4's `tokenizer.json` | `llama4gold.py`, `llama4visiongold.py` |
+
+The decision models' goldens: `scripts/decisiongold.sh` (llama-server's
+`/v1/systemone` under `JITLLM_LCPP` on `$JITLLM_MODELS/{d1,lev,laya/gguf}`) and
+`scripts/layagold.py` (Laya's own code: `real` on the checkpoint, `fixture`
+builds the random fixture into `$JITLLM_MODELS/laya/fixture` with llama.cpp's
+converter); `docs/design/decision-models.md` names the files.
 
 A script-specific override (`QVL_TOK`, `PIX_HF`, `PHI4V_TOK` and the like) is
 named in that script's docstring and defaults to a path under `$JITLLM_MODELS`.

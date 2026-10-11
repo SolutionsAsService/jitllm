@@ -3,8 +3,8 @@ package tier
 import (
 	"sync/atomic"
 
-	"github.com/samyfodil/jitllm/engine/nn"
-	"github.com/samyfodil/jitllm/format/quant"
+	"github.com/jitllm/jitllm/engine/nn"
+	"github.com/jitllm/jitllm/format/quant"
 )
 
 // A session is one sequence; a tier is one model. The per-sequence state (the
@@ -209,6 +209,13 @@ func (s *gpuSession) Detach() {
 func (s *gpuSession) SetKeyRuns(full, windowed []nn.KeyRun) bool {
 	defer s.leave(s.step())
 	return s.g.setKeyRuns(s.sid, full, windowed)
+}
+
+// SetRowWindows records one window a row for this session's calls that
+// follow; see GPU.SetRowWindows.
+func (s *gpuSession) SetRowWindows(wins []nn.KeyRun) bool {
+	defer s.leave(s.step())
+	return s.g.setRowWindows(s.sid, wins)
 }
 
 // HeldBytes is this session's history on every device (nn.Session).

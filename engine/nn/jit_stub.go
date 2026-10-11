@@ -5,9 +5,9 @@ package nn
 import (
 	"time"
 
-	"github.com/samyfodil/jitllm/engine/sched"
-	"github.com/samyfodil/jitllm/format/quant"
-	"github.com/samyfodil/jitllm/jit/cpu"
+	"github.com/jitllm/jitllm/engine/sched"
+	"github.com/jitllm/jitllm/format/quant"
+	"github.com/jitllm/jitllm/jit/cpu"
 )
 
 // JIT is the generated-code tier. This platform has no code generator, so it
@@ -199,3 +199,8 @@ func unsupported() { panic("jit: no code generator for this architecture") }
 func (f *JIT) QuantizeKVRows(dst, src []float32, hd, n int) { unsupported() }
 func (f *JIT) ReserveKVQuant(hd int)                        {}
 func (f *JIT) WidenKVRows(dst, src []float32, hd, n int)    { unsupported() }
+
+// MatMulFloat is the float GEMM. There is no generated code here.
+func (f *JIT) MatMulFloat(out []float32, t quant.Type, w []byte, x []float32, nrows, k, ntok int) bool {
+	return false
+}

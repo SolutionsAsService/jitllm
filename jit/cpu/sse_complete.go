@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/samyfodil/jitllm/format/quant"
-	"github.com/samyfodil/jitllm/jit/gpu/kernels"
+	"github.com/jitllm/jitllm/format/quant"
+	"github.com/jitllm/jitllm/jit/gpu/kernels"
 )
 
 // SSEPending lists the SSE-tier table's ops that have no kernel yet, by field
@@ -140,6 +140,16 @@ var sseProbes = []sseProbe{
 	{"RowMajor", func(em *Emitters) error {
 		_, err := em.RowMajor(Spec{W: quant.F32, Rows: 1, Cols: 1, Accs: 1})
 		return err
+	}},
+	{"FloatMatMul", func(em *Emitters) error {
+		for _, t := range []quant.Type{quant.F32, quant.F16, quant.BF16} {
+			for nt := 1; nt <= MaxFloatTokens; nt++ {
+				if _, err := em.FloatMatMul(t, nt); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
 	}},
 	{"PackedMatVec", func(em *Emitters) error { _, err := em.PackedMatVec(quant.Q4_K, PackedRows); return err }},
 	{"PackedWide", func(em *Emitters) error { _, err := em.PackedWide(quant.Q4_K); return err }},

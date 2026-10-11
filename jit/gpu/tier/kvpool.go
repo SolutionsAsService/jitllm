@@ -6,8 +6,8 @@ import (
 	"slices"
 	"unsafe"
 
-	"github.com/samyfodil/jitllm/jit/gpu/backend"
-	"github.com/samyfodil/jitllm/jit/gpu/kernels"
+	"github.com/jitllm/jitllm/jit/gpu/backend"
+	"github.com/jitllm/jitllm/jit/gpu/kernels"
 )
 
 // ErrKVCapacity is a device that cannot give a sequence another page of
@@ -248,6 +248,14 @@ func (g *devTier) allocPages(sid uint64, kp *kvPool, l *kvLayerPool, s seqID, co
 	if count <= 0 {
 		return nil
 	}
+	// The table run first: a run that moves may grow every layer's table
+	// arena, and the room for that comes from compacting the layers
+	// (kvCompact), this one included, which gives its free pages back. Taken
+	// after the free list was made long enough, it emptied the list again.
+	have := len(l.owned[s])
+	if err := g.ensureRange(kp, s, have+count); err != nil {
+		return err
+	}
 	if len(l.free) < count {
 		// Growth first -- a page-out of streamed weights or more pool -- and
 		// when nothing can grow, cold history goes home (kvevict.go). A
@@ -255,10 +263,6 @@ func (g *devTier) allocPages(sid uint64, kp *kvPool, l *kvLayerPool, s seqID, co
 		if err := g.growKVLayer(kp, l, l.n+count-len(l.free)); err != nil && !g.evictForRoom(sid, kp, l, count) {
 			return err
 		}
-	}
-	have := len(l.owned[s])
-	if err := g.ensureRange(kp, s, have+count); err != nil {
-		return err
 	}
 	take := l.free[len(l.free)-count:]
 	l.owned[s] = append(l.owned[s], take...)
@@ -312,7 +316,15 @@ func (g *devTier) growKVLayer(kp *kvPool, l *kvLayerPool, want int) error {
 	g.quiesce()
 	pb := kp.pageBytes(l)
 	fits := func(n uint64) bool { return g.stateFits(n, l) }
-	for _, n := range []int{min(max(l.n*2, want, 2), limit), want} {
+	// A doubling stops at what a scheduler promised (PromiseKV): the pages in
+	// use and the promise's, with one spare. The budget past it is left to
+	// the batched scratches the admitted rows' steps run in, which a pool
+	// doubled into the whole card refused, padding every step to the widest.
+	grow := l.n * 2
+	if g.kvPromise > 0 {
+		grow = min(grow, l.n-len(l.free)+(g.kvPromise+kp.p-1)/kp.p+1)
+	}
+	for _, n := range []int{min(max(grow, want, 2), limit), want} {
 		if n < want {
 			continue
 		}
@@ -643,7 +655,12 @@ func (g *devTier) compactViaHost(kp *kvPool, l *kvLayerPool, order []uint32, n i
 		err = writePagesIn(v, hv, vw, order)
 	}
 	if err != nil {
+		// As above: the history goes back in at the old size rather than
+		// leaving the layer with no buffers for the next read.
 		freeKV2(k, v)
+		if rk, rv, rerr := g.restoreLayer(l, kp.p, hk, hv); rerr == nil {
+			l.k, l.v = rk, rv
+		}
 		return nil, nil, err
 	}
 	return k, v, nil

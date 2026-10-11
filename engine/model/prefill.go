@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/samyfodil/jitllm/engine/nn"
+	"github.com/jitllm/jitllm/engine/nn"
 )
 
 // MaxPrefillChunk sizes the batched scratch. The width used is tuned per
@@ -33,6 +33,10 @@ func (s *State) Prefill(tokens []int32) ([]float32, error) {
 	defer s.m.enterPager()()
 	if s.batched {
 		return nil, errBatch{}
+	}
+	if err := s.retireErr; err != nil {
+		s.retireErr = nil
+		return nil, err
 	}
 	return s.prefillInto(0, tokens)
 }

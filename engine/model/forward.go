@@ -11,12 +11,12 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/samyfodil/jitllm/engine/sched"
-	"github.com/samyfodil/jitllm/format/jlm"
-	"github.com/samyfodil/jitllm/format/quant"
+	"github.com/jitllm/jitllm/engine/sched"
+	"github.com/jitllm/jitllm/format/jlm"
+	"github.com/jitllm/jitllm/format/quant"
 
-	"github.com/samyfodil/jitllm/engine/nn"
-	"github.com/samyfodil/jitllm/jit/cpu"
+	"github.com/jitllm/jitllm/engine/nn"
+	"github.com/jitllm/jitllm/jit/cpu"
 )
 
 // Per-op timing, armed by WithProfile. The counters are process-wide (OpProfile
@@ -132,6 +132,9 @@ type State struct {
 	// visState is the vision State a text State encodes its pictures in
 	// (Vision), nil until the first picture.
 	visState *State
+	// enc is an encoder segment's run: set on the State an Embedder places
+	// its encoder's blocks through (encdev.go), nil everywhere else.
+	enc *encRun
 	// kvErr is the first page fault of the current step that could not be
 	// recovered. It is set inside a pool closure, which has no error path, and
 	// drained by kvCheck at the entry point.
@@ -457,7 +460,8 @@ type State struct {
 	// counter for both would read "batched" while half the FFN looped.
 	moeDownBatched, moeDownLooped atomic.Int64
 	blogits                       []float32 // nseq * NVocab, ForwardBatch's output
-	retireErr                     error     // a device reset Retire could not make; see Retire
+	retireErr                     error     // a device reset Retire or Reset could not make; see Retire
+	allRows                       []int     // 0..nseq-1, the rows Reset zeroes on a device
 	// placing is true while SetDeviceLayers offers blocks, when WithPlacement's
 	// map applies; placeErr is what it could not do.
 	placing  bool
@@ -883,7 +887,7 @@ func (s *State) Close() error {
 	// placed on gets its room back with the State: its text sessions' blocks
 	// run every token. Through the session view, so another session's hold on
 	// the same blocks keeps them there.
-	if s.vis != nil && s.ld != nil && s.devCount() > 0 {
+	if (s.vis != nil || s.enc != nil) && s.ld != nil && s.devCount() > 0 {
 		s.SetGPULayers(s.lo)
 	}
 	// The session's history on the device goes back to the tier, which keeps
@@ -909,6 +913,10 @@ func (s *State) Close() error {
 				s.m.hostRuns(li, li+1, -1)
 			}
 		}
+	}
+	// An encoder segment's JIT is its Embedder's to close.
+	if s.enc != nil {
+		return nil
 	}
 	// A vision State's prompt buffers are the tower's shape, which no text
 	// State could take; and a JIT it borrowed is the text State's to close.
@@ -993,7 +1001,7 @@ func (s *State) SetDeviceLayers(d nn.Device, max int) error {
 		}
 	}
 	// A borrowed JIT is the text State's, attached to its device by it.
-	if s.vis == nil || !s.vis.borrowed {
+	if !s.borrowsJIT() {
 		s.jit.SetDevice(d)
 	}
 	s.clearOnDev()
@@ -1092,7 +1100,7 @@ func (s *State) SetDeviceLayers(d nn.Device, max int) error {
 		// second State would inherit the first's sample and run the same
 		// token with different kernels
 		// (TestHybridSecondSessionMatchesTheFirst).
-		if s.vis == nil || !s.vis.borrowed {
+		if !s.borrowsJIT() {
 			s.jit.SetDevice(ld)
 		}
 	}
@@ -1406,6 +1414,9 @@ func (s *State) placeHeadOn(name string) bool {
 func (s *State) layerWeightsAt(li int) nn.LayerWeights {
 	if s.vis != nil {
 		return s.visWeights(li)
+	}
+	if s.enc != nil {
+		return s.encWeights(li)
 	}
 	l := &s.m.layers[li]
 	qn, kn := s.qkNorms(li)
@@ -1815,6 +1826,9 @@ func (s *State) planFor(li int) *nn.LayerPlan {
 	plan := s.plan
 	if s.vis != nil {
 		return s.visPlan(li)
+	}
+	if s.enc != nil {
+		return s.encPlan(li)
 	}
 	// The sinks and the mixture biases are resident vectors read at build(),
 	// not page bytes, so asking about them here still needs no page-in.
@@ -3057,6 +3071,20 @@ func (s *State) Reset() {
 	for i := 0; i < s.nseq; i++ {
 		s.ResetRecurrent(i)
 	}
+	// A placed linear block keeps its running state on the device, and the
+	// next prompt would start from the last one's summary: zeroed there too,
+	// as Retire zeroes a row's. A failure is the next call's error.
+	if s.recurrent() && s.devLinear() {
+		if len(s.allRows) != s.nseq {
+			s.allRows = make([]int, s.nseq)
+			for i := range s.allRows {
+				s.allRows[i] = i
+			}
+		}
+		if rr, ok := s.ld.(nn.RecRowsDevice); !ok || !rr.ResetRecRows(s.allRows) {
+			s.retireErr = fmt.Errorf("model: the recurrent state on the device could not be reset")
+		}
+	}
 	s.kv.reset()
 	s.kvErr.Store(nil)
 	s.kvSkipped = 0
@@ -3136,6 +3164,10 @@ func (s *State) Forward(token int32) ([]float32, error) {
 	defer s.m.enterPager()()
 	if int(token) < 0 || int(token) >= s.c.NVocab {
 		return nil, errToken{token, s.c.NVocab}
+	}
+	if err := s.retireErr; err != nil {
+		s.retireErr = nil
+		return nil, err
 	}
 	s.kv.note(s.bpos[0], token)
 	s.tok = token

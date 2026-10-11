@@ -3111,8 +3111,9 @@ Go's stdlib lacks, so scripts/genunicode now emits llama.cpp's pinned 15.1
 `unicode_ranges_nfd` beside the existing tables (every existing table
 byte-identical, so no token id moved).
 
-Not done: the device tier (an encoder offers no block; a bidirectional decoder
-refuses a device by name), the Unigram tokenizer (C12c: bge-m3,
+Not done: a bidirectional decoder on a device (it embeds on the host; the
+encoders run there, `docs/design/decision-models.md` section 10), the Unigram
+tokenizer (C12c: bge-m3,
 paraphrase-multilingual, granite-embedding, snowflake-arctic-embed2),
 nomic-bert-moe, rerankers (pooling_type 4 is refused at conversion), and input
 longer than the position table (refused, not truncated as sentence-transformers
@@ -3271,13 +3272,10 @@ on the greedy ratchet (4 and 9 tokens against the recorded 20).
 Both HTTP shims accept tools: OpenAI `tools` / `tool_calls` / `role: "tool"`,
 Anthropic `tools` / `tool_use` / `tool_result`, streaming and not. The list is
 handed to the model's chat template as `tools` (`Model.ChatIDsTools`), so the
-prompt is the one the model was trained on; the reply is parsed by
-`model.ParseToolCalls`, which knows two shapes -- Hermes `<tool_call>{...}`
-(Qwen2.5/Qwen3) and a bare JSON call opening the reply (Llama-3.x
-`{"name", "parameters"}`, Mistral v0.3's array after a control token the
-detokenizer drops) -- and only takes a call to a DECLARED name, so an answer in
-JSON stays an answer. A stream sends text until a call begins
-(`model.ToolCallHold`) and the call as one tool-call frame at the end.
+prompt is the one the model was trained on; the reply is read in the model's
+own tool syntax (below), and only a call to a DECLARED name is taken, so an
+answer in JSON stays an answer. A stream sends the text that cannot become a
+call as it arrives, and each call as soon as its markup closes.
 
 **The prompt is held to transformers byte for byte**
 (`model.TestToolPromptMatchesTransformers`, goldens from `scripts/toolgold.py`
@@ -3305,10 +3303,59 @@ doubles the OPENING brace -- which the parser tolerates. Llama-3.2-1B makes the
 first call correctly and then calls again instead of answering from the result,
 on a prompt byte-identical to transformers'; that is the 1B model.
 
-Not built: constrained decoding (a grammar that forces valid calls),
-`tool_choice` "required"/named (rendered as "auto"), gpt-oss's harmony tool
-channel, Mistral's newer `[TOOL_CALLS]name[ARGS]{...}` form, and tools on the
-ConnectRPC surface (a proto change).
+### Each family's syntax, and forced calls
+
+The first parser knew two shapes, Hermes `<tool_call>{...}` and a bare JSON
+call opening the reply. A model's syntax is now a property read from its chat
+template (`model.ToolSyntaxOf`) -- the markup the template writes or describes
+is what the weights were trained to emit -- rather than every parser tried on
+every reply. Twenty-four are read (`engine/model/toolsyntax.go`): Hermes, the
+Llama 3.x JSON reply, the Qwen3-Coder XML (Qwen3.5, Nemotron 3), Seed-OSS,
+GLM-4.5+ and Ling, MiniMax-M2, DeepSeek V3/R1 and V3.1/V3.2 tool tokens,
+DeepSeek V4's DSML, Kimi-K2's sections, Kimi-K3's XTML, harmony, Mistral v0.3
+and the v11+ `[TOOL_CALLS]NAME[CALL_ID]ID[ARGS]{...}`, Granite 3, Nemotron-H,
+Command R7B and Command-R, Apertus, Phi-4-mini, Llama 4 and LFM2 Python calls,
+Hunyuan, Gemma 4. The source of each is the family's own template; vLLM's
+tool parsers were the prior art where a template only describes the call
+(Phi-4-mini, LFM2).
+
+**The reply is read raw.** Several syntaxes are written in control tokens the
+detokenizer drops (`[TOOL_CALLS]`, harmony's `<|channel|>` header that carries
+`to=functions.X`, Kimi's section tokens), so the server hands the shims a
+`model.ToolStream` that reads the token ids: the raw text spells every control
+token out (`tok.Vocab.Literal`), and the text shown is the chat text, cut
+around the calls. With the raw text replaced by Decode's,
+`TestToolStreamReadsControlTokens` loses the gpt-oss and Mistral calls.
+
+**tool_choice "required" and a named tool force a call** through the
+structured-output machinery, not a second one: `Model.ToolGrammar` writes the
+family's own spelling around the tool's JSON Schema (an XML family's
+arguments one by one, a string's value as text up to its closing tag), the
+server compiles it with the same matcher, and the mask is the same generated
+`nn.Add32JIT` bias. The tokenizer the tool grammar is matched over offers the
+syntax's marker control tokens by their literal text; a structured-output
+grammar never sees them, so a JSON string cannot spell `<|call|>`. A model
+that reasons first writes its block before the call: inside it when the
+prompt opened one (DeepSeek-R1), never when the prompt wrote it closed
+(thinking switched off), optional when the template writes one -- an earlier
+version allowed the block whenever the template mentioned `</think>`, and
+Qwen3.5 with thinking off wrote its prose answer, then `</think>`, then the
+call. A schema keyword the converter does not build constrains that tool's
+arguments to any JSON object rather than refusing the request; a family that
+writes arguments one by one refuses it instead.
+
+Live, greedy, six P-cores, laptop: on a prompt each answers in text
+(tool_choice auto), Qwen3-0.6B, Qwen3.5-0.8B, gpt-oss-20B and
+DeepSeek-R1-Distill-Qwen-1.5B call under "required" and under a named tool,
+both APIs, streaming and not, arguments valid under the schema
+(`server.TestToolChoiceForcesACall`). Llama-3.2-1B calls `get_weather`
+whatever it is asked, so its discriminating arm is the named `get_time`.
+With the constraint disabled, Qwen3 answers in text under "required" and
+Llama calls the wrong tool under the named choice.
+
+Not built: arguments streamed in pieces (a call goes out whole when its
+markup closes), MiniMax-M3's argument tags, Tencent Hy3's templated tokens,
+functionary, and tools on the ConnectRPC surface (a proto change).
 
 ## The format tier -- four silent dequantization traps, hermetic goldens, and the GGUF trust boundary
 
@@ -9254,3 +9301,17 @@ The engine keeps a compressed block's pending compressor inputs in the
 window's own cached rows, so the window must cover what the compressor
 still reads: the HCA rate, and two CSA windows (the overlap). DeepSeek V4's
 own (128 against 128 and 8) does; another is refused by name.
+
+## Decision models
+
+Laya (ModernBERT and its decision head), d1 and Lev (label-token readouts
+over lfm2 and qwen35) answer TypeSafe's `/v1/systemone`. The research, the
+readouts, the divergences and the gates with their numbers are in
+`docs/design/decision-models.md` (sections 8 and 9). The bisection that
+found the one bug on the way: the fixture's head runs 2 heads of 64 beside an
+encoder of 4 heads of 32, and `JIT.AddAttn` keeps ONE default attention set,
+so registering the head's width replaced the encoder's and every encoder
+layer attended at the wrong width (layer 0 off from its first block); the
+encoder and the head now each hold the set for their own geometry
+(`JIT.AttnSetFor`). The real checkpoint could not have shown it: 1024 wide at
+16 heads, both widths are 64.

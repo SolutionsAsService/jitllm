@@ -1,6 +1,6 @@
 package cpu
 
-import "github.com/samyfodil/jitllm/jit/gpu/kernels"
+import "github.com/jitllm/jitllm/jit/gpu/kernels"
 
 // ActKind is the activation a kernel bakes in. It is the kernels package's
 // type, so the host emitters and the device kernels name the same set with the
@@ -23,6 +23,8 @@ const (
 	ActSqrtSoftplus = kernels.ActSqrtSoftplus
 	// ActSitu is Kimi-K3's: both operands bounded by a scaled tanh.
 	ActSitu = kernels.ActSitu
+	// ActGELUErf is GELU with erf, transformers' and torch's default.
+	ActGELUErf = kernels.ActGELUErf
 )
 
 // Ungated and Gated are kernels.Ungated and kernels.Gated.

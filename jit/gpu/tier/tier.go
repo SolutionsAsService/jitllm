@@ -21,11 +21,11 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/samyfodil/jitllm/format/quant"
+	"github.com/jitllm/jitllm/format/quant"
 
-	"github.com/samyfodil/jitllm/engine/nn"
-	"github.com/samyfodil/jitllm/jit/gpu/backend"
-	"github.com/samyfodil/jitllm/jit/gpu/kernels"
+	"github.com/jitllm/jitllm/engine/nn"
+	"github.com/jitllm/jitllm/jit/gpu/backend"
+	"github.com/jitllm/jitllm/jit/gpu/kernels"
 )
 
 type resident struct {
@@ -246,6 +246,13 @@ type Config struct {
 	// KVStreamPages forces how many evicted pages one pass over evicted
 	// history uploads (kvevict.go); 0 is every free page the layer has.
 	KVStreamPages int
+	// StagedPassKeys is the most keys one staged paged attention pass
+	// covers; 0 sizes it to a 64 MiB plane (devStagedPlane). The staged plan's score and weight
+	// planes are rows x heads x keys, so a plan sized for the context would
+	// hold gigabytes of a card that a model's histories need (8 GiB of a
+	// V100 for a 256-row chunk of a 131072-position Llama 3.1); a row deeper
+	// than this goes in passes over its pages, folded (pagedstream.go).
+	StagedPassKeys int
 	// FlashSplit sets parallel key partitions for generated attention (0/1: one).
 	// Configure before placing layers; each partition needs a small partial buffer.
 	FlashSplit int
@@ -612,6 +619,9 @@ type Stats struct {
 	// SampleReads counts tokens whose sampler ran on the device and read
 	// back k candidates instead of the vocabulary (nn.Head.SampleK).
 	SampleReads int
+	// PickReads counts heads whose label pick ran on the device and read
+	// back the picked logits instead of the vocabulary (nn.Head.Pick).
+	PickReads int
 	// SampleLaunches counts the sampler's launches: two top-k passes a
 	// token, and the penalty's when it runs.
 	SampleLaunches int
@@ -764,6 +774,9 @@ type Stats struct {
 	KVWindowReleased int
 	// KVStreamPasses counts attention passes over evicted history.
 	KVStreamPasses int
+	// StagedPasses counts attention passes of streamed calls: those over
+	// evicted history and those past Config.StagedPassKeys on the card.
+	StagedPasses int
 	// PipelinePieces counts the pieces of pipelined prompt chunks this device
 	// ran (GPU.pipeline).
 	PipelinePieces int
@@ -981,6 +994,7 @@ func (s *Stats) add(o Stats) {
 	s.RagGateFused += o.RagGateFused
 	s.RagHeadOne += o.RagHeadOne
 	s.SampleReads += o.SampleReads
+	s.PickReads += o.PickReads
 	s.SampleLaunches += o.SampleLaunches
 	s.GroupedMoE += o.GroupedMoE
 	s.GroupedFloat += o.GroupedFloat
@@ -1059,6 +1073,7 @@ func (s *Stats) add(o Stats) {
 	s.KVEvictions += o.KVEvictions
 	s.KVWindowReleased += o.KVWindowReleased
 	s.KVStreamPasses += o.KVStreamPasses
+	s.StagedPasses += o.StagedPasses
 	s.PipelinePieces += o.PipelinePieces
 	s.SubsBeside += o.SubsBeside
 	s.RanBeside += o.RanBeside
@@ -1367,7 +1382,10 @@ type devShared struct {
 	cnt backend.AllocCounter
 	// rounding is the driver's page rounding charged so far (settleRounding).
 	rounding uint64
-	winDepth int
+	// kvPromise is the positions of history a scheduler has admitted rows
+	// for and they have not yet taken (GPU.PromiseKV, kvroom.go).
+	kvPromise int
+	winDepth  int
 	// geoUsed says a split plan was ever placed here (gemma4.go).
 	geoUsed bool
 	// reserving is set while reserveScratch probes widths, so prepBatch's
@@ -1478,8 +1496,10 @@ type devShared struct {
 	// over the head's rows and, per k, the two top-k passes (sample.go).
 	samplePenK backend.Kernel
 	sampleKs   map[int]sampleKerns
-	hostA      []uint32
-	hostAX     []float32
+	// pickK is the label pick's gather over the head's rows (pick.go).
+	pickK  backend.Kernel
+	hostA  []uint32
+	hostAX []float32
 
 	// Host-side scratch, reused rather than allocated per matvec. It is per
 	// device even though it is host memory, because lastX/staged say "the
@@ -2148,6 +2168,8 @@ func (g *devTier) Close() {
 	}
 	g.closeSample()
 	g.lane0.freeSample()
+	g.closePick()
+	g.lane0.freePick()
 	for _, k := range g.recCopies {
 		k.Close()
 	}

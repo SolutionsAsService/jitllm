@@ -93,8 +93,10 @@ correctness gates -- a gate that never runs a model does not cover it
   are deterministic. `perf stat` instructions above one thread are NOT a work
   measure: the pool spins, so a spinning worker's count tracks how long the
   region took, which on a clamped box is temperature.
-- **An over-committed row gives both arms the same ceiling by shrinking the
-  cgroup, never by `-maxmem` on one arm.** llama.cpp mmaps and reaches the whole
+- **A row runs outside any memory cgroup** (RULE 3). The one exception is an
+  over-committed row, where the ceiling IS the experiment: **it gives both arms
+  the same ceiling by shrinking the cgroup, stated with the row, never by
+  `-maxmem` on one arm.** llama.cpp mmaps and reaches the whole
   cgroup through the page cache, while jitllm self-limits to `sched.MemBudget()`;
   a row where one arm holds 14 GiB of weights and the other 26 is not an engine
   comparison.
@@ -185,10 +187,13 @@ budget 6 GC cycles, 8.99 GiB 648).
 Evidence: `docs/engineering-history/scheduling-and-measurement.md` ("THE GO
 COLLECTOR WAS 42% OF THE ENGINE'S CPU", "RULE 2f as it stood in AGENTS.md").
 
-## RULE 3: every heavy job runs under `scripts/cap`. No exceptions, including subagents.
+## RULE 3: on the developer's machine, every heavy job runs under `scripts/cap`. Agents included.
 
     ./scripts/cap 8G -- taskset -c 0,2,4,6,8,10 go test ./... -count=1
 
+`scripts/cap` protects the machine the developer is working on from OOM:
+systemd-oomd has killed the desktop session three times here, and MemoryHigh
+throttling keeps the pressure that triggers it inside the job's cgroup.
 `MemoryMax=8G MemoryHigh=7G MemorySwapMax=0`. Use `24G` for a model over ~16 GB
 (cgroup v2 charges a mmap'd file's page cache to the cgroup) and for `-race`:
 the detector's shadow memory pushes a suite that converts a GGUF past
@@ -196,16 +201,27 @@ the detector's shadow memory pushes a suite that converts a GGUF past
 reporting anything. A slow `-race` run is a cap question before it is a code
 question.
 
+**It is not a measurement tool.** A benchmark host (a server, a rented runner)
+runs both engines bare, with only the measurement lock; a comparison row never
+runs inside a memory cgroup, which charges llama.cpp's page cache and throttles
+it while jitllm's O_DIRECT reads are not charged that way.
+`scripts/vs-llamacpp.sh` takes the lock itself and runs no cgroup; on the
+laptop the hook still wraps it in `scripts/cap`, and the script reuses that
+lock. A container with no writable cgroup runs uncapped and says so, never
+under `ulimit -v`, which aborts the CUDA runtime.
+
 There is no bypass variable in `scripts/cap`, on purpose. `JITLLM_NO_CAP=1`
 belongs to the HOOK, where it lets a command run without this script and is
 visible in the command line; a bypass that makes a capped-looking command
-uncapped is a trap. systemd-oomd has killed the desktop three times here.
+uncapped is a trap.
 
-1. **Every prompt dispatching an agent that may build or measure must contain the
-   cap command verbatim.** An agent that has not been told will not do it.
+1. **Every prompt dispatching an agent that may build or measure on the
+   developer's machine must contain the cap command verbatim.** An agent that
+   has not been told will not do it.
 2. **Never fan out parallel measurement agents.** Measure serially, in the main
    loop.
-3. `scripts/cap` takes a `flock`: measurements EXCLUSIVE, builds SHARED. It
+3. The lock (`$TMPDIR/jitllm-cap.lock`, `flock`): measurements EXCLUSIVE,
+   builds SHARED, taken by `scripts/cap` and by the comparison scripts. It
    protects this repo only — another project's `go test` is invisible to every
    gate here and will land mid-round.
 4. **Kill background jobs when the work that spawned them finishes.** Work
@@ -213,7 +229,8 @@ uncapped is a trap. systemd-oomd has killed the desktop three times here.
    knows.
 
 Evidence: `docs/engineering-history/scheduling-and-measurement.md` ("RULE 3 as
-it stood in AGENTS.md").
+it stood in AGENTS.md", "The cap is the developer machine's, not a
+measurement's").
 
 ## RULE 4: no perf floors inside correctness tests.
 
@@ -377,7 +394,8 @@ Further rules for every entry:
   the code space down (`format/jlm/archdense.go`), the flagships counting up from
   44 (`format/jlm/archflagship.go`), the state-space families from 100
   (`format/jlm/archssm.go`), the vision families from the top down
-  (`format/jlm/visionfam.go`), the vision-language families' text models up
+  (`format/jlm/visionfam.go`), the encoders after BERT from 150
+  (`format/jlm/archencoder.go`), the vision-language families' text models up
   from 200 (`format/jlm/archvision.go`). `Arch.Valid` asks the name tables.
 
 ### The architectures
@@ -426,7 +444,8 @@ A new architecture adds one row here and its narrative in
 | deepseek4 | four hyper-connection streams (stream-major, Sinkhorn-mixed per row); one key head that is the value, rotated on its last NRot dimensions and back after the softmax; sinks, a grouped low-rank output and a window on every block; compressed blocks attend to pooled entries in a second paged history (HCA every visible entry, CSA the indexer's top-k); sqrt(softplus) gating with hash-routed blocks; clamped SwiGLU | `TestDeepseek4MatchesTransformers`, `TestDeepseek4FeaturesAreLoadBearing`, `TestDeepseek4OnEveryDevice`, `TestDeepseek4DeviceRunsTheChunkWhole` | MC "deepseek4" |
 | kimi-k3 (`KimiK3ForConditionalGeneration` too: the release streamed from safetensors) | Kimi-Linear's KDA and NoPE MLA with residual attention (checkpoint streams mixed per sublayer by a softmax over normed scores, stream-major), a latent mixture beside full-width shared experts, situ, an MLA output gate, a full-rank KDA gate and a decay lower-bounded when the file states a bound (Kimi-Linear's softplus when not); a mixed quantization's q, k and v re-stored as one Q8_0 projection; from safetensors, text_config through configOf as llama.cpp's keys, compressed-tensors `mxfp4-pack-quantized` experts moved byte for byte into the container's MXFP4 (`convert/hfmxfp4.go`, every other compressed-tensors scheme refused by name), the release's zero-padded A_log cut to its heads, the vision tower named and not carried | `TestKimiK3MatchesReference`, `TestKimiK3FeaturesAreLoadBearing`, `TestKimiK3OnEveryDevice`, `TestKimiK3DeviceRunsTheChunkWhole`, `TestKimiK3RealMatchesReference` (trained Kimi-K3-0.40B, from GGUF and safetensors, and its MXFP4 release-format checkpoint), `convert.TestK3JoinsAMixedQuantization`, `convert.TestK3SafetensorsMatchesItsGGUF`, `convert.TestK3MXFP4ExpertsMatchTheGGUF`, `convert.TestMXFP4RepackIsLossless`, `convert.TestPlanIsTheWrite` | MC "kimi-k3", "Real trained weights", "The release from safetensors" |
 | mamba2, granitehybrid, nemotron_h (nemotron_h_moe), falcon-h1, lfm2 (lfm2moe), mamba (FalconMamba), jamba | state-space layers as a layer kind (`jlm.LayerSSD`): the delta rule's state with the key dot removed; lfm2's short convolutions; Mamba-1's selective scan | `TestSSMFamiliesMatchTransformers`, `TestSSDFeaturesAreLoadBearing`, `TestSSMFamiliesOnEveryDevice`, `TestSSMFamiliesPageWithTheSameAnswer`, `TestSSMRealModelsTeacherForced`, `TestBatchSeamMovesCarryEveryRowSSM` | MC "The state-space hybrids" |
-| bert, nomic-bert | embedding encoders (post-norm, `engine/model/encoder.go`); qwen3-embedding and EmbeddingGemma are qwen3/gemma3 with pooling bits | `TestEmbeddingsMatchReference`, `TestEmbeddingGateDiscriminates` | MC "Embedding models" |
+| modern-bert (Laya) | a pre-norm encoder with no biases, GeGLU, NEOX rotary at two bases, global every third layer and a symmetric window on the rest; Laya's decision head (a type row per question type, two biased pre-norm blocks at max(1, d/64) heads, a scorer at each option's [MASK]) after it. On the device as non-causal blocks through an encoder segment's placement (`engine/model/encdev.go`) | `TestLayaMatchesReference` (random fixture and the real checkpoint, held to Laya's own code; host and every device), `TestLayaFeaturesAreLoadBearing` (host and every device), `TestLayaPagesWithTheSameAnswer`, `TestDecisionMatchesLlamaCpp`, `TestDecisionOnEveryDevice`, `TestDecisionRelocatesBetweenDevices`, `TestDecisionEncodeDoesNotAllocate` | MC "Decision models"; `docs/design/decision-models.md` |
+| bert, nomic-bert | embedding encoders (post-norm, `engine/model/encoder.go`; on the device with the norms after the residual adds, `nn.LayerPlan.PostResidNorm`); qwen3-embedding and EmbeddingGemma are qwen3/gemma3 with pooling bits | `TestEmbeddingsMatchReference`, `TestEmbeddingGateDiscriminates`, `TestEmbeddingsOnEveryDevice` | MC "Embedding models" |
 | clip | the vision tower's blocks (see the projectors) | the projectors' gates | MC "Vision as blocks" |
 
 ### The projectors
@@ -530,6 +549,11 @@ The recorded divergences (each with its measurement in the evidence file):
 | MiniCPM-V's image ids, resize and slicing | three departures from the processor | the processor | MC "MiniCPM-V" |
 | Kimi-K3-0.40B-MXFP4's dynamic MXFP4 input activations | -- (its converter moves the weights alone) | the release's W4A16: the experts' weights moved, their activations the engine's MXFP4 kernels' own | MC "The release from safetensors" |
 | the chat template | the GGUF's | the publisher's when given (`-chat-template`) | MC "The chat template, applied" |
+| a decision request without `instructions` | refused | TypeSafe's protocol: optional, asked by the question's id (Clef's code, lev's template) | `docs/design/decision-models.md` |
+| Laya's confidence | TypeSafe's formula | Laya's code: one minus normalised entropy | same |
+| Laya's sequence | the template rendered whole, then re-cut | `rl_common.build_sequence`: each piece tokenized alone (token for token equal on the gates' requests) | same |
+| Laya's GELU (GeGLU and the scorer) | tanh in the GeGLU, erf in the scorer | the reference: erf in both (`ActGELUErf`, generated on every tier; worst logit 1e-6 on the f32 fixture, where tanh was 3e-4) | same |
+| Laya's state cut | the context | the context: the GGUF does not carry the reference's max_len (512) | same |
 | the stop set | EOS, a GGUF's eot, eom and FIM ids, and its name list | llama.cpp's from a GGUF (`tok.TestStopSetMatchesLlamaCpp`); from safetensors transformers' generation_config eos list beside the names | MC "The stop set: what the file states, carried into the container" |
 
 ## RULE 8: every op a token runs is generated code. There is no interpreted tier.

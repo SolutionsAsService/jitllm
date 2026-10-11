@@ -3,7 +3,7 @@ package tier
 import (
 	"fmt"
 
-	"github.com/samyfodil/jitllm/engine/nn"
+	"github.com/jitllm/jitllm/engine/nn"
 )
 
 // A tier is one model. Its blocks are keyed by index (GPU.own, devTier.layers)
@@ -142,6 +142,8 @@ func (g *devTier) releaseModel() {
 	sw := g.scratchWin()
 	g.closeSample()
 	g.lane0.freeSample()
+	g.closePick()
+	g.lane0.freePick()
 	sw.close()
 	// The capacity, the widest block and the retune mark are the model's
 	// plan, read the first time a device sees one.
