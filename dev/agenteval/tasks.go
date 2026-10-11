@@ -239,7 +239,7 @@ func httpGet(url string) (string, error) {
 	defer r.Body.Close()
 	b, err := io.ReadAll(r.Body)
 	if r.StatusCode != http.StatusOK {
-		return string(b), fmt.Errorf("%s: %s", url, r.Status)
+		return string(b), fmt.Errorf("%s: %s: %s", url, r.Status, strings.TrimSpace(string(b)))
 	}
 	return string(b), err
 }
@@ -253,7 +253,7 @@ func httpPost(url, body string) (string, error) {
 	defer r.Body.Close()
 	b, err := io.ReadAll(r.Body)
 	if r.StatusCode != http.StatusOK {
-		return string(b), fmt.Errorf("%s: %s", url, r.Status)
+		return string(b), fmt.Errorf("%s: %s: %s", url, r.Status, strings.TrimSpace(string(b)))
 	}
 	return string(b), err
 }
