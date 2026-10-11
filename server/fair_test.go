@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"fmt"
 	"math/rand"
 	"slices"
@@ -334,6 +335,33 @@ func timeSliced(t *testing.T, dev string, violate bool) (parks int64, apart int)
 		}
 	}
 	return parks, apart
+}
+
+// TestARefusedParkFailsNoRequest: at level 100 with six requests on two rows,
+// every time-slice park is refused, as a session whose history will not come
+// home refuses it. The row keeps its place and runs another slice, and every
+// request completes with every token asked for. Before, the refused park
+// ended the row with the device's error: a request failed for the queue's
+// sake (TestSixtyFourRequestsWhoseHistoryStreams on a 4 GiB card).
+func TestARefusedParkFailsNoRequest(t *testing.T) {
+	level := 100
+	e, lm, c := fairEngine(t, "", Config{MaxBatchRows: 2, Fairness: &level})
+	lm.loop.parkFault = errors.New("injected: the session's history would not come home")
+	gen := 3 * fairQuantum(level)
+	got := sendTogether(t, e, lm, c, fairRequests(6, gen))
+	refused := lm.loop.stats.parkRefusals.Load()
+	t.Logf("%d park(s) refused, %d parked", refused, lm.loop.stats.parks.Load())
+	if refused == 0 {
+		t.Fatal("no park was asked for: the gate refused nothing")
+	}
+	for i, g := range got {
+		if g.err != nil {
+			t.Fatalf("request %d failed because a park was refused: %v", i, g.err)
+		}
+		if len(g.ids) != gen {
+			t.Fatalf("request %d: %d of %d tokens", i, len(g.ids), gen)
+		}
+	}
 }
 
 // TestTimeSlicesBoundTheWait: six requests on two rows. At level 100 every
