@@ -20,7 +20,7 @@ import (
 // probability, so they part in the last bits; the bound between them is the
 // device-against-host band, and the argmax must agree. Stats.FlashPrefills must
 // count every layer of every chunk on the flash arm and nothing on the other. A
-// card whose attention does not take sm_70's kernels skips by name.
+// card with no one-kernel form (sm_70's, or Metal's tile kernel) skips by name.
 func TestFlashPrefillMatchesThreeKernels(t *testing.T) {
 	for _, name := range []string{"Llama-3.2-1B-Instruct-Q4_K_M", "Qwen3-0.6B-Q8_0"} {
 		t.Run(name, func(t *testing.T) { flashPrefillMatches(t, name) })
@@ -76,7 +76,7 @@ func flashPrefillMatches(t *testing.T, name string) {
 	trio, trioN := run(true)
 	flash, flashN := run(false)
 	if flashN == 0 && trioN == 0 {
-		t.Skip("this device's batched attention is not sm_70's m8n8k4: there is no one-kernel arm to compare")
+		t.Skip("this device builds no one-kernel prompt attention: there is no arm to compare")
 	}
 	chunks := (len(ids) + 511) / 512
 	if trioN != 0 || flashN != chunks*m.Cfg.NLayer {

@@ -856,7 +856,8 @@ type Stats struct {
 	// HeadFolds counts batched chunks that ran the output projection on
 	// their last row inside their own submission.
 	HeadFolds int
-	// FlashPrefills counts batched attention launches of kernels.FlashPrefill70.
+	// FlashPrefills counts batched attention launches of a one-kernel form
+	// (kernels.FlashPrefill70, FlashPrefillTile), paged or not.
 	FlashPrefills int
 	// VisionAttnChunks counts the query chunks vision blocks ran their
 	// attention in (visionattn.go) -- the selection check that a large image's
