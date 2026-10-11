@@ -30,6 +30,8 @@ matching evidence file and leave a pointer.
 | the designs: block paging, device sessions, KV paging, vision as blocks, the coverage survey | `docs/design/` |
 | which models a test reads, and every model-selecting test variable | `docs/testing.md` |
 | every architecture, class and projector that converts, and the models each covers | `docs/models.md` (generated from the converter's lists) |
+| what this build converts, runs and serves, by machine; `jitllm doctor` | `docs/capabilities.md` (`docs/capabilities.json` is generated) |
+| which checks a change needs, and running them | `docs/checks.md` (`go run ./scripts/checks <paths or range>`) |
 
 Those files carry the reasoning and the failed attempts. Skipping them is how an
 idea gets proposed for the fourth time; several have a section that exists
@@ -331,7 +333,9 @@ conversion with `ErrNotImplemented`. Adding one is the user's decision.
 `docs/models.md` is generated from those lists, never written by hand: an entry
 adds its models' line to `internal/modelsdoc/describe.go` (the generator refuses
 a name without one) and reruns `go run ./scripts/genmodels docs/models.md`;
-`srcgate.TestModelsDocIsGenerated` fails until it does.
+`srcgate.TestModelsDocIsGenerated` fails until it does. The same lists feed
+`docs/capabilities.json` (`cd server && go run ./cmd/gencapabilities`;
+`srcgate.TestCapabilitiesDocIsGenerated`).
 
 **Scope is jitllm's only defence.** llama.cpp has 176 `LLM_ARCH_` cases and 50
 graph builders; Ollama had a funded team, covered ~21 architectures, and deleted
