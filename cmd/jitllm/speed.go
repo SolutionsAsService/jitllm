@@ -435,6 +435,7 @@ func ttftText(m *model.Model, p int) string {
 func ttftRun(m *model.Model, attach func(int) (*model.State, error), p, reps int, t00 time.Time, tOpen, tDev time.Duration) error {
 	text := ttftText(m, p)
 	var tAttach time.Duration
+	var compiled, tuned int64
 	first := func() (time.Duration, int, error) {
 		t0 := time.Now()
 		ids := m.Vocab.Encode(text, true)
@@ -444,11 +445,15 @@ func ttftRun(m *model.Model, attach func(int) (*model.State, error), p, reps int
 		}
 		tAttach = time.Since(t0)
 		defer st.Close()
+		// Ready: the blocks are placed, every kernel compiled and the tuners
+		// done. What follows, to the first token, must do none of either.
+		c0, u0 := backend.Compiles(), tier.TuneTrials()
 		lg, err := st.Prefill(ids)
 		if err != nil {
 			return 0, 0, err
 		}
 		model.Greedy(lg)
+		compiled, tuned = backend.Compiles()-c0, tier.TuneTrials()-u0
 		return time.Since(t0), len(ids), nil
 	}
 	el, _, err := first()
@@ -460,6 +465,16 @@ func ttftRun(m *model.Model, attach func(int) (*model.State, error), p, reps int
 	ms := func(d time.Duration) float64 { return float64(d.Microseconds()) / 1e3 }
 	fmt.Printf("cold: open %.0f ms, devices %.0f ms, attach %.0f ms (placement and upload), prompt %.0f ms\n",
 		ms(tOpen), ms(tDev), ms(tAttach), ms(el-tAttach))
+	// The two rows vs-llamacpp.sh reads: load is open to ready (the container
+	// opened, the devices up, the kernels compiled, the tuners run, the blocks
+	// placed and uploaded); ttft (model loaded) is ready to the first token of
+	// the process's first prompt, tokenizing excluded as llama.cpp's prompt
+	// eval excludes it.
+	if err := readyHonest(compiled, tuned); err != nil {
+		return err
+	}
+	fmt.Printf("load %.1f ms (open %.0f + devices %.0f + attach %.0f)   ttft-loaded %.1f ms (ready to the first token; %d compiles, %d tuner trials after ready)\n",
+		ms(tOpen+tDev+tAttach), ms(tOpen), ms(tDev), ms(tAttach), ms(el-tAttach), compiled, tuned)
 	var warm []float64
 	ntok := 0
 	for r := 0; r < reps; r++ {
@@ -487,6 +502,16 @@ func warmHonest(st *model.State, n int, logits []float32, vocab int) error {
 		return fmt.Errorf("speed: the timed prompt ran %d of %d rows and ended at position %d", st.PrefillRows(), n, st.Pos())
 	case len(logits) != vocab:
 		return fmt.Errorf("speed: the timed prompt returned %d logits, not the %d of a row read back", len(logits), vocab)
+	}
+	return nil
+}
+
+// readyHonest refuses a ready mark that came too early: a kernel compiled or
+// a tuner trial timed between ready and the first token would put load work
+// inside the ttft row.
+func readyHonest(compiled, tuned int64) error {
+	if compiled != 0 || tuned != 0 {
+		return fmt.Errorf("speed: %d kernel compile(s) and %d tuner trial(s) ran after the model was ready", compiled, tuned)
 	}
 	return nil
 }

@@ -6075,23 +6075,9 @@ func (g *devTier) layersOnce(sid uint64, bs *blockScratch, lo, hi, pos int, x, c
 			return refuse("a batched submission of %d rows with a %v head", bs.rows, hb.head.t)
 		}
 		if hb.spanK == nil {
-			kk, e := kernels.CopySpan(bs.p.NEmbd)
-			var k backend.Kernel
-			if e == nil {
-				k, e = g.dev.Compile(kk)
-			}
-			var ob backend.Buf
-			if e == nil {
-				w := g.scratchWin() // the scratch's own word (scratch.go)
-				if ob, e = g.dev.Alloc(4); e != nil {
-					k.Close()
-				}
-				w.close()
-			}
-			if e != nil {
+			if e := g.spanKernel(hb); e != nil {
 				return refuse("the folded head's row copy: %v", e)
 			}
-			hb.spanK, hb.spanOff = k, ob
 		}
 	}
 	if head != nil && (hb == nil || hb.head == nil || !hb.head.ok) {

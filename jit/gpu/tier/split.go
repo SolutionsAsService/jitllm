@@ -7,6 +7,7 @@ import (
 	"os"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jitllm/jitllm/jit/gpu/backend"
@@ -134,6 +135,13 @@ func (g *devTier) tuneSplit(q kernels.Quant, rows, k int, r *resident) int {
 	return best
 }
 
+var tuneTrials atomic.Int64
+
+// TuneTrials counts the timed trials the device tuners have run in this
+// process (the split tuner, the sequence retunes, the backend probe): what a
+// benchmark reads to show its timed span tuned nothing.
+func TuneTrials() int64 { return tuneTrials.Load() }
+
 // splitTrial is one timed candidate of tuneSplit; a gate swaps it to count
 // trials and fix the winner.
 var splitTrial = (*devTier).timeSplitMode
@@ -154,6 +162,7 @@ func (g *devTier) tuneKey(shape string) string {
 }
 
 func (g *devTier) timeSplitMode(kern, red backend.Kernel, r *resident, d, out backend.Buf, rows, split int, grp bool) (float64, bool) {
+	tuneTrials.Add(1)
 	const rounds, iters = 9, 4
 	rates := make([]float64, 0, rounds)
 	for round := 0; round < rounds+1; round++ {
@@ -557,6 +566,7 @@ type splitCand struct {
 // sel is the expert selection an INDEXED matvec reads after its output, or nil
 // for a dense one; rows is then the launch's output rows, Rows*Slots.
 func (g *devTier) timeSequences(cs []splitCand, rs []*resident, rows int, sel backend.Buf) []splitCand {
+	tuneTrials.Add(1)
 	// Three replays a sample so a Sync's jitter is small against the work, and
 	// seven rounds; the differences being decided are ~1 us a launch.
 	const rounds, reps = 7, 3

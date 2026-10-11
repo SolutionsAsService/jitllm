@@ -92,6 +92,9 @@ func (g *GPU) PrewarmKV(positions int) {
 func (g *devTier) prewarmKV(positions int) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	// The first prompt's lazily compiled kernels too: after PrewarmKV the
+	// device is ready, and the prompt compiles nothing (speed -ttft gates it).
+	g.prewarmPrompt()
 	kp := g.kvp
 	if !g.paged || kp == nil || positions <= 0 || kp.p <= 0 {
 		return

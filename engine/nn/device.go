@@ -1183,7 +1183,9 @@ type SeqKVDevice interface {
 // written into it. PrewarmKV makes room for positions more positions in every
 // placed block's pool where the device's budget has it free -- without paging
 // weights out and without giving the pages to any sequence -- so the first
-// prompt a State runs does not grow the pool inside its own time.
+// prompt a State runs does not grow the pool inside its own time. It also
+// compiles the kernels that prompt would otherwise compile on first use, so a
+// device is ready, kernels and pages, when it returns.
 type KVPrewarmer interface {
 	PrewarmKV(positions int)
 }

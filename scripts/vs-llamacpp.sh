@@ -115,7 +115,10 @@ DEPTH="${JITLLM_DEPTH:-0}"   # long enough that jitllm run's un-warmed first tok
 # exactly what RULE 12q says not to do: "a scoreboard whose rows come from two
 # different tools is not a scoreboard". The soak, the ABBA, the PSI gate, the
 # clamp gate and the IQR gate are all mode-independent, so prefill only needs
-# its two run functions.
+# its two run functions. Two cold rows sit beside them: load (process start to
+# model ready) and ttft (model ready to the first token of a fresh process's
+# first prompt), each engine's boundary read from its own output; see "THE
+# COLD COSTS" below.
 MODE="${JITLLM_MODE:-decode}"
 # Prompt for the prefill mode: repeated so its length is set by a count rather
 # than by prose, and long enough that jitllm's fixed startup is a small share.
@@ -308,33 +311,46 @@ lcpp_pp() { ${PIN[@]+"${PIN[@]}"} "$LCPP/llama-bench" -m "$MODEL" "${LCPP_ARGS[@
 jitllm_pp_warm() { ${PIN[@]+"${PIN[@]}"} "$JITLLM" speed -devices "$JITLLM_DEV" ${JITLLM_EXTRA[@]+"${JITLLM_EXTRA[@]}"} -p "$PPTOK" -n 0 -r 1 "$JITLLM_PATH" 2>/dev/null \
               | sed -n 's|^pp[0-9]* \([0-9.]*\).*|\1|p'; }
 
-# THE COLD COSTS ARE ROWS OF THEIR OWN, NOT HIDDEN IN THE WARM ONE.
-# JITLLM_MODE=first: the first prompt after model open, lazy initialisation
-# included -- jitllm's first `run` prompt against llama-completion's "prompt eval
-# time" with --no-warmup. JITLLM_MODE=ttft: process launch to the first token,
-# wall clock, `jitllm run -n 1` against `llama-completion -n 1`. Both print the
-# prompt tokens per second of that span so the ratio reads as the others do.
-# The file is in the page cache after the token-count probe and jitllm's tuning
-# cache is whatever the host holds; the header says so.
+# THE COLD COSTS ARE ROWS OF THEIR OWN, NOT HIDDEN IN THE WARM ONE. Two rows,
+# each engine's boundary read from its own output, never guessed:
+#
+# JITLLM_MODE=load: process start to model ready. jitllm: `speed -ttft`'s
+#   "load" (open + device init and kernel compile + attach: placement, upload,
+#   the tuners, the KV pool and the first prompt's kernels), its breakdown
+#   printed in the header. llama.cpp: llama-completion's own "load time".
+# JITLLM_MODE=ttft: model ready to the first token of the process's first
+#   prompt, tokenizing excluded. jitllm: `speed -ttft`'s "ttft-loaded", which
+#   refuses the run if any kernel compiled or any tuner trial ran after ready
+#   (readyHonest). llama.cpp: llama-completion --no-warmup's "prompt eval time"
+#   (its first decode after load; the sampled token is one argmax more).
+#
+# Both print a per-second figure so the ratio reads as the other rows do:
+# loads a second, and prompt tokens a second of the ttft span. The file is in
+# the page cache after the token-count probe, which serves llama.cpp's mmap;
+# jitllm reads the container with O_DIRECT and gets no help from it. jitllm's
+# tuning cache is whatever this host holds (tier.WithTuneCache); the header
+# says how many tuner trials the probe run timed.
 lcpp_comp() { ${PIN[@]+"${PIN[@]}"} "$LCPP/llama-completion" -m "$MODEL" "${LCPP_ARGS[@]}" -n 1 -no-cnv --no-warmup -p "$PP" </dev/null 2>&1; }
-lcpp_first() { lcpp_comp | sed -n 's|.*prompt eval time.*, *\([0-9.]*\) tokens per second.*|\1|p'; }
-wall_rate() { local t0 t1; t0=$(date +%s%N); "$@" >/dev/null 2>&1; t1=$(date +%s%N)
-              python3 -c 'import sys; print("%.2f" % (int(sys.argv[1])*1e9/int(sys.argv[2])))' "$PPTOK" $((t1-t0)); }
+jitllm_cold() { ${PIN[@]+"${PIN[@]}"} "$JITLLM" speed -devices "$JITLLM_DEV" ${JITLLM_EXTRA[@]+"${JITLLM_EXTRA[@]}"} -ttft -p "$PPTOK" -r 1 "$JITLLM_PATH" 2>&1; }
+per_s() { python3 -c 'import sys; v=sys.stdin.read().split(); print("%.3f" % (float(sys.argv[1])*1e3/float(v[0]))) if v else None' "$1"; }
 
-if [ "$MODE" = first ] || [ "$MODE" = ttft ]; then
+if [ "$MODE" = load ] || [ "$MODE" = ttft ]; then
   [ -x "$LCPP/llama-completion" ] || { echo "no llama-completion in $LCPP" >&2; exit 1; }
   PP="$(python3 -c 'import sys; print(" ".join(["the quick brown fox jumps over the lazy dog"]*int(sys.argv[1])))' "$PPREPS")"
   PPTOK="$(jitllm_pp_ntok)"
   [ -n "$PPTOK" ] || { echo "could not determine jitllm's prompt token count" >&2; exit 1; }
-  echo "  caches: model file in the page cache (warm), jitllm tuning cache as found on this host"
-  if [ "$MODE" = first ]; then
-    echo "  first prefill, pp$PPTOK: the first prompt after open, lazy init included (jitllm run vs llama-completion --no-warmup)"
-    jitllm_run() { jitllm_pp; }
-    lcpp_run() { lcpp_first; }
+  probe="$(jitllm_cold)"
+  echo "$probe" | grep -q '^load ' || { echo "jitllm speed -ttft gave no load line:" >&2; echo "$probe" >&2; exit 1; }
+  echo "  jitllm probe: $(echo "$probe" | grep '^load ')"
+  echo "  caches: model file in the page cache (llama.cpp mmaps it; jitllm reads O_DIRECT), jitllm tuning cache as found on this host"
+  if [ "$MODE" = load ]; then
+    echo "  load: process start to model ready, as loads/s (jitllm speed -ttft 'load' vs llama-completion 'load time')"
+    jitllm_run() { jitllm_cold | sed -n 's|^load \([0-9.]*\) ms.*|\1|p' | per_s 1; }
+    lcpp_run() { lcpp_comp | sed -n 's|.*load time = *\([0-9.]*\) ms.*|\1|p' | per_s 1; }
   else
-    echo "  fresh-process TTFT, pp$PPTOK: launch to first token, wall clock, as prompt tok/s (jitllm run -n 1 vs llama-completion -n 1)"
-    jitllm_run() { wall_rate ${PIN[@]+"${PIN[@]}"} "$JITLLM" run -devices "$JITLLM_DEV" ${JITLLM_EXTRA[@]+"${JITLLM_EXTRA[@]}"} -n 1 "$JITLLM_PATH" "$PP"; }
-    lcpp_run() { wall_rate lcpp_comp; }
+    echo "  ttft (model loaded), pp$PPTOK: ready to the first token of a fresh process's first prompt, as prompt tok/s (jitllm speed -ttft 'ttft-loaded' vs llama-completion --no-warmup 'prompt eval time')"
+    jitllm_run() { jitllm_cold | sed -n 's|.*ttft-loaded \([0-9.]*\) ms.*|\1|p' | per_s "$PPTOK"; }
+    lcpp_run() { lcpp_comp | sed -n 's|.*prompt eval time = *\([0-9.]*\) ms.*|\1|p' | per_s "$PPTOK"; }
   fi
   DEPTH=0
   N="$PPTOK"
@@ -353,7 +369,7 @@ elif [ "$MODE" = prefill ]; then
   DEPTH=0
   N="$PPTOK"
 elif [ "$MODE" != decode ]; then
-  echo "JITLLM_MODE must be decode, prefill, first or ttft" >&2; exit 1
+  echo "JITLLM_MODE must be decode, prefill, load or ttft" >&2; exit 1
 fi
 
 # ★ THE A/A SELF-CONTROL RUNS ON THIS HARNESS, NOT BESIDE IT. JITLLM_VS_AA=1

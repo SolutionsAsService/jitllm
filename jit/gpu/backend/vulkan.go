@@ -116,6 +116,7 @@ func (v *vkDev) Alloc(n int) (Buf, error) {
 }
 
 func (v *vkDev) Compile(k *ir.Kernel) (Kernel, error) {
+	compiles.Add(1)
 	// A tile kernel is declined by name on a device that did not enable the
 	// features: a driver may run the module anyway and silently compute a
 	// wrong answer, so the refusal is the whole safety property.

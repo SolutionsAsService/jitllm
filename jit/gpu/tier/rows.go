@@ -1083,13 +1083,76 @@ func (g *devTier) actF16For(bs *blockScratch, m mv, ntok int) (act, conv backend
 	if !ok || bm.act == nil {
 		return nil, nil, 0
 	}
-	k := g.fusedKern(ragKey{kind: "actmulf16t", q: bm.q, k: m.k, ntok: ntok, act: bs.p.Act}, func() (*ir.Kernel, error) {
-		return kernels.ActMulF16T(bm.q, ntok, m.k, bs.p.Act)
+	// ntok only clamps the last thread (RULE 13). Where a token's words are
+	// whole workgroups the launch has no surplus thread at any ntok, so one
+	// kernel at the scratch's width serves every chunk and is compiled once,
+	// ahead of the first prompt (prewarmPrompt); elsewhere it is per ntok.
+	kn := ntok
+	if (m.k/2)%128 == 0 && ntok <= bs.rows {
+		kn = bs.rows
+	}
+	k := g.fusedKern(ragKey{kind: "actmulf16t", q: bm.q, k: m.k, ntok: kn, act: bs.p.Act}, func() (*ir.Kernel, error) {
+		return kernels.ActMulF16T(bm.q, kn, m.k, bs.p.Act)
 	})
 	if k == nil {
 		return nil, nil, 0
 	}
 	return k, bm.act, kernels.ActMulF16TThreads(ntok, m.k)
+}
+
+// prewarmPrompt compiles, ahead of the first prompt, the kernels the prompt
+// path would otherwise compile on first use at the reserved prompt width: the
+// embedding gather, the folded head's row copy and the fused binary16 operand
+// kernels of every placed block. A kernel a block turns out not to launch is
+// a compile spent at load, never a wrong answer. Callers hold g.mu.
+func (g *devTier) prewarmPrompt() {
+	if g.bs == nil || g.promptW <= 0 || g.bbs[g.promptW] == nil {
+		return
+	}
+	bs, hb := g.bbs[g.promptW], g.bs
+	if hb.head != nil && hb.head.ok && !kernels.IsFloat(hb.head.t) {
+		if hb.headEmbeds {
+			g.embedKernel(hb)
+		}
+		if hb.spanK == nil && hb.p.NEmbd == bs.p.NEmbd {
+			g.spanKernel(hb)
+		}
+	}
+	R := bs.rows
+	for _, l := range g.layers {
+		if l == nil || !l.ok {
+			continue
+		}
+		g.rmsF16For(bs, l.mvq, R, false)
+		first := l.mvg
+		if first.kern == nil {
+			first = l.mvu
+		}
+		g.rmsF16For(bs, first, R, true)
+		g.actF16For(bs, l.mvd, R)
+	}
+}
+
+// spanKernel builds the folded head's row copy and its offset word into hb.
+func (g *devTier) spanKernel(hb *blockScratch) error {
+	kk, e := kernels.CopySpan(hb.p.NEmbd)
+	var k backend.Kernel
+	if e == nil {
+		k, e = g.dev.Compile(kk)
+	}
+	var ob backend.Buf
+	if e == nil {
+		w := g.scratchWin() // the scratch's own word (scratch.go)
+		if ob, e = g.dev.Alloc(4); e != nil {
+			k.Close()
+		}
+		w.close()
+	}
+	if e != nil {
+		return e
+	}
+	hb.spanK, hb.spanOff = k, ob
+	return nil
 }
 
 // int8GemmOn reports whether the device lowers GemmInt8, probed once by a
