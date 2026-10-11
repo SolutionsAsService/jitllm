@@ -67,6 +67,7 @@ func (s *gpuSession) EndPlacement() {
 	// Auto-streamed blocks get their expert caches from the room placement
 	// left (GPU.sizeAutoCaches), before another session can place.
 	s.g.sizeAutoCaches()
+	s.g.prewarmPromptWidths()
 	s.g.place.Unlock()
 }
 
@@ -209,6 +210,13 @@ func (s *gpuSession) Detach() {
 func (s *gpuSession) SetKeyRuns(full, windowed []nn.KeyRun) bool {
 	defer s.leave(s.step())
 	return s.g.setKeyRuns(s.sid, full, windowed)
+}
+
+// SetRowWindows records one window a row for this session's calls that
+// follow; see GPU.SetRowWindows.
+func (s *gpuSession) SetRowWindows(wins []nn.KeyRun) bool {
+	defer s.leave(s.step())
+	return s.g.setRowWindows(s.sid, wins)
 }
 
 // HeldBytes is this session's history on every device (nn.Session).

@@ -45,7 +45,8 @@ func TestTilePrefillMatchesTheHost(t *testing.T) {
 	}
 	ran := 0
 	for _, name := range []string{"Llama-3.2-1B-Instruct-Q4_K_M.gguf", "tinyllama-1.1b-q3_K_M.gguf",
-		"Qwen2-1.5B-Instruct-Q4_K_M.gguf", "gemma-2b.gguf", "Qwen3-MOE-4x0.6B-Q4_K_M.gguf"} {
+		"Qwen2-1.5B-Instruct-Q4_K_M.gguf", "gemma-2b.gguf", "Qwen3-MOE-4x0.6B-Q4_K_M.gguf",
+		"Ministral-3-3B-Instruct-2512-Q4_K_M.gguf"} {
 		p := testmodels.Path(name)
 		if _, err := os.Stat(p); err != nil {
 			if _, err := os.Stat(strings.TrimSuffix(p, ".gguf") + ".jlm"); err != nil {
@@ -123,6 +124,11 @@ func TestTilePrefillMatchesTheHost(t *testing.T) {
 			st := g.Stats()
 			if st.TileMV == 0 {
 				t.Fatalf("no GemmTile was built (refused: %q): the dp4a twin answered", st.TileWhy)
+			}
+			// 200 tokens are a 224-row chunk, which no 64-token block divides:
+			// the widest block runs over 192 and a tail launch over 32.
+			if st.TileTail == 0 {
+				t.Fatalf("no GemmTile ran as a wide block plus a tail (%d tile matvecs)", st.TileMV)
 			}
 			// A mixture's experts are the grouped GemmTile, counted apart.
 			if m.Cfg.NExpert > 0 && (st.GroupedMoE == 0 || st.GroupedVolta == 0) {

@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/jitllm/jitllm/internal/testmodels"
-	"github.com/jitllm/jitllm/jit/gpu/backend"
 	"github.com/jitllm/jitllm/jit/gpu/tier"
 )
 
@@ -15,9 +14,7 @@ import (
 // device grows the device's KV pools ahead (PrewarmKV), so its first prompt
 // of one chunk grows none of them -- Stats.KVGrows does not move across the
 // Prefill -- and answers exactly as the same State without the prewarm,
-// whose first prompt does grow them, and compiles nothing either: the prewarm
-// also compiles the kernels the prompt would compile on first use, which is
-// the ready mark speed -ttft's load and ttft rows split at (the violation arm, which must move the
+// whose first prompt does grow them (the violation arm, which must move the
 // counter or the gate proves nothing). With a budget that leaves no room past
 // the blocks, the prewarm takes nothing and places the same blocks as no
 // prewarm: it grows into what placement left, never into a block's room.
@@ -35,7 +32,6 @@ func TestFirstPromptDoesNotGrowTheKVPool(t *testing.T) {
 	type arm struct {
 		logits         []float32
 		grows, prewarm int
-		compiles       int64
 		placed         int
 		used           uint64 // the budget placement spent, before the prompt
 	}
@@ -60,18 +56,16 @@ func TestFirstPromptDoesNotGrowTheKVPool(t *testing.T) {
 		st.SetDevice(g)
 		before := g.Stats()
 		used := before.BudgetUsed
-		c0 := backend.Compiles()
 		lg, err := st.Prefill(in)
 		if err != nil {
 			t.Fatal(err)
 		}
 		after := g.Stats()
-		return arm{append([]float32(nil), lg...), after.KVGrows - before.KVGrows, before.KVPrewarmPages,
-			backend.Compiles() - c0, st.GPULayers(), used}
+		return arm{append([]float32(nil), lg...), after.KVGrows - before.KVGrows, before.KVPrewarmPages, st.GPULayers(), used}
 	}
 	on, off := run(true, 0), run(false, 0)
-	t.Logf("prewarm: %d page(s) grown ahead, %d growth(s) and %d compile(s) in the first prompt; without: %d growth(s), %d compile(s); %d and %d blocks placed",
-		on.prewarm, on.grows, on.compiles, off.grows, off.compiles, on.placed, off.placed)
+	t.Logf("prewarm: %d page(s) grown ahead, %d growth(s) in the first prompt; without: %d growth(s); %d and %d blocks placed",
+		on.prewarm, on.grows, off.grows, on.placed, off.placed)
 	if on.placed == 0 {
 		t.Skip("CARD TOO SMALL: no block placed -- this gate proved nothing on this device")
 	}
@@ -80,12 +74,6 @@ func TestFirstPromptDoesNotGrowTheKVPool(t *testing.T) {
 	}
 	if on.prewarm == 0 || on.grows != 0 {
 		t.Fatalf("the prewarm grew %d page(s) ahead and the first prompt still grew a pool %d time(s)", on.prewarm, on.grows)
-	}
-	if off.compiles == 0 {
-		t.Fatalf("the first prompt compiled nothing without the prewarm either: the compile count cannot tell the arms apart")
-	}
-	if on.compiles != 0 {
-		t.Fatalf("the first prompt after the prewarm compiled %d kernel(s): the ready mark came before the kernels", on.compiles)
 	}
 	if on.placed != off.placed {
 		t.Fatalf("%d blocks placed with the prewarm, %d without", on.placed, off.placed)

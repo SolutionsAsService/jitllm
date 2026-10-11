@@ -142,7 +142,10 @@ type layer struct {
 	nFFN2, nPost1, nPost2, nRouter, expScale backend.Buf
 	// LayerNorm biases, nil for every block that RMSNorms.
 	nAttnB, nFFNB backend.Buf
-	nQ, nK        backend.Buf // per-head q/k RMSNorm weights (qwen3), nil otherwise
+	// nResid and nResidB are a post-norm block's norm over x + mlp(x)
+	// (nn.LayerPlan.PostResidNorm, BERT's), nil elsewhere.
+	nResid, nResidB backend.Buf
+	nQ, nK          backend.Buf // per-head q/k RMSNorm weights (qwen3), nil otherwise
 	// The KV cache is per sequence, not per block: nn.LayerDevice.Layers carries a
 	// position and no state identity, so two model.States sharing one pair would
 	// silently corrupt each other. See docs/design/device-sessions.md.
@@ -166,6 +169,18 @@ type layer struct {
 	// handed (nn.LayerPlan.Windowed, SetKeyRuns). Per block: the scratch's
 	// plan is its first block's, and Qwen2.5-VL's blocks alternate.
 	windowed bool
+	// A non-causal block's own MLP and rotary, which may differ from the
+	// first block's the set was built from: an encoder's decision head
+	// (Laya's) is an ungated ReLU MLP wider than the encoder's gated GELU,
+	// and rotates nothing where the encoder rotates every head. nffn is its
+	// width, ungated whether it has no gate, actK its activation where the
+	// set's is another (nil: the set's bs.actMul), noRope that it rotates
+	// nothing. Read on the non-causal path only.
+	nffn    int
+	ungated bool
+	act     kernels.ActKind
+	actK    backend.Kernel
+	noRope  bool
 	// swa says the block attends at the sliding layers' geometry, so it runs
 	// in that geometry's scratch set (gemma4.go). outScale is its output
 	// scalar, one float, nil where it has none.
@@ -1007,8 +1022,17 @@ func (g *devTier) streamStage(m, pl, n int) []byte {
 // same matvec at the split the fitted table would have picked, kept so
 // tuneSplit's answer can be checked in a paired A/B. Codegen is microseconds, so
 // a second kernel is free.
+// mvTail is a batched twin's second launch (mv.tail).
+type mvTail struct {
+	kern    backend.Kernel
+	threads int
+}
+
 type mv struct {
 	kern backend.Kernel
+	// tail is a second launch of the batched twin over the tokens the first
+	// one's block does not divide (tileMV); it takes the same parameters.
+	tail *mvTail
 	red  backend.Kernel
 	rows int
 	// slots is 0 for an ordinary matvec and NExpertUsed for an indexed one, in
@@ -1869,6 +1893,11 @@ func declineReason(p *nn.LayerPlan) string {
 		return "a non-causal block with a parallel residual, a recurrence, latent attention, experts or sinks"
 	case p.Windowed && !p.NonCausal:
 		return "windowed key runs on a causal block"
+	case p.PostResidNorm && (!p.NonCausal || !p.NoPreNorm || !p.LayerNorm):
+		// The norms after the residual adds are wired into the non-causal
+		// block (BERT's encoder): its attention reads the residual through
+		// the no-pre-norm copy, and its norms are LayerNorms.
+		return "post-residual norms on a block other than a non-causal LayerNorm one with no pre-norm"
 	case p.Clamps && (!p.NonCausal || p.ClampKQV != 0 || p.AttnOutGate || ungatedFFN(p)):
 		// The clipped linears are wired into the non-causal block's plain
 		// q/k/v, its output projection and a gated MLP: Gemma 4's tower, the
@@ -2212,6 +2241,10 @@ func (g *devTier) prepLayer(sid uint64, li int, p *nn.LayerPlan, w *nn.LayerWeig
 		g.LastErr = fmt.Sprintf("block %d: %s", li, r)
 		return false
 	}
+	if r := nonCausalConflict(g.bs, sp); r != "" {
+		g.LastErr = fmt.Sprintf("block %d: %s", li, r)
+		return false
+	}
 
 	// A block already on this device is shared and only the history is new: the
 	// weights, norms, biases and router are the model's. Rebuilding would
@@ -2284,6 +2317,14 @@ func (g *devTier) prepLayer(sid uint64, li int, p *nn.LayerPlan, w *nn.LayerWeig
 		if g.bs = g.initScratch(sp, 1); g.bs == nil {
 			return false
 		}
+	} else if want := g.bs.p; p.NonCausal && sp.NFFN > want.NFFN {
+		// A non-causal block with a wider MLP than the set was built for (a
+		// decision head after its encoder): the set grows to it, and every
+		// block runs its own width inside it (layer.nffn).
+		want.NFFN, want.MaxSeq = sp.NFFN, g.visMax
+		if !g.towerAt(&want, g.visCap) {
+			return false
+		}
 	} else if want := g.bs.p; !p.NonCausal && planUnion(&want, sp) {
 		// g.bs is built from whichever block arrives first, and on a hybrid that
 		// may be a linear block with no out-gate kernels. A hybrid's two kinds
@@ -2297,6 +2338,13 @@ func (g *devTier) prepLayer(sid uint64, li int, p *nn.LayerPlan, w *nn.LayerWeig
 		g.layers = map[int]*layer{}
 	}
 	l := &layer{nonCausal: p.NonCausal, windowed: p.Windowed, geo: geoOf(p), vFromK: p.VFromK}
+	if p.NonCausal {
+		l.nffn, l.ungated, l.act = p.NFFN, ungatedFFN(p), p.Act
+		l.noRope = p.NRot == 0 || p.NoPosEnc
+		if !g.ownActKern(l) {
+			return false
+		}
+	}
 	mkw := func(slot int, x nn.Weight) *resident {
 		q, ok := quantOf(x.T)
 		// A float format's block is the activation granule, not a file structure,
@@ -3030,13 +3078,16 @@ func (g *devTier) prepLayer(sid uint64, li int, p *nn.LayerPlan, w *nn.LayerWeig
 	// A post-norm block (OLMo 2, EXAONE 4) has neither pre-norm: the emit
 	// copies the residual where the norm would have written (bs.copyRows).
 	noPre := w.AttnNorm == nil && w.PostAttnNorm != nil && w.PostFFNNorm != nil
+	// ModernBERT's first block has no attention norm and keeps its FFN norm:
+	// the attention reads the residual as it is, the same copy.
+	noAttnNorm := w.AttnNorm == nil && w.FFNNorm != nil && p.NoPreNorm && p.NonCausal
 	if noPre && !p.NoPreNorm {
 		g.LastErr = fmt.Sprintf("block %d has no pre-norm on a plan that does not say so", li)
 		return false
 	}
 	if w.AttnNorm != nil {
 		up(&l.nAttn, w.AttnNorm)
-	} else if !noPre {
+	} else if !noPre && !noAttnNorm {
 		g.LastErr = fmt.Sprintf("block %d has no attention norm", li)
 		return false
 	}
@@ -3157,6 +3208,21 @@ func (g *devTier) prepLayer(sid uint64, li int, p *nn.LayerPlan, w *nn.LayerWeig
 	}
 	if w.AttnNormB != nil {
 		up(&l.nAttnB, w.AttnNormB)
+	}
+	// BERT's norms after the residual adds: the attention reads the block
+	// input (no attention norm), FFNNorm normalises x + attention and the
+	// residual takes it, ResidNorm normalises x + mlp.
+	if p.PostResidNorm {
+		if w.AttnNorm != nil || w.FFNNorm == nil || len(w.ResidNorm) != p.NEmbd ||
+			(w.ResidNormB != nil && len(w.ResidNormB) != p.NEmbd) {
+			g.LastErr = fmt.Sprintf("block %d: a post-norm block wants no attention norm and two "+
+				"norms of %d after its adds", li, p.NEmbd)
+			return false
+		}
+		up(&l.nResid, w.ResidNorm)
+		if w.ResidNormB != nil {
+			up(&l.nResidB, w.ResidNormB)
+		}
 	}
 	if w.FFNNormB != nil {
 		up(&l.nFFNB, w.FFNNormB)
@@ -3550,7 +3616,7 @@ func (g *devTier) initRopeTable(bs *blockScratch, p *nn.LayerPlan, rows int) err
 	if err != nil {
 		return why("%v", err)
 	}
-	c, err := g.dev.Compile(k)
+	c, err := g.compileShared(k)
 	if err != nil {
 		return why("%s declined the rotary table: %v", g.dev.API(), err)
 	}
@@ -3565,24 +3631,24 @@ func (g *devTier) initRopeTable(bs *blockScratch, p *nn.LayerPlan, rows int) err
 		return b.Write(f32b(v))
 	}
 	if err := up(&bs.ropeTab, p.RopeTab); err != nil {
-		c.Close()
+		closeKern(c)
 		return err
 	}
 	if p.SWAPeriod > 0 {
 		if err := up(&bs.ropeTabSWA, p.RopeTabSWA); err != nil {
-			c.Close()
+			closeKern(c)
 			return err
 		}
 	}
 	if err := up(&bs.ropeConst, kernels.RopeTabConsts()); err != nil {
-		c.Close()
+		closeKern(c)
 		return err
 	}
 	// (rows+1) words, the first being the valid row count as in bs.n, so a
 	// ragged chunk's per-token staging is one small write (see kernels.RopeTable).
 	b, err := g.dev.Alloc((rows + 1) * 4)
 	if err != nil {
-		c.Close()
+		closeKern(c)
 		return err
 	}
 	// The table is zeroed once: the kernel writes only valid rows, so the padded
@@ -3595,7 +3661,7 @@ func (g *devTier) initRopeTable(bs *blockScratch, p *nn.LayerPlan, rows int) err
 			continue
 		}
 		if err := t.Write(z); err != nil {
-			c.Close()
+			closeKern(c)
 			b.Free()
 			return err
 		}
@@ -4259,7 +4325,9 @@ func (g *devTier) initScratch(p *nn.LayerPlan, rows int) (out *blockScratch) {
 			// Needed wherever k reaches the cache unrotated or partly rotated: a
 			// ViT with no rotary, a partial rotary (RoPERows leaves the tail
 			// unwritten), Llama 4's NoPE layers, and a model with no rotary at all.
-			if p.MLA() || (!(p.NonCausal && p.NRot == 0) && !partialRotary(p) && !p.NoPEGlobal && !p.NoPosEnc &&
+			// A non-causal set may hold a block that rotates nothing beside
+			// ones that do (an encoder's decision head; layer.noRope).
+			if p.MLA() || (!p.NonCausal && !partialRotary(p) && !p.NoPEGlobal && !p.NoPosEnc &&
 				!p.RopeSplit) {
 				return nil, nil
 			}
@@ -5041,7 +5109,7 @@ func (g *devTier) initScratch(p *nn.LayerPlan, rows int) (out *blockScratch) {
 		if k == nil {
 			continue // an optional kernel this architecture does not need
 		}
-		c, e := g.dev.Compile(k)
+		c, e := g.compileShared(k)
 		if e != nil {
 			g.LastErr = e.Error()
 			return nil
@@ -5146,7 +5214,7 @@ func (g *devTier) pickSoftmax(bs *blockScratch) bool {
 			g.LastErr = err.Error()
 			return nil
 		}
-		c, err := g.dev.Compile(k)
+		c, err := g.compileShared(k)
 		if err != nil {
 			g.LastErr = err.Error()
 			return nil
@@ -5191,9 +5259,9 @@ func (g *devTier) pickSoftmax(bs *blockScratch) bool {
 			bs.smAltGroups, bs.smAltWidth = scalarGroups, scalarWidth
 			return true
 		}
-		c.Close()
+		closeKern(c)
 	} else if c != nil {
-		c.Close()
+		closeKern(c)
 	}
 	c := build(1)
 	if c == nil {
@@ -5518,7 +5586,7 @@ func (g *devTier) PrepHead(h *nn.Head) bool {
 		}
 		b, e := g.dev.Alloc(h.W.Rows * 4)
 		if e != nil {
-			c.Close()
+			closeKern(c)
 			return false
 		}
 		bs.headCap, bs.logitsCap = c, b
@@ -5533,12 +5601,13 @@ func (g *devTier) PrepHead(h *nn.Head) bool {
 				if b, e := g.dev.Alloc(4); e == nil {
 					g.argmaxK, g.argmaxOut = c, b
 				} else {
-					c.Close()
+					closeKern(c)
 				}
 				w.close()
 			}
 		}
 	}
+	g.prewarmHeadKernels()
 	return true
 }
 
@@ -5615,7 +5684,7 @@ func (g *devTier) layersCall(sid uint64, lo, hi, pos, n int, x, cs, csSWA []floa
 		bs := g.bs
 		// The windows staged in the set are whichever session's picture
 		// came last: this session's go in again.
-		wok := g.setWindowsLocked(g.winRuns)
+		wok := g.setWindowsLocked(g.winRuns, g.winPerRow)
 		g.mu.Unlock()
 		if !wok {
 			return false
@@ -5657,7 +5726,10 @@ func (g *devTier) layersCall(sid uint64, lo, hi, pos, n int, x, cs, csSWA []floa
 		// The width is the chunk's rounded up to the grain, so a short tail does
 		// not run the full grid. A scratch per width costs VRAM, so the narrow one
 		// is used only if it fits; otherwise the wide one pads.
-		w := (n + batchGrain - 1) / batchGrain * batchGrain
+		g.mu.Lock()
+		grain := g.promptGrain() // f16GemmK probes once, under g.mu
+		g.mu.Unlock()
+		w := (n + grain - 1) / grain * grain
 		if w > bw {
 			return false
 		}
@@ -5668,7 +5740,34 @@ func (g *devTier) layersCall(sid uint64, lo, hi, pos, n int, x, cs, csSWA []floa
 		// The chunk's own width, or the width reserved at placement when the
 		// narrow one does not fit (scratch.go); with no reservation, the full
 		// width.
-		ww := g.batchFor(w)
+		// The chunk's own grain width first: batchFor rounds a width it has
+		// not built to a power of two, which is right for a step loop whose
+		// row count moves every step but ran a 415-token prompt over 512
+		// rows, a quarter of its arithmetic on padding. prepBatch refuses a
+		// width the budget has no room for, and the chunk then pads as before.
+		//
+		// One exact width lives at a time: each is budgeted beside the
+		// reservation, so a second one is what a full card refuses. The last
+		// is dropped (after every submission that may read it) before the
+		// next is built; its kernels stay in the caches.
+		ww := 0
+		if !g.NoExactPrompt && w != bw {
+			if g.bbs[w] == nil && g.exactW != 0 && g.exactW != w && g.exactW != g.promptW && g.exactW != g.stepW {
+				g.quiesce()
+				g.dropBatch(g.exactW)
+				g.exactW = 0
+			}
+			if g.bbs[w] != nil || g.prepBatch(w) {
+				ww = w
+				g.ExactPrompts++
+				if w != g.promptW && w != g.stepW {
+					g.exactW = w
+				}
+			}
+		}
+		if ww == 0 {
+			ww = g.batchFor(w)
+		}
 		if ww == 0 && w != bw && g.prepBatch(bw) {
 			ww = bw
 		}
@@ -5923,6 +6022,8 @@ type graphKey struct {
 	// samplePen says the sampler's penalty launch runs: with no history it
 	// is skipped and the first top-k pass reads the logits.
 	samplePen bool
+	// pick says the head ends in the label pick's gather (nn.Head.Pick).
+	pick bool
 	// rag is a LayersRows step's sequence count, 0 for any other call: ragged
 	// attention and a per-row head, and on a hybrid the per-count linear
 	// kernels (ragLin), which a recording names by address.
@@ -6074,10 +6175,8 @@ func (g *devTier) layersOnce(sid uint64, bs *blockScratch, lo, hi, pos int, x, c
 		case kernels.IsFloat(hb.head.t) || hb.p.NEmbd != bs.p.NEmbd:
 			return refuse("a batched submission of %d rows with a %v head", bs.rows, hb.head.t)
 		}
-		if hb.spanK == nil {
-			if e := g.spanKernel(hb); e != nil {
-				return refuse("the folded head's row copy: %v", e)
-			}
+		if e := g.spanKernel(hb); e != nil {
+			return refuse("the folded head's row copy: %v", e)
 		}
 	}
 	if head != nil && (hb == nil || hb.head == nil || !hb.head.ok) {
@@ -6403,6 +6502,9 @@ func (g *devTier) layersOnce(sid uint64, bs *blockScratch, lo, hi, pos int, x, c
 	if head != nil && !argmax && head.SampleK > 0 && R == 1 && rag == nil && !allRows && !fold && g.prepSample(head) {
 		sampleK, samplePen = head.SampleK, head.SampleArgs[0] > 0
 	}
+	// The label pick: one row's logits, a decode's or a folded chunk's last.
+	pick := head != nil && !argmax && sampleK == 0 && len(head.Pick) > 0 && rag == nil && !allRows &&
+		(R == 1 || fold) && g.prepPick(head)
 	ragN, ragRuns, ragHead := 0, 0, 0
 	if rag != nil {
 		ragN, ragRuns = len(rag.pos), len(rag.runs)
@@ -6421,7 +6523,7 @@ func (g *devTier) layersOnce(sid uint64, bs *blockScratch, lo, hi, pos int, x, c
 		ragHead = head.WantedRows(nrow)
 	}
 	key := graphKey{lo, hi, nCap, R, head != nil, g.TableSplit, g.ScalarSoftmax, g.flashOn(), g.KVF16,
-		ropeDev, argmax, sampleK, samplePen, ragN, ragRuns, par, pagedVar, ragHead, hNormID, sid}
+		ropeDev, argmax, sampleK, samplePen, pick, ragN, ragRuns, par, pagedVar, ragHead, hNormID, sid}
 	if _, live := g.recs[key]; !live {
 		for k, r := range g.recs {
 			older := k
@@ -6468,7 +6570,7 @@ func (g *devTier) layersOnce(sid uint64, bs *blockScratch, lo, hi, pos int, x, c
 		hx: hx, hcs: hcs, hcsSWA: hcsSWA, pn: pn, koffs: koffs, kposs: kposs, rposs: rposs,
 		p: p, rag: rag, pe: pe, key: key, R: R, nrow: nrow, kvDim: kvDim, qdim: qdim,
 		kst: kst, nCap: nCap, gatherN: gatherN, rrows: rrows, sm: sm, smG: smG, smW: smW,
-		fold: fold, ropeDev: ropeDev, argmax: argmax, sampleK: sampleK, samplePen: samplePen, ragHead: ragHead, parOK: parOK,
+		fold: fold, ropeDev: ropeDev, argmax: argmax, sampleK: sampleK, samplePen: samplePen, pick: pick, ragHead: ragHead, parOK: parOK,
 		allRows: allRows, hNorm: hNorm,
 	}
 	if g.subFn == nil {
@@ -6561,7 +6663,7 @@ type submitArgs struct {
 	ragHead                 int
 	fold, ropeDev, argmax   bool
 	sampleK                 int
-	samplePen               bool
+	samplePen, pick         bool
 	parOK, allRows          bool
 	hNorm                   backend.Buf
 	// What the session hands back.
@@ -6581,7 +6683,7 @@ func (g *devTier) layersSession(s backend.Session) {
 	p, rag, pe, key := a.p, a.rag, a.pe, a.key
 	R, nrow, kvDim, qdim, kst, nCap, gatherN, rrows := a.R, a.nrow, a.kvDim, a.qdim, a.kst, a.nCap, a.gatherN, a.rrows
 	sm, smG, smW := a.sm, a.smG, a.smW
-	fold, ropeDev, argmax, sampleK, samplePen := a.fold, a.ropeDev, a.argmax, a.sampleK, a.samplePen
+	fold, ropeDev, argmax, sampleK, samplePen, pick := a.fold, a.ropeDev, a.argmax, a.sampleK, a.samplePen, a.pick
 	ragHead, parOK, allRows, hNorm := a.ragHead, a.parOK, a.allRows, a.hNorm
 	var err error
 	direct := false
@@ -6656,6 +6758,13 @@ func (g *devTier) layersSession(s backend.Session) {
 				lc.la(bm.kern, bm.threads, r.qs, d, r.sc, g.f16Buf, out, bm.bias)
 			} else {
 				lc.la(bm.kern, bm.threads, r.qs, d, r.sc, g.f16Buf, out)
+			}
+			if t := bm.tail; t != nil {
+				if bm.bias != nil {
+					lc.la(t.kern, t.threads, r.qs, d, r.sc, g.f16Buf, out, bm.bias)
+				} else {
+					lc.la(t.kern, t.threads, r.qs, d, r.sc, g.f16Buf, out)
+				}
 			}
 			if bm.split > 1 {
 				lc.la(bm.red, bm.redN, g.partBuf, dst)
@@ -7180,7 +7289,7 @@ func (g *devTier) layersSession(s backend.Session) {
 						}
 					}
 					// Per layer: Llama 4 leaves every SWAPeriod'th layer unrotated.
-					roped := bs.ropeQ != nil && (p.RopeAt(li) || rag != nil && rowsFaulted("nope"))
+					roped := bs.ropeQ != nil && !l.noRope && (p.RopeAt(li) || rag != nil && rowsFaulted("nope"))
 					// mistral3's temperature reaches the rotated layers too. A row's
 					// factor and its rotation are both linear in q, so q is scaled
 					// first, into qt, and rotated from there.
@@ -7240,9 +7349,10 @@ func (g *devTier) layersSession(s backend.Session) {
 							laKV(copyK, R*kvDim, kSrc, kDst, kOff)
 						} else if roped {
 							// The table layer li was trained with: gemma3 puts five layers in
-							// six on the local base (see nn.LayerPlan.SWAPeriod).
+							// six on the local base (see nn.LayerPlan.SWAPeriod), ModernBERT
+							// all but every third from the first (LocalRope).
 							rcs := bs.cs
-							if bs.csSWA != nil && p.SWAPeriod > 0 && li%p.SWAPeriod < p.SWAPeriod-1 {
+							if bs.csSWA != nil && p.LocalRope(li) {
 								rcs = bs.csSWA
 							}
 							// The unrotated tail first: RoPERows writes only the nRot
@@ -7633,6 +7743,11 @@ func (g *devTier) layersSession(s backend.Session) {
 					norm(bs.x2, l.nFFN, l.nFFNB)
 				}
 			}
+			// A post-norm block's residual is the norm of x + attention, the
+			// row the FFN reads (nn.LayerPlan.PostResidNorm).
+			if l.nResid != nil && !skip["norm"] {
+				lc.la(bs.copyRows, R*p.NEmbd, bs.h, bs.x2)
+			}
 			if voltaOnly && !quantDone {
 				fsrc = bs.h
 				g.QuantSkipped++
@@ -7965,7 +8080,15 @@ func (g *devTier) layersSession(s backend.Session) {
 					ffnOut = bs.shsum
 				}
 			} else if !skipFFN {
-				ungated := ungatedFFN(p)
+				// A non-causal block's own MLP, which may not be the set's
+				// (layer.nffn): its width, gating and activation.
+				ungated, nffn, actK := ungatedFFN(p), p.NFFN, bs.actMul
+				if l.nonCausal {
+					ungated, nffn = l.ungated, l.nffn
+					if l.actK != nil {
+						actK = l.actK
+					}
+				}
 				gIn, uIn := bs.g, bs.u
 				if l.clampB != nil && !ungated {
 					// Gemma 4's clipped linears: gate and up each read their own
@@ -8013,12 +8136,12 @@ func (g *devTier) layersSession(s backend.Session) {
 				if !skip["actmul"] && !gated && actConv == nil && !quantDoneF {
 					if ungated && l.xielu != nil {
 						// Apertus: the block's four numbers ride as a buffer.
-						lc.la(bs.actMul, R*p.NFFN, bs.u, l.xielu, bs.act)
+						lc.la(actK, R*nffn, bs.u, l.xielu, bs.act)
 					} else if ungated {
 						// One operand: the gate does not exist.
-						lc.la(bs.actMul, R*p.NFFN, bs.u, bs.act)
+						lc.la(actK, R*nffn, bs.u, bs.act)
 					} else {
-						lc.la(bs.actMul, R*p.NFFN, gIn, uIn, bs.act)
+						lc.la(actK, R*nffn, gIn, uIn, bs.act)
 					}
 				}
 				if voltaOnly {
@@ -8032,7 +8155,7 @@ func (g *devTier) layersSession(s backend.Session) {
 					lc.la(bs.quantF, kernels.QuantizeThreads(R*p.NFFN/32), bs.cin, bs.a, bs.ax)
 					fsrc = bs.cin
 				} else if !skip["quantf"] && !quantDoneF {
-					lc.la(bs.quantF, kernels.QuantizeThreads(R*p.NFFN/32), bs.act, bs.a, bs.ax)
+					lc.la(bs.quantF, kernels.QuantizeThreads(R*nffn/32), bs.act, bs.a, bs.ax)
 				}
 				if l.clampB == nil && l.nPostFFN == nil && !resScaled && !skip["add"] && l.k3 == nil && mvres(l.mvd, l.down, bs.x, bs.x2) {
 					ffnFused = true
@@ -8058,6 +8181,11 @@ func (g *devTier) layersSession(s backend.Session) {
 				g.k3PostFFN(lc, bs, R, fout)
 			} else if !skip["add"] && !ffnFused {
 				addRes(bs.x2, fout, bs.x)
+			}
+			// BERT's output norm, over x + mlp, out of place and back.
+			if l.nResid != nil && !skip["norm"] {
+				norm(bs.x, l.nResid, l.nResidB)
+				lc.la(bs.copyRows, R*p.NEmbd, bs.h, bs.x)
 			}
 			// Gemma 4's per-layer embedding: x += post_norm(W_out ·
 			// (gelu(W_gate · x) * pl[li])), the sum through x2 and back.
@@ -8163,6 +8291,9 @@ func (g *devTier) layersSession(s backend.Session) {
 			if hb.headCap != nil {
 				lc.la(hb.headCap, m.rows, hb.logits, hb.logitsCap)
 			}
+			if pick {
+				lc.la(g.pickK, pickMax, hb.headOut(), g.pickIDs, g.pickOut)
+			}
 			g.HeadFolds++
 		} else if head != nil {
 			// The output norm and the vocabulary projection, in the same
@@ -8199,6 +8330,9 @@ func (g *devTier) layersSession(s backend.Session) {
 			}
 			if sampleK > 0 && err == nil {
 				err = g.launchSample(lc, bs.headOut(), bs.mvHead.rows, sampleK, samplePen)
+			}
+			if pick {
+				lc.la(g.pickK, pickMax, bs.headOut(), g.pickIDs, g.pickOut)
 			}
 		}
 	}
@@ -8316,6 +8450,10 @@ func (g *devTier) layersSession(s backend.Session) {
 		// The history changes every token; the recording reads its count.
 		w(g.sampleArgs, u32b(head.SampleArgs))
 	}
+	if pick {
+		// The ids change every question; the recording reads them.
+		w(g.pickIDs, g.pickStage(head))
+	}
 	if bs.dRows != nil {
 		// The recurrent descriptor (see emitLinear), staged here outside any
 		// recording: written inside emit it was a memcpy mid-capture, which
@@ -8418,6 +8556,12 @@ func (g *devTier) layersSession(s backend.Session) {
 			g.SampleLaunches++
 		}
 		direct = true
+	case pick:
+		err = s.Read(g.pickOut, f32b(head.PickVals[:len(head.Pick)]))
+		head.Picked = err == nil
+		// Counted here, not at the launch, which a replayed recording skips.
+		g.PickReads++
+		direct = true
 	case argmax:
 		tok := g.subBytes.one[:]
 		if err = s.Read(g.argmaxOut, tok); err == nil {
@@ -8507,6 +8651,7 @@ func accSplitFor(qdim, slots, pin int) int {
 func (l *layer) auxBufs() []backend.Buf {
 	return append(append(l.convBufs(),
 		l.nAttn, l.nFFN, l.nAttnB, l.nFFNB, l.nQ, l.nK,
+		l.nResid, l.nResidB, // BERT's post-norm
 		l.nPostAttn, l.nPostFFN, // gemma2/gemma3
 		l.clampB,      // Gemma 4's tower: its clipped linears' bounds
 		l.nQA, l.nKVA, // MLA's two latent norms
@@ -8543,6 +8688,10 @@ func (g *devTier) dropLayerLocal(l *layer) {
 	freeRec(l)
 	if l.mvRouter != nil {
 		l.mvRouter.Close()
+	}
+	if l.actK != nil {
+		l.actK.Close()
+		l.actK = nil
 	}
 	if n := l.recBytes; n > 0 {
 		g.refund(n)
@@ -9281,6 +9430,18 @@ func (g *devTier) prepBatch(width int) bool {
 // 33% waste on a 42-row tail.
 const batchGrain = 8 * 4
 
+// promptGrain is the grain a prompt chunk's own width is rounded to: the
+// batched kernels' batchGrain, or on a device that runs a chunk's attention
+// as FlashPrefill80 the row block that kernel takes (64 rows; a 32-row grain
+// sent every width that is not a multiple of 64 to the staged kernels and
+// the int8 operands). Callers hold g.mu.
+func (g *devTier) promptGrain() int {
+	if !g.kb.noAttnMMA && g.f16GemmK() == 16 {
+		return max(batchGrain, 16*4)
+	}
+	return batchGrain
+}
+
 // actWinFor is the activation window of the scratch set in use: a tier with a
 // vision tower has a set per segment, each with its plan, and the window is a
 // codegen input both tiers must agree on (nn.LayerPlan.ActWin).
@@ -9662,6 +9823,46 @@ func planConflict(bs *blockScratch, p *nn.LayerPlan) string {
 	if a, b := bs.p.Recurrent, p.Recurrent; a.Conv > 0 && b.Conv > 0 && a.KeyTiled != b.KeyTiled {
 		return fmt.Sprintf("a delta rule with key heads tiled=%v on a tier built for tiled=%v",
 			b.KeyTiled, a.KeyTiled)
+	}
+	return ""
+}
+
+// nonCausalConflict names a non-causal block the non-causal set, built from
+// the first such block's plan, cannot run, or "". planConflict passes every
+// non-causal plan, since a tower's blocks are one shape; an encoder with a
+// decision head after it (Laya) is two. A block's own MLP width, gating and
+// activation, and whether it rotates, are its own (layer.nffn, the set grown
+// to the widest MLP); what the set's kernels bake for every block is the
+// heads and their width, the norm kind, the rotary's width and pairing, a
+// gate buffer and the copy where a norm is missing, so a block differing in
+// one of those would run on the first one's kernels and is declined by name.
+// A convolutional tower block runs its own program and is not compared.
+func nonCausalConflict(bs *blockScratch, p *nn.LayerPlan) string {
+	if bs == nil || !p.NonCausal || p.Conv != nil || bs.p.Conv != nil {
+		return ""
+	}
+	a := &bs.p
+	gated := map[bool]string{true: "ungated", false: "gated"}
+	switch {
+	case a.NEmbd != p.NEmbd || a.NHead != p.NHead || a.NKVHead != p.NKVHead || a.HeadDim != p.HeadDim:
+		return fmt.Sprintf("a non-causal block of %d heads of %d (%d kv) over %d on a set built for %d of %d (%d kv) over %d",
+			p.NHead, p.HeadDim, p.NKVHead, p.NEmbd, a.NHead, a.HeadDim, a.NKVHead, a.NEmbd)
+	case !ungatedFFN(p) && ungatedFFN(a):
+		// The set of an ungated MLP has no gate buffer; a block's own width,
+		// gating and activation are otherwise its own (layer.nffn).
+		return fmt.Sprintf("a non-causal block's MLP (%s %s, %d wide) on a set built for (%s %s, %d wide)",
+			gated[ungatedFFN(p)], p.Act, p.NFFN, gated[ungatedFFN(a)], a.Act, a.NFFN)
+	case p.LayerNorm != a.LayerNorm:
+		return fmt.Sprintf("a non-causal block with LayerNorm %v on a set built with %v", p.LayerNorm, a.LayerNorm)
+	case p.NRot > 0 && !p.NoPosEnc && (a.NRot == 0 || a.NoPosEnc):
+		// A set that rotates nothing builds no rotary kernels; a block that
+		// rotates nothing runs on one that does (layer.noRope).
+		return fmt.Sprintf("a non-causal block rotating %d of each head on a set built to rotate none", p.NRot)
+	case p.NRot > 0 && a.NRot > 0 && (p.NRot != a.NRot || p.RopeNeox != a.RopeNeox):
+		return fmt.Sprintf("a non-causal block rotating %d (NEOX %v) on a set built for %d (NEOX %v)",
+			p.NRot, p.RopeNeox, a.NRot, a.RopeNeox)
+	case p.NoPreNorm && !a.NoPreNorm:
+		return "a non-causal block with no pre-norm on a set built for blocks that have one"
 	}
 	return ""
 }
@@ -10552,7 +10753,7 @@ func (g *devTier) volta70Attn(bs *blockScratch, kvDim, gqa int, scale float32) b
 	if sk == nil || ak == nil || (p.SWAWindow > 0 && sw == nil) {
 		for _, k := range []backend.Kernel{sk, ak, sw} {
 			if k != nil {
-				k.Close()
+				closeKern(k)
 			}
 		}
 		return false
@@ -10571,7 +10772,7 @@ func (g *devTier) volta70Attn(bs *blockScratch, kvDim, gqa int, scale float32) b
 		if fk != nil && p.SWAWindow > 0 {
 			fs.Window = p.SWAWindow
 			if fw = comp(kernels.FlashPrefill70(fs)); fw == nil {
-				fk.Close()
+				closeKern(fk)
 				fk = nil
 			}
 		}
@@ -10651,9 +10852,35 @@ func (g *devTier) flashTileAttn(bs *blockScratch, kvDim, gqa int, scale float32)
 	if fk != nil && p.SWAWindow > 0 {
 		fs.Window = p.SWAWindow
 		if fw = comp(kernels.FlashPrefillTile(fs, t)); fw == nil {
-			fk.Close()
+			closeKern(fk)
 			fk = nil
 		}
 	}
 	bs.fpT, bs.fpTW, bs.fpTile = fk, fw, t
+}
+
+// spanKernel builds the decode scratch's row copy the folded head reads (a
+// chunk's last row into the decode scratch) if it has none. Callers hold g.mu.
+func (g *devTier) spanKernel(hb *blockScratch) error {
+	if hb.spanK != nil {
+		return nil
+	}
+	kk, e := kernels.CopySpan(hb.p.NEmbd)
+	var k backend.Kernel
+	if e == nil {
+		k, e = g.dev.Compile(kk)
+	}
+	var ob backend.Buf
+	if e == nil {
+		w := g.scratchWin() // the scratch's own word (scratch.go)
+		if ob, e = g.dev.Alloc(4); e != nil {
+			closeKern(k)
+		}
+		w.close()
+	}
+	if e != nil {
+		return e
+	}
+	hb.spanK, hb.spanOff = k, ob
+	return nil
 }

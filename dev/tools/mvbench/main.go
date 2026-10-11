@@ -52,6 +52,18 @@ var shapes = []struct {
 	{"l1b ffn_down Q4_K", 2048, 8192, kernels.Q4_K},
 	{"l1b lm_head Q6_K", 128256, 2048, kernels.Q6_K},
 
+	// Ministral-3-3B-Instruct-Q4_K_M's: NEmbd 3072, 32 heads and 8 KV heads of
+	// 128, FFN 9216, an untied Q6_K head over 131072. Q4_K_M puts attn_v and
+	// ffn_down in Q6_K on half the blocks.
+	{"m3b q Q4_K", 4096, 3072, kernels.Q4_K},
+	{"m3b k/v Q4_K", 1024, 3072, kernels.Q4_K},
+	{"m3b v Q6_K", 1024, 3072, kernels.Q6_K},
+	{"m3b o Q4_K", 3072, 4096, kernels.Q4_K},
+	{"m3b gate/up Q4_K", 9216, 3072, kernels.Q4_K},
+	{"m3b ffn_down Q4_K", 3072, 9216, kernels.Q4_K},
+	{"m3b ffn_down Q6_K", 3072, 9216, kernels.Q6_K},
+	{"m3b lm_head Q6_K", 131072, 3072, kernels.Q6_K},
+
 	// One shape, every format. On its own this is misleading: a fixed shape
 	// is not a fixed byte count, so the rows sit at different cache levels.
 	// Use -eqbytes (see equalBytes) to compare formats.
@@ -109,7 +121,17 @@ func main() {
 	wideW := flag.Int("wallw", 0, "sweep the read-wall probe at 1,2,4,8 CONSECUTIVE words per "+
 		"thread and print nothing else. This IR has no vector load, so the question is whether "+
 		"the MSL compiler merges w consecutive scalar Loads -- see kernels.StreamWide")
+	only := flag.String("only", "", "time only the shapes whose name has this prefix")
 	flag.Parse()
+	if *only != "" {
+		kept := shapes[:0]
+		for _, s := range shapes {
+			if strings.HasPrefix(s.name, *only) {
+				kept = append(kept, s)
+			}
+		}
+		shapes = kept
+	}
 	if *eqMiB > 0 {
 		if err := equalBytes(*eqMiB); err != nil {
 			fmt.Fprintln(os.Stderr, err)

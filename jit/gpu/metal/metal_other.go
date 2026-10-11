@@ -40,22 +40,26 @@ func (c *Ctx) Residency() error { return errNoMetal }
 
 // GPUBusy and GPUBusyLast have nothing to report off darwin; they exist so
 // callers (engine/model/devrate_test.go) compile everywhere.
-func GPUBusy() (ns, buffers uint64)                      { return 0, 0 }
-func GPUBusyLast() uint64                                { return 0 }
-func GPUIdle() (ns, gaps uint64)                         { return 0, 0 }
-func HostGap() (ns, n uint64)                            { return 0, 0 }
-func RoundTrip() (ns, n uint64)                          { return 0, 0 }
-func (c *Ctx) Alloc(int) (*Buf, error)                   { return nil, errNoMetal }
-func (c *Ctx) Copy(*Buf, int, *Buf, int, int) error      { return errNoMetal }
-func (c *Ctx) ImportAlign() int                          { return 0 }
-func (c *Ctx) Import(unsafe.Pointer, int) (*Buf, error)  { return nil, errNoMetal }
-func (b *Buf) Imported() bool                            { return false }
-func (c *Ctx) Compile(string, string) (*Kernel, error)   { return nil, errNoMetal }
-func (b *Buf) Bytes() []byte                             { return nil }
-func (b *Buf) Free()                                     {}
-func (k *Kernel) Launch(int, int, ...*Buf) error         { return errNoMetal }
-func (k *Kernel) Close()                                 {}
-func (k *Kernel) Limits() (int, int)                     { return 0, 0 }
+func GPUBusy() (ns, buffers uint64)                     { return 0, 0 }
+func GPUBusyLast() uint64                               { return 0 }
+func GPUIdle() (ns, gaps uint64)                        { return 0, 0 }
+func HostGap() (ns, n uint64)                           { return 0, 0 }
+func RoundTrip() (ns, n uint64)                         { return 0, 0 }
+func (c *Ctx) Alloc(int) (*Buf, error)                  { return nil, errNoMetal }
+func (c *Ctx) Copy(*Buf, int, *Buf, int, int) error     { return errNoMetal }
+func (c *Ctx) ImportAlign() int                         { return 0 }
+func (c *Ctx) Import(unsafe.Pointer, int) (*Buf, error) { return nil, errNoMetal }
+func (b *Buf) Imported() bool                           { return false }
+func (c *Ctx) Compile(string, string) (*Kernel, error)  { return nil, errNoMetal }
+func (b *Buf) Bytes() []byte                            { return nil }
+func (b *Buf) Free()                                    {}
+func (k *Kernel) Launch(int, int, ...*Buf) error        { return errNoMetal }
+func (k *Kernel) Close()                                {}
+func (k *Kernel) Limits() (int, int)                    { return 0, 0 }
+func (k *Kernel) SetWrites(uint64)                      {}
+
+// Barriers has nothing to count off darwin.
+func Barriers() uint64                                   { return 0 }
 func (c *Ctx) NewBatch() *Batch                          { return nil }
 func (c *Ctx) NewQueue() (*Queue, error)                 { return nil, errNoMetal }
 func (q *Queue) NewBatch() *Batch                        { return nil }

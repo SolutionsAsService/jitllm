@@ -66,6 +66,15 @@ type Config struct {
 	// DefaultStepCost.
 	StepCost float64
 
+	// Fairness is the step loop's policy between throughput and the spread
+	// of the requests' waits, 0 to 100 (batchfair.go): 0 serves first come
+	// first served and runs each row to its end, the most tokens a second;
+	// above it rows are time-sliced (parked for a waiting request after a
+	// quantum that shrinks with the level), the prompts admitted after the
+	// oldest are fed beside it, and priority is a head start that age
+	// overtakes. nil takes DefaultFairness.
+	Fairness *int
+
 	// JointSteps is how a decode step whose rows could run as one joint step
 	// does run: measured per row count (the default), always joint, or never.
 	JointSteps JointSteps
@@ -296,6 +305,12 @@ type LoadedModel struct {
 	// embMu guards emb, the idle embedders Embed reuses (embed.go).
 	embMu sync.Mutex
 	emb   embedders
+
+	// decMu guards dec, the decision model's one Decider (decide.go), and
+	// decClosed, set at unload.
+	decMu     sync.Mutex
+	dec       *model.Decider
+	decClosed bool
 
 	tokensGenerated atomic.Int64
 	tokensPrefilled atomic.Int64
@@ -685,6 +700,7 @@ func (e *Engine) UnloadModel(id string, force bool) (closed int, err error) {
 	// they end -- and before the model it steps.
 	lm.closeLoop()
 	lm.closeEmbedders()
+	lm.closeDecider()
 	if cerr := lm.m.Close(); cerr != nil {
 		err = cerr
 	}
@@ -727,6 +743,7 @@ func (e *Engine) Close() {
 		lm.closeLoop()
 		e.closeIdle(lm)
 		lm.closeEmbedders()
+		lm.closeDecider()
 		lm.m.Close()
 		lm.closeDev()
 	}

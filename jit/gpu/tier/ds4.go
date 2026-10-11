@@ -502,7 +502,7 @@ func (x *ds4Scratch) free() {
 	}
 	for _, k := range ks {
 		if k != nil {
-			k.Close()
+			closeKern(k)
 		}
 	}
 	for _, b := range bs {

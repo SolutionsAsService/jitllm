@@ -538,7 +538,7 @@ func ActMul(n int, k ActKind) (*ir.Kernel, error) {
 // actMulKind refuses an activation ActMul has no gated form of.
 func actMulKind(k ActKind) error {
 	switch k {
-	case ActSiLU, ActGELU, ActSwiGLUOAI, ActIdentity, ActSwiGLUClamp, ActSitu:
+	case ActSiLU, ActGELU, ActSwiGLUOAI, ActIdentity, ActSwiGLUClamp, ActSitu, ActGELUErf:
 		return nil
 	}
 	return fmt.Errorf("kernels: ActMul: %v is not a gated activation", k)
@@ -756,6 +756,17 @@ func act(b *ir.Builder, g ir.Value, k ActKind) ir.Value {
 		return b.Div(ir.F32, g, b.Add(ir.F32, one, b.Exp(b.Sub(ir.F32, b.ConstF32(0), z))))
 	case ActSqrtSoftplus:
 		return b.Sqrt(softplus(b, g))
+	case ActGELUErf:
+		// 0.5*((x + |x|) - |x|*q), q = 1 - erf(|x|/sqrt 2); see ActGELUErf.
+		ax := b.Max(ir.F32, g, b.Sub(ir.F32, b.ConstF32(0), g))
+		z := b.Mul(ir.F32, b.ConstF32(0.70710678118654752), ax)
+		t := b.Div(ir.F32, one, b.Fma(b.ConstF32(GELUErfP), z, one))
+		p := b.ConstF32(GELUErfA[4])
+		for i := 3; i >= 0; i-- {
+			p = b.Fma(p, t, b.ConstF32(GELUErfA[i]))
+		}
+		q := b.Mul(ir.F32, b.Mul(ir.F32, p, t), b.Exp(b.Sub(ir.F32, b.ConstF32(0), b.Mul(ir.F32, z, z))))
+		return b.Mul(ir.F32, b.ConstF32(0.5), b.Sub(ir.F32, b.Add(ir.F32, g, ax), b.Mul(ir.F32, ax, q)))
 	}
 	const c = 0.7978845608028654 // sqrt(2/pi)
 	inner := b.Mul(ir.F32, b.ConstF32(c),
@@ -806,7 +817,7 @@ func softplus(b *ir.Builder, z ir.Value) ir.Value {
 // (a ViT's), and DeepSeek V4's router gate (ActSqrtSoftplus).
 func Act(n int, k ActKind) (*ir.Kernel, error) {
 	switch k {
-	case ActSiLU, ActGELU, ActQuickGELU, ActReLU2, ActReLU, ActSqrtSoftplus:
+	case ActSiLU, ActGELU, ActQuickGELU, ActReLU2, ActReLU, ActSqrtSoftplus, ActGELUErf:
 	default:
 		return nil, fmt.Errorf("kernels: Act: %v is not an ungated activation", k)
 	}

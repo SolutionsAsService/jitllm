@@ -870,6 +870,9 @@ func (c *cudaDev) GuaranteedLanes(w int) (bool, string) {
 
 func (c *cudaDev) Compile(k *ir.Kernel) (Kernel, error) {
 	compiles.Add(1)
+	if CompileLog != nil {
+		CompileLog(k.Name)
+	}
 	src, err := ptx.Lower(k, c.d.Target)
 	if err != nil {
 		return nil, err

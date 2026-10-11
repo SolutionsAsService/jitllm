@@ -755,3 +755,31 @@ func MMAShapeOf(o Op) MMAShape {
 	return MMAShape{M: int(o.Imm>>16) & 0xFF, N: int(o.Imm>>8) & 0xFF, K: int(o.Imm) & 0xFF,
 		Kind: MMAKind(o.Imm >> 24)}
 }
+
+// WrittenParams is a bit per parameter the kernel stores into (OpStore,
+// OpStoreV, OpTileStore), parameter i at bit i; a kernel with more than 64
+// parameters reports every bit set. A backend that runs dispatches
+// concurrently orders them by it: a dispatch reading what an earlier one
+// writes, or writing what an earlier one reads or writes, waits for it.
+func (k *Kernel) WrittenParams() uint64 {
+	if len(k.Params) > 64 {
+		return ^uint64(0)
+	}
+	var m uint64
+	for _, o := range k.Ops {
+		if o.Kind != OpStore && o.Kind != OpStoreV && o.Kind != OpTileStore {
+			continue
+		}
+		b := o.Args[0]
+		if b == 0 || int(b) > len(k.Ops) || k.Ops[b-1].Kind != OpParam {
+			// Not a parameter by name (shared memory is OpShared and is not
+			// a store target here): say everything is written.
+			if b != 0 && int(b) <= len(k.Ops) && k.Ops[b-1].Kind == OpShared {
+				continue
+			}
+			return ^uint64(0)
+		}
+		m |= 1 << uint(k.Ops[b-1].Imm)
+	}
+	return m
+}

@@ -380,9 +380,3 @@ func OpenWith(o Opts) []Device {
 	}
 	return out
 }
-
-var compiles atomic.Int64
-
-// Compiles counts the kernels every device in the process has been asked to
-// compile: what a benchmark reads to show its timed span compiled nothing.
-func Compiles() int64 { return compiles.Load() }

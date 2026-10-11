@@ -111,6 +111,9 @@ func (m *mtlDev) GuaranteedLanes(w int) (bool, string) {
 
 func (m *mtlDev) Compile(k *ir.Kernel) (Kernel, error) {
 	compiles.Add(1)
+	if CompileLog != nil {
+		CompileLog(k.Name)
+	}
 	src, err := msl.Emit(k)
 	if err != nil {
 		return nil, err
@@ -133,6 +136,7 @@ func (m *mtlDev) Compile(k *ir.Kernel) (Kernel, error) {
 		return nil, fmt.Errorf("metal: %s is written for %d-lane simdgroups and %s runs it at %d",
 			k.Name, k.Lanes, m.c.Name(), simd)
 	}
+	kern.SetWrites(k.WrittenParams())
 	return &mtlKern{k: kern, group: k.Group, name: k.Name}, nil
 }
 

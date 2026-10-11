@@ -154,6 +154,9 @@ func (g *devTier) dropBatch(w int) {
 	if g.stepW == w {
 		g.stepW = 0
 	}
+	if g.exactW == w {
+		g.exactW = 0
+	}
 }
 
 // dropAllScratch frees every scratch and the staging: what a device holding
@@ -357,4 +360,68 @@ func (g *devTier) batchFor(w int) int {
 		}
 	}
 	return 0
+}
+
+// prewarmPromptWidths builds, at the end of a placement, the kernels of every
+// grain width below the reserved prompt width (layersFor's exact prompt
+// scratch), so a prompt of any length compiles nothing: at most
+// promptW/batchGrain widths, each built and dropped again, its kernels kept in
+// the shape-keyed caches. A device with no reserved width, or the exact width
+// switched off, has nothing to warm.
+func (g *GPU) prewarmPromptWidths() {
+	for _, d := range g.devs {
+		// The decode retune compiles its candidate splits; run at the first
+		// token it put those compiles, on a cold shader cache seconds of
+		// them, inside the decode. Placement is done, so it runs here.
+		if !d.NoPromptPrewarm {
+			d.retuneDecode()
+		}
+		d.mu.Lock()
+		d.prewarmPromptWidths()
+		d.mu.Unlock()
+	}
+}
+
+// prewarmPromptWidths is GPU.prewarmPromptWidths for one device. Callers hold
+// g.mu.
+func (g *devTier) prewarmPromptWidths() {
+	if g.NoPromptPrewarm {
+		return
+	}
+	g.prewarmHeadKernels()
+	g.prewarmPrompt()
+	grain := g.promptGrain()
+	if g.NoExactPrompt || g.promptW <= grain {
+		return
+	}
+	for w := grain; w < g.promptW; w += grain {
+		if g.bbs[w] != nil || w == g.stepW {
+			continue
+		}
+		if g.prepBatch(w) {
+			g.PromptWidthsWarmed++
+			g.prewarmFused(g.bbs[w])
+		}
+		g.dropBatch(w)
+	}
+}
+
+// prewarmHeadKernels builds the decode scratch's two prompt-only kernels,
+// which a first prompt would build otherwise: the embedding gather from the
+// resident head and the row copy the folded head reads. PrepHead calls it
+// once the head is resident; placement may end before the head is offered.
+// Callers hold g.mu.
+func (g *devTier) prewarmHeadKernels() {
+	hb := g.bs
+	if g.NoPromptPrewarm || hb == nil || hb.head == nil || !hb.head.ok || kernels.IsFloat(hb.head.t) {
+		return
+	}
+	if hb.headEmbeds {
+		g.embedKernel(hb)
+	}
+	if hb.p.NEmbd == hb.head.k {
+		if err := g.spanKernel(hb); err != nil {
+			g.LastErr = "the folded head's row copy: " + err.Error()
+		}
+	}
 }

@@ -80,7 +80,7 @@ func (g *devTier) embedKernel(bs *blockScratch) bool {
 	var ib backend.Buf
 	if err == nil {
 		if ib, err = g.dev.Alloc(batchWidth * 4); err != nil {
-			k.Close()
+			closeKern(k)
 		}
 	}
 	if err != nil {

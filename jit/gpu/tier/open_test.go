@@ -326,15 +326,17 @@ func TestOneCardTwoAPIsIsOnePool(t *testing.T) {
 	}
 }
 
-// TestUnifiedBudgetIsCarvedFromTheHostBudget: the iGPU's share is a fraction
-// of the host's budget, not of what the device claims is free.
+// TestUnifiedBudgetIsCarvedFromTheHostBudget: the iGPU's share is bounded by
+// the host's budget, not by what the device claims is free.
 func TestUnifiedBudgetIsCarvedFromTheHostBudget(t *testing.T) {
 	_, igpu := thisBox()
-	slots := planSlots([]backend.Device{igpu}, nil, openOpts{host: boxHost, hostSet: true})
-	if slots[0].Bytes > boxHost/2 {
+	// The device claims more free memory than the whole host budget.
+	big := &fakeDev{name: "Iris Xe", api: "spirv", unified: true, free: boxRAM, total: boxRAM}
+	slots := planSlots([]backend.Device{big}, nil, openOpts{host: boxHost, hostSet: true})
+	if slots[0].Bytes >= boxHost {
 		t.Fatalf("the integrated GPU was given %.2f GiB out of a %.2f GiB host budget: "+
 			"it reported %.2f GiB free and every one of those bytes is the host's",
-			gib(slots[0].Bytes), gib(boxHost), gib(boxIGPUFree))
+			gib(slots[0].Bytes), gib(boxHost), gib(uint64(boxRAM)))
 	}
 	if !strings.Contains(slots[0].Why, "host") {
 		t.Errorf("provenance %q does not say the budget came off the host's", slots[0].Why)
@@ -577,5 +579,50 @@ func TestSameDeviceNamedTwiceIsRefused(t *testing.T) {
 	c := &fakeDev{name: "RTX 3050 Ti", api: "spirv", free: boxCardFree, total: boxCardTotal}
 	if err := noDuplicates([]backend.Device{a, c}, "cuda:0,vulkan:0"); err != nil {
 		t.Errorf("one card through two APIs was refused as a duplicate: %v", err)
+	}
+}
+
+// TestUnifiedDeviceGetsTheSharedPool: on unified memory the device and the
+// host are one pool, so by default the device may hold the host budget less
+// its headroom -- a model that fits the host budget goes on the device whole.
+// The figures are a 16 GiB M4's (a 7.68 GiB host budget, Metal's 10.67 GiB
+// working set), where the quarter that stood in hostShare gave 1.92 GiB and
+// left the last block and the head of Ministral-3-3B Q4_K_M (2.26 GiB) on the
+// CPU. A discrete card beside it keeps budgetFor's figure, untouched.
+func TestUnifiedDeviceGetsTheSharedPool(t *testing.T) {
+	const (
+		host    = 7*(1<<30) + 696<<20 // 7.68 GiB
+		working = 10*(1<<30) + 686<<20
+		model   = 2*(1<<30) + 266<<20 // 2.26 GiB: Ministral-3-3B Q4_K_M with its head
+	)
+	m4 := &fakeDev{name: "Apple M4", api: "msl", unified: true, free: working, total: working}
+	card, _ := thisBox()
+	slots := planSlots([]backend.Device{card, m4}, nil, openOpts{host: host, hostSet: true})
+
+	got := slots[1].Bytes
+	t.Logf("host budget %.2f GiB: unified device %.2f GiB (%s), host keeps %.2f GiB when it is full",
+		gib(host), gib(got), slots[1].Why, gib(host-got))
+	if got < model {
+		t.Fatalf("the unified device may hold %.2f GiB of a %.2f GiB host budget: a %.2f GiB "+
+			"model that fits the shared pool is split onto the CPU", gib(got), gib(host), gib(model))
+	}
+	if got >= host || host-got < 256<<20 {
+		t.Fatalf("the unified device may hold %.2f GiB of a %.2f GiB host budget: the host "+
+			"keeps no headroom for its pager and scratch", gib(got), gib(host))
+	}
+	if slots[1].Pool.Limit() != got || !slots[1].Pool.Host() {
+		t.Fatalf("the unified device's pool is %q at %.2f GiB, want the host pool at %.2f",
+			slots[1].Pool.Name(), gib(slots[1].Pool.Limit()), gib(got))
+	}
+	// Discrete: unchanged by construction, budgetFor's figure on its own pool.
+	want, _ := budgetFor(card, 0, "-vram")
+	if slots[0].Bytes != want || slots[0].Pool.Host() {
+		t.Fatalf("the discrete card got %d on pool %q, want budgetFor's %d on its own",
+			slots[0].Bytes, slots[0].Pool.Name(), want)
+	}
+	// An explicit -vram still wins on both.
+	slots = planSlots([]backend.Device{card, m4}, nil, openOpts{host: host, hostSet: true, budget: 1 << 30})
+	if slots[0].Bytes != 1<<30 || slots[1].Bytes != 1<<30 {
+		t.Fatalf("-vram 1G gave %d and %d", slots[0].Bytes, slots[1].Bytes)
 	}
 }

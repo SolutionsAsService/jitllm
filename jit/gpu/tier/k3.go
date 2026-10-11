@@ -199,13 +199,13 @@ func (x *k3Scratch) free() {
 	for _, ks := range []map[int]backend.Kernel{x.score, x.mixK, x.post} {
 		for _, k := range ks {
 			if k != nil {
-				k.Close()
+				closeKern(k)
 			}
 		}
 	}
 	for _, k := range []backend.Kernel{x.normL, x.quantL, x.sigMG} {
 		if k != nil {
-			k.Close()
+			closeKern(k)
 		}
 	}
 	for _, b := range []backend.Buf{x.scores, x.mix, x.lat, x.latAcc, x.latN, x.mgate, x.mgated} {

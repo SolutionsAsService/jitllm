@@ -43,3 +43,7 @@ func VulkanGroups(d Device) (limit uint32, dispatches uint64, ok bool) {
 	}
 	return v.c.MaxGroups(), v.c.Dispatches(), true
 }
+
+// MetalKernelWrites overrides the write mask a Metal kernel was compiled
+// with: the violation arm of the concurrent encoder's gate.
+func MetalKernelWrites(k Kernel, m uint64) { k.(*mtlKern).k.SetWrites(m) }
