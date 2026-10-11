@@ -537,9 +537,9 @@ jobs:
   # The package-manager files for the published release, generated from its
   # checksums.txt: the Homebrew cask and formula (packaging/homebrew) and the
   # winget manifests (packaging/winget), kept as the `packaging` artifact.
-  # With HOMEBREW_TAP_TOKEN set (a token that can push to jitllm/homebrew-tap)
+  # With HOMEBREW_TAP_TOKEN set (a token that can push to jitllm/homebrew-jitllm)
   # the cask and formula are committed to the tap, which is what makes
-  # `brew install --cask jitllm/tap/jitllm` install this release; without it
+  # `brew tap jitllm/jitllm` then `brew install --cask jitllm` install this release; without it
   # nothing leaves the run. The winget manifests are never submitted from
   # here: a pull request to microsoft/winget-pkgs is a separate step
   # (packaging/README.md).
@@ -574,7 +574,7 @@ jobs:
         if: env.HAS_TAP == 'true'
         env:
           TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          TAP_REPO: ${{ vars.HOMEBREW_TAP_REPO || 'jitllm/homebrew-tap' }}
+          TAP_REPO: ${{ vars.HOMEBREW_TAP_REPO || 'jitllm/homebrew-jitllm' }}
         run: |
           set -euo pipefail
           git clone --depth 1 "https://x-access-token:${TAP_TOKEN}@github.com/${TAP_REPO}.git" tap

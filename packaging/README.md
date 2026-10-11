@@ -120,7 +120,7 @@ ad-hoc signed on macOS and unsigned on Windows.
 | `HOMEBREW_TAP_TOKEN` | a token that can push to the tap repository | `packages` |
 
 and one optional repository variable, `HOMEBREW_TAP_REPO` (default
-`jitllm/homebrew-tap`).
+`jitllm/homebrew-jitllm`).
 
 A Windows certificate whose key lives in a hardware token or a cloud signing
 service cannot be exported as a `.pfx`; `windows/sign.sh` is the one place to
@@ -134,8 +134,8 @@ To publish, in order:
 2. **Windows**: a code-signing certificate (OV or EV) usable as a `.pfx`, or a
    signing service wired into `windows/sign.sh`. Set the two `WINDOWS_*`
    secrets.
-3. **Homebrew**: create the GitHub repository `jitllm/homebrew-tap` (the
-   `homebrew-` prefix is what makes `brew install jitllm/tap/...` find it),
+3. **Homebrew**: create the GitHub repository `jitllm/homebrew-jitllm` (the
+   `homebrew-` prefix is what makes `brew tap jitllm/jitllm` find it),
    and a fine-grained token with contents read/write on it alone, as
    `HOMEBREW_TAP_TOKEN`. The next release commits `Casks/jitllm.rb` and
    `Formula/jitllm.rb`; or push a release's `packaging` artifact by hand.

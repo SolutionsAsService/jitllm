@@ -50,8 +50,10 @@ Settings can start the server at login. With Homebrew (available once the tap
 is published):
 
 ```sh
-brew install --cask jitllm/tap/jitllm   # the app, with jitllm and jitllmd on PATH
-brew install jitllm/tap/jitllm          # jitllm and jitllmd only
+brew tap jitllm/jitllm
+brew trust jitllm/jitllm
+brew install --cask jitllm   # the app, with jitllm and jitllmd on PATH
+brew install jitllm          # jitllm and jitllmd only
 ```
 
 **Windows:** run `jitllm-setup_<version>_windows_amd64.exe` (or `_arm64.exe`)

@@ -24,8 +24,10 @@ The app carries the CLI and the server inside it. On first launch it offers to l
 With Homebrew, once the tap is published:
 
 ```sh
-brew install --cask jitllm/tap/jitllm   # the app, with jitllm and jitllmd on PATH
-brew install jitllm/tap/jitllm          # the CLI and the server only
+brew tap jitllm/jitllm
+brew trust jitllm/jitllm
+brew install --cask jitllm   # the app, with jitllm and jitllmd on PATH
+brew install jitllm          # the CLI and the server only
 ```
 
 The formula's server also runs as a Homebrew service: `brew services start jitllm`.
