@@ -303,11 +303,11 @@ func (g *devTier) allocPages(sid uint64, kp *kvPool, l *kvLayerPool, s seqID, co
 		err := g.growKVLayer(kp, l, l.n+count-len(l.free))
 		switch {
 		case err == nil:
-			g.kvCeil = 0
+			g.kvTight = false
 		case !errors.Is(err, ErrKVCapacity):
 			// The budget allowed it and the driver did not: the card's
-			// own ceiling, which KVRoom then reports (kvCeil).
-			g.kvCeil = g.used + g.reserved()
+			// own ceiling, which KVRoom then reads (kvTight).
+			g.kvTight = true
 		}
 		if err != nil && !g.evictForRoom(sid, kp, l, count) {
 			return err

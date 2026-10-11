@@ -1385,13 +1385,13 @@ type devShared struct {
 	// kvPromise is the positions of history a scheduler has admitted rows
 	// for and they have not yet taken (GPU.PromiseKV, kvroom.go).
 	kvPromise int
-	// kvCeil is where the driver refused the KV pool's growth inside the
-	// budget, in the budget's bytes (used plus reserved), 0 when it has
-	// not: the card holds less than the budget says (other processes on it,
-	// or a budget set past what was free), and KVRoom counts no growth past
-	// it, so a scheduler holds rows back rather than admitting history the
-	// card cannot take. A growth that succeeds, or a new budget, clears it.
-	kvCeil   uint64
+	// kvTight says the driver refused the KV pool a growth the budget
+	// allowed: the card holds less than the budget says (other processes on
+	// it, or a budget set past what was free), so KVRoom counts growth only
+	// up to what the driver reports free, asked each time, and a scheduler
+	// holds rows back rather than admitting history the card cannot take.
+	// A growth that succeeds, or a new budget, clears it.
+	kvTight  bool
 	winDepth int
 	// geoUsed says a split plan was ever placed here (gemma4.go).
 	geoUsed bool

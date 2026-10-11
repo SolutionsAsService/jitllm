@@ -15,9 +15,10 @@ import (
 // stayed and the park failed ("park: N block(s) stay on the device"), which
 // failed the request (server.TestSixtyFourRequestsWhoseHistoryStreams). It
 // now comes home through the pool's reserve. And the driver's refusal of a
-// growth the budget allowed is the card's ceiling: KVRoom stops counting
-// growth past it, so a scheduler holds rows back rather than admitting
-// history the card cannot take.
+// growth the budget allowed marks the card tight: KVRoom counts no growth
+// past what the driver reports free (this fake reports nothing, so none), and
+// a scheduler holds rows back rather than admitting history the card cannot
+// take.
 func TestHistoryComesHomeFromAFullCard(t *testing.T) {
 	p := fakePlan()
 	d := &fakeDev{}
