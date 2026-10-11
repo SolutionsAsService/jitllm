@@ -12,6 +12,14 @@ import (
 // per trip. The workgroup covers WM*MT*8 rows by WN*NT*8 tokens.
 type TileGemm struct {
 	MT, NT, WM, WN, KB int
+	// NoSplit keeps the duplicate staging where a sub-block could split
+	// between threads: the A/B arm and the bisection switch.
+	NoSplit bool
+	// TokOff is the first token this launch covers: a prompt whose token
+	// count the widest block does not divide runs the widest block over the
+	// leading tokens and a narrower one over the rest at an offset, both
+	// reading and writing the whole buffers (s.NTok is the launch's own count).
+	TokOff int
 }
 
 // Rows and Toks are the workgroup's block of the output.
@@ -116,11 +124,34 @@ func GemmTile(s MatVecShape, t TileGemm) (*ir.Kernel, error) {
 	if (BN*C)%nth != 0 || nth%C != 0 {
 		return nil, fmt.Errorf("kernels: GemmTile: %d threads do not tile %d B chunks", nth, BN*C)
 	}
+	// Where the items are fewer than the threads, the surplus threads would
+	// dequantize a duplicate. On a format with no secondary plane a sub-block
+	// splits by its primary words instead: parts threads each decode and stage
+	// 1/parts of it, so no thread repeats another's work. Apple's matrix
+	// multiply runs on the same ALUs as the dequant, so a duplicate is not free.
+	pw := qi.sub * qi.bits / 32
+	parts := 1
+	if dup && qi.hi == 0 && !t.NoSplit {
+		if p := nth / (BM * t.KB); nth%(BM*t.KB) == 0 && pw%p == 0 && subC%p == 0 {
+			parts = p
+		}
+	}
+	pwP, subCP := pw/parts, subC/parts
+	lw := pwP + qi.sub*qi.hi/32 // words a thread loads per item
 
 	name := fmt.Sprintf("gemmtile_%s_%dx%d_t%d_m%dn%dw%dx%dk%d", strings.ToLower(s.T.String()),
 		s.Rows, s.K, s.NTok, t.MT, t.NT, t.WM, t.WN, t.KB)
+	if parts > 1 {
+		name += fmt.Sprintf("_p%d", parts)
+	}
 	if grouped {
 		name += fmt.Sprintf("_e%d", s.Experts)
+	}
+	if t.TokOff != 0 {
+		if grouped || t.TokOff < 0 {
+			return nil, fmt.Errorf("kernels: GemmTile: token offset %d on a grouped or negative launch", t.TokOff)
+		}
+		name += fmt.Sprintf("_o%d", t.TokOff)
 	}
 	b := ir.New(name, [3]int{nth, 1, 1})
 	pQS := b.Param("pQS", ir.U32)
@@ -160,7 +191,7 @@ func GemmTile(s MatVecShape, t TileGemm) (*ir.Kernel, error) {
 		bm = b.Rem(ir.U32, b.Div(ir.U32, grp, c(int64(nB))), c(int64(mB)))
 	}
 	rowBlk := b.Mul(ir.U32, bm, c(int64(BM)))
-	tokBlk := b.Mul(ir.U32, bn, c(int64(BN)))
+	tokBlk := add(b.Mul(ir.U32, bn, c(int64(BN))), int64(t.TokOff))
 	tid := b.TID()
 
 	dq := newVoltaDeq(b, s.T, pQS, pD, pSC, s.Rows)
@@ -178,6 +209,7 @@ func GemmTile(s MatVecShape, t TileGemm) (*ir.Kernel, error) {
 	type aItem struct{ g, s, row, sb int64 }
 	aC := make([]aItem, nA)
 	var aRow0, aSb0 ir.Value
+	aPart := c(0)
 	if BM%nth == 0 {
 		per := BM / nth
 		aRow0, aSb0 = tid, c(0)
@@ -190,6 +222,9 @@ func GemmTile(s MatVecShape, t TileGemm) (*ir.Kernel, error) {
 		if dup {
 			aSb0 = b.Rem(ir.U32, aSb0, c(int64(t.KB)))
 		}
+		if parts > 1 {
+			aPart = b.Div(ir.U32, tid, c(int64(BM*t.KB)))
+		}
 		for i := range aC {
 			sb := int64(i * (nth / BM))
 			aC[i] = aItem{g: sb * int64(words*s.Rows), sb: sb}
@@ -197,11 +232,17 @@ func GemmTile(s MatVecShape, t TileGemm) (*ir.Kernel, error) {
 	}
 	aRowG := b.Add(ir.U32, rowBlk, aRow0)
 	aGBase := b.Add(ir.U32, b.Mul(ir.U32, aSb0, c(int64(words*s.Rows))), aRowG)
+	if parts > 1 {
+		aGBase = b.Add(ir.U32, aGBase, b.Mul(ir.U32, aPart, c(int64(pwP*s.Rows))))
+	}
 	// aAt[i][q] is where item i's chunk q goes: row*RS + (sub-block*subC+q)*4.
 	aSBase := b.Add(ir.U32, b.Mul(ir.U32, aRow0, c(int64(RS))), b.Mul(ir.U32, aSb0, c(int64(4*subC))))
+	if parts > 1 {
+		aSBase = b.Add(ir.U32, aSBase, b.Mul(ir.U32, aPart, c(int64(4*subCP))))
+	}
 	aAt := make([][]int64, nA)
 	for i := range aAt {
-		aAt[i] = make([]int64, subC)
+		aAt[i] = make([]int64, subCP)
 		for q := range aAt[i] {
 			aAt[i][q] = aC[i].s + (aC[i].sb*int64(subC)+int64(q))*4
 		}
@@ -221,7 +262,7 @@ func GemmTile(s MatVecShape, t TileGemm) (*ir.Kernel, error) {
 		wa := b.Add(ir.U32, W, aGBase)
 		sbBase := b.Add(ir.U32, sub, aSb0)
 		for i := range ra {
-			ra[i] = append(dq.words(wa, aC[i].g), dq.scaleWords(add(sbBase, aC[i].sb), add(aRowG, aC[i].row))...)
+			ra[i] = append(dq.wordsN(wa, aC[i].g, pwP), dq.scaleWords(add(sbBase, aC[i].sb), add(aRowG, aC[i].row))...)
 		}
 		rb = make([][]ir.Value, nBc)
 		wb := b.Add(ir.U32, Bc, bGBase)
@@ -238,13 +279,13 @@ func GemmTile(s MatVecShape, t TileGemm) (*ir.Kernel, error) {
 			if carry {
 				xi = x[i]
 			}
-			s2, m2 := dq.scalesOfX(ra[i][words:], xi, add(sbBase, aC[i].sb), add(aRowG, aC[i].row))
-			vals[i] = dq.frags(ra[i][:words], s2, m2)
+			s2, m2 := dq.scalesOfX(ra[i][lw:], xi, add(sbBase, aC[i].sb), add(aRowG, aC[i].row))
+			vals[i] = dq.fragsN(ra[i][:lw], s2, m2, pwP)
 		}
 		baseA := b.Add(ir.U32, aSBase, offA)
 		for i := 0; i < nA; i++ {
 			f := vals[i]
-			for q := 0; q < subC; q++ {
+			for q := 0; q < subCP; q++ {
 				b.StoreV(shA, baseA, aAt[i][q], f[2*q][0], f[2*q][1], f[2*q+1][0], f[2*q+1][1])
 			}
 		}
@@ -273,7 +314,7 @@ func GemmTile(s MatVecShape, t TileGemm) (*ir.Kernel, error) {
 		}
 		out := make([]ir.Value, nA)
 		for i := range out {
-			out[i] = dq.scNext(x[i], ra[i][words+1], add(b.Add(ir.U32, sub, aSb0), aC[i].sb), t.KB)
+			out[i] = dq.scNext(x[i], ra[i][lw+1], add(b.Add(ir.U32, sub, aSb0), aC[i].sb), t.KB)
 		}
 		return out
 	}

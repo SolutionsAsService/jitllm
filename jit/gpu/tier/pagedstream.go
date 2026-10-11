@@ -45,7 +45,7 @@ type streamSet struct {
 func (ss *streamSet) close() {
 	for _, k := range []backend.Kernel{ss.first, ss.fold, ss.finish} {
 		if k != nil {
-			k.Close()
+			closeKern(k)
 		}
 	}
 	for _, b := range ss.run {

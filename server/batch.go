@@ -1161,6 +1161,12 @@ func (e *Engine) generateBatched(ctx context.Context, lp *stepLoop, s *Session, 
 
 	// ---- the row: drain its outbox until the loop lets go of it. A cancel or
 	// a failed write marks the row, and the loop retires it at its next step.
+	// The cancel is marked the moment it happens, not when this drain next
+	// selects: the loop does not wait for the client, so while an emit blocks
+	// it keeps stepping the row, and a fast device can run the row to
+	// max_tokens before the drain would have looked.
+	stopMark := context.AfterFunc(ctx, func() { r.cancelled.Store(true) })
+	defer stopMark()
 	var emitErr error
 	cancelled := ctx.Done()
 	for {

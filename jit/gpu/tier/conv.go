@@ -688,6 +688,9 @@ func (g *devTier) convRun(lc *launcher, l *layer, cs *convScratch) {
 		if bm.act != nil {
 			lc.la(bm.act, bm.actN, src, g.f16Buf)
 			lc.la(bm.kern, bm.threads, r.qs, d, r.sc, g.f16Buf, out)
+			if t := bm.tail; t != nil {
+				lc.la(t.kern, t.threads, r.qs, d, r.sc, g.f16Buf, out)
+			}
 		} else {
 			n := bm.threads
 			if n == 0 {

@@ -103,7 +103,7 @@ type pagedVariant struct {
 func (v *pagedVariant) close() {
 	for _, k := range []backend.Kernel{v.k, v.scores, v.soft, v.acc, v.merge} {
 		if k != nil {
-			k.Close()
+			closeKern(k)
 		}
 	}
 }
@@ -161,7 +161,7 @@ func (g *devTier) initPagedScratch(bs *blockScratch) error {
 		if err != nil {
 			return err
 		}
-		c, err := g.dev.Compile(k)
+		c, err := g.compileShared(k)
 		if err != nil {
 			return err
 		}
@@ -329,7 +329,7 @@ func freePaged(pg *pagedScratch) {
 	}
 	for _, k := range []backend.Kernel{pg.copyK, pg.ropeK, pg.copyV, pg.copyLat, pg.copyPE} {
 		if k != nil {
-			k.Close()
+			closeKern(k)
 		}
 	}
 	for _, v := range pg.vars {
@@ -444,7 +444,7 @@ func (g *devTier) pagedBuild(bs *blockScratch, plan kernels.DecodePlan) (*pagedV
 	}
 	comp := func(dst *backend.Kernel, k *ir.Kernel, err error) error {
 		if err == nil {
-			*dst, err = g.dev.Compile(k)
+			*dst, err = g.compileShared(k)
 		}
 		return err
 	}
