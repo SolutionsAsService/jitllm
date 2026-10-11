@@ -1022,8 +1022,17 @@ func (g *devTier) streamStage(m, pl, n int) []byte {
 // same matvec at the split the fitted table would have picked, kept so
 // tuneSplit's answer can be checked in a paired A/B. Codegen is microseconds, so
 // a second kernel is free.
+// mvTail is a batched twin's second launch (mv.tail).
+type mvTail struct {
+	kern    backend.Kernel
+	threads int
+}
+
 type mv struct {
 	kern backend.Kernel
+	// tail is a second launch of the batched twin over the tokens the first
+	// one's block does not divide (tileMV); it takes the same parameters.
+	tail *mvTail
 	red  backend.Kernel
 	rows int
 	// slots is 0 for an ordinary matvec and NExpertUsed for an indexed one, in
@@ -5714,7 +5723,19 @@ func (g *devTier) layersCall(sid uint64, lo, hi, pos, n int, x, cs, csSWA []floa
 		// The chunk's own width, or the width reserved at placement when the
 		// narrow one does not fit (scratch.go); with no reservation, the full
 		// width.
-		ww := g.batchFor(w)
+		// The chunk's own grain width first: batchFor rounds a width it has
+		// not built to a power of two, which is right for a step loop whose
+		// row count moves every step but ran a 415-token prompt over 512
+		// rows, a quarter of its arithmetic on padding. prepBatch refuses a
+		// width the budget has no room for, and the chunk then pads as before.
+		ww := 0
+		if !g.NoExactPrompt && w != bw && (g.bbs[w] != nil || g.prepBatch(w)) {
+			ww = w
+			g.ExactPrompts++
+		}
+		if ww == 0 {
+			ww = g.batchFor(w)
+		}
 		if ww == 0 && w != bw && g.prepBatch(bw) {
 			ww = bw
 		}
@@ -6721,6 +6742,13 @@ func (g *devTier) layersSession(s backend.Session) {
 				lc.la(bm.kern, bm.threads, r.qs, d, r.sc, g.f16Buf, out, bm.bias)
 			} else {
 				lc.la(bm.kern, bm.threads, r.qs, d, r.sc, g.f16Buf, out)
+			}
+			if t := bm.tail; t != nil {
+				if bm.bias != nil {
+					lc.la(t.kern, t.threads, r.qs, d, r.sc, g.f16Buf, out, bm.bias)
+				} else {
+					lc.la(t.kern, t.threads, r.qs, d, r.sc, g.f16Buf, out)
+				}
 			}
 			if bm.split > 1 {
 				lc.la(bm.red, bm.redN, g.partBuf, dst)

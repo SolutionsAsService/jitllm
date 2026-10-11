@@ -15,6 +15,11 @@ type TileGemm struct {
 	// NoSplit keeps the duplicate staging where a sub-block could split
 	// between threads: the A/B arm and the bisection switch.
 	NoSplit bool
+	// TokOff is the first token this launch covers: a prompt whose token
+	// count the widest block does not divide runs the widest block over the
+	// leading tokens and a narrower one over the rest at an offset, both
+	// reading and writing the whole buffers (s.NTok is the launch's own count).
+	TokOff int
 }
 
 // Rows and Toks are the workgroup's block of the output.
@@ -142,6 +147,12 @@ func GemmTile(s MatVecShape, t TileGemm) (*ir.Kernel, error) {
 	if grouped {
 		name += fmt.Sprintf("_e%d", s.Experts)
 	}
+	if t.TokOff != 0 {
+		if grouped || t.TokOff < 0 {
+			return nil, fmt.Errorf("kernels: GemmTile: token offset %d on a grouped or negative launch", t.TokOff)
+		}
+		name += fmt.Sprintf("_o%d", t.TokOff)
+	}
 	b := ir.New(name, [3]int{nth, 1, 1})
 	pQS := b.Param("pQS", ir.U32)
 	pD := b.Param("pD", ir.U32)
@@ -180,7 +191,7 @@ func GemmTile(s MatVecShape, t TileGemm) (*ir.Kernel, error) {
 		bm = b.Rem(ir.U32, b.Div(ir.U32, grp, c(int64(nB))), c(int64(mB)))
 	}
 	rowBlk := b.Mul(ir.U32, bm, c(int64(BM)))
-	tokBlk := b.Mul(ir.U32, bn, c(int64(BN)))
+	tokBlk := add(b.Mul(ir.U32, bn, c(int64(BN))), int64(t.TokOff))
 	tid := b.TID()
 
 	dq := newVoltaDeq(b, s.T, pQS, pD, pSC, s.Rows)

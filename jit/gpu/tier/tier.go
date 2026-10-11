@@ -172,6 +172,14 @@ type Config struct {
 	// device to the int8 path's precision (model's hybrid batch gate) asks for
 	// that with this one knob on every backend.
 	NoVolta bool
+	// NoTileTail keeps GemmTile to one blocking that divides the whole prompt
+	// rather than the widest block plus a tail launch (tileMV): the A/B arm
+	// and the bisection switch.
+	NoTileTail bool
+	// NoExactPrompt runs a prompt chunk in the batched scratch batchFor picks
+	// (a power of two) rather than one built at the chunk's own grain width:
+	// the A/B arm and the bisection switch.
+	NoExactPrompt bool
 	// NoVoltaMoE keeps a batched mixture's expert matvecs on the dp4a grouped
 	// kernel where sm_70's grouped GemmVolta -- or Metal's grouped GemmTile --
 	// would run them (moegroup.go): the A/B arm for that, and its bisection
@@ -854,6 +862,12 @@ type Stats struct {
 	// refused them.
 	TileMV  int
 	TileWhy string
+	// TileTail counts the GemmTile matvecs built as a wide block plus a tail
+	// launch at a token offset.
+	TileTail int
+	// ExactPrompts counts prompt chunks run in a scratch of their own grain
+	// width rather than a wider one they pad.
+	ExactPrompts int
 	// SoftmaxLanes is 32 when the device passed pickSoftmax's on-device check
 	// of the warp reduction, and 1 when it fell back to a thread per head. The
 	// two produce slightly different floats (a tree sum against a sequential
@@ -1095,6 +1109,8 @@ func (s *Stats) add(o Stats) {
 		s.MMAWhy = o.MMAWhy
 	}
 	s.TileMV += o.TileMV
+	s.TileTail += o.TileTail
+	s.ExactPrompts += o.ExactPrompts
 	if o.TileWhy != "" {
 		s.TileWhy = o.TileWhy
 	}
