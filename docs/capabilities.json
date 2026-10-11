@@ -1,0 +1,1317 @@
+{
+  "schema": 1,
+  "container": {
+    "version": 28,
+    "note": "the engine reads only .jlm containers of exactly this version; anything else is converted with `jitllm convert`"
+  },
+  "input_formats": [
+    {
+      "name": "gguf",
+      "example": "jitllm convert model.gguf out.jlm",
+      "note": "a GGUF of an architecture in architectures; its tensor types must be in quantization.dequantable",
+      "evidence": [
+        "TestGreedyMatchesLlamaCpp"
+      ]
+    },
+    {
+      "name": "gguf+mmproj",
+      "example": "jitllm convert model.gguf mmproj.gguf out.jlm",
+      "note": "a text GGUF and its vision projector, joined into one container; the projector must be in projectors",
+      "evidence": [
+        "TestOneContainerCarriesTextAndVision"
+      ]
+    },
+    {
+      "name": "safetensors",
+      "example": "jitllm convert ./hf-model-dir out.jlm",
+      "note": "a Hugging Face directory whose config.json class is in safetensors_classes; -q8 stores the matrices as Q8_0",
+      "evidence": [
+        "TestSafetensorsMatchTransformers"
+      ]
+    },
+    {
+      "name": "url",
+      "example": "jitllm convert hf://owner/repo/model.gguf out.jlm",
+      "note": "an hf:// or https:// URL, downloaded into JITLLM_MODELS first",
+      "evidence": [
+        "TestLibraryArgsExpandsANameAndNothingElse"
+      ]
+    },
+    {
+      "name": "catalogue name",
+      "example": "jitllm convert qwen3-0.6b",
+      "note": "a name from `jitllm library`",
+      "evidence": [
+        "TestLibraryArgsExpandsANameAndNothingElse",
+        "TestEveryArchitectureIsObtainable"
+      ]
+    },
+    {
+      "name": "jlm",
+      "example": "jitllm run out.jlm 'Hello'",
+      "note": "the only format the engine runs; a container of another version is refused with the convert command",
+      "evidence": [
+        "TestEveryModelRunsGenerated"
+      ]
+    }
+  ],
+  "architectures": [
+    {
+      "name": "apertus",
+      "graph": "apertus"
+    },
+    {
+      "name": "arcee",
+      "graph": "arcee"
+    },
+    {
+      "name": "bailingmoe2",
+      "graph": "bailingmoe2"
+    },
+    {
+      "name": "bert",
+      "graph": "bert"
+    },
+    {
+      "name": "clip",
+      "graph": "clip"
+    },
+    {
+      "name": "cohere2",
+      "graph": "command-r"
+    },
+    {
+      "name": "command-r",
+      "graph": "command-r"
+    },
+    {
+      "name": "dbrx",
+      "graph": "dbrx"
+    },
+    {
+      "name": "deepseek2",
+      "graph": "deepseek2"
+    },
+    {
+      "name": "deepseek32",
+      "graph": "deepseek32"
+    },
+    {
+      "name": "deepseek4",
+      "graph": "deepseek4"
+    },
+    {
+      "name": "dots1",
+      "graph": "dots1"
+    },
+    {
+      "name": "ernie4_5",
+      "graph": "llama"
+    },
+    {
+      "name": "ernie4_5-moe",
+      "graph": "ernie4_5-moe"
+    },
+    {
+      "name": "exaone4",
+      "graph": "exaone4"
+    },
+    {
+      "name": "falcon",
+      "graph": "falcon"
+    },
+    {
+      "name": "falcon-h1",
+      "graph": "falcon-h1"
+    },
+    {
+      "name": "gemma",
+      "graph": "gemma"
+    },
+    {
+      "name": "gemma2",
+      "graph": "gemma2"
+    },
+    {
+      "name": "gemma3",
+      "graph": "gemma3"
+    },
+    {
+      "name": "gemma3n",
+      "graph": "gemma3n"
+    },
+    {
+      "name": "gemma4",
+      "graph": "gemma4"
+    },
+    {
+      "name": "glm4",
+      "graph": "glm4"
+    },
+    {
+      "name": "glm4moe",
+      "graph": "glm4moe"
+    },
+    {
+      "name": "gpt-oss",
+      "graph": "gptoss"
+    },
+    {
+      "name": "granite",
+      "graph": "granite"
+    },
+    {
+      "name": "granitehybrid",
+      "graph": "granitehybrid"
+    },
+    {
+      "name": "granitemoe",
+      "graph": "granite"
+    },
+    {
+      "name": "hunyuan-dense",
+      "graph": "hunyuan"
+    },
+    {
+      "name": "hunyuan-moe",
+      "graph": "hunyuan"
+    },
+    {
+      "name": "hunyuan_vl",
+      "graph": "hunyuan_vl"
+    },
+    {
+      "name": "jamba",
+      "graph": "jamba"
+    },
+    {
+      "name": "kimi-k3",
+      "graph": "kimi-k3"
+    },
+    {
+      "name": "lfm2",
+      "graph": "lfm2"
+    },
+    {
+      "name": "lfm2moe",
+      "graph": "lfm2"
+    },
+    {
+      "name": "llama",
+      "graph": "llama"
+    },
+    {
+      "name": "llama4",
+      "graph": "llama4"
+    },
+    {
+      "name": "mamba",
+      "graph": "mamba"
+    },
+    {
+      "name": "mamba2",
+      "graph": "mamba2"
+    },
+    {
+      "name": "minimax-m2",
+      "graph": "minimax-m2"
+    },
+    {
+      "name": "minimax-m3",
+      "graph": "minimax-m3"
+    },
+    {
+      "name": "mistral3",
+      "graph": "mistral3"
+    },
+    {
+      "name": "modern-bert",
+      "graph": "modern-bert"
+    },
+    {
+      "name": "nemotron",
+      "graph": "nemotron"
+    },
+    {
+      "name": "nemotron_h",
+      "graph": "nemotron_h"
+    },
+    {
+      "name": "nemotron_h_moe",
+      "graph": "nemotron_h"
+    },
+    {
+      "name": "nomic-bert",
+      "graph": "nomic-bert"
+    },
+    {
+      "name": "olmo2",
+      "graph": "olmo2"
+    },
+    {
+      "name": "olmoe",
+      "graph": "olmoe"
+    },
+    {
+      "name": "phi2",
+      "graph": "phi2"
+    },
+    {
+      "name": "phi3",
+      "graph": "phi3"
+    },
+    {
+      "name": "phimoe",
+      "graph": "phimoe"
+    },
+    {
+      "name": "qwen2",
+      "graph": "qwen2"
+    },
+    {
+      "name": "qwen2moe",
+      "graph": "qwen2moe"
+    },
+    {
+      "name": "qwen2vl",
+      "graph": "qwen2vl"
+    },
+    {
+      "name": "qwen3",
+      "graph": "qwen3"
+    },
+    {
+      "name": "qwen35",
+      "graph": "qwen3next"
+    },
+    {
+      "name": "qwen35moe",
+      "graph": "qwen3next"
+    },
+    {
+      "name": "qwen3moe",
+      "graph": "qwen3moe"
+    },
+    {
+      "name": "qwen3next",
+      "graph": "qwen3next"
+    },
+    {
+      "name": "qwen3vl",
+      "graph": "qwen3vl"
+    },
+    {
+      "name": "qwen3vlmoe",
+      "graph": "qwen3vlmoe"
+    },
+    {
+      "name": "seed_oss",
+      "graph": "seed_oss"
+    },
+    {
+      "name": "smollm3",
+      "graph": "smollm3"
+    },
+    {
+      "name": "stablelm",
+      "graph": "stablelm"
+    },
+    {
+      "name": "starcoder",
+      "graph": "starcoder"
+    },
+    {
+      "name": "starcoder2",
+      "graph": "starcoder2"
+    }
+  ],
+  "safetensors_classes": [
+    {
+      "name": "ApertusForCausalLM",
+      "graph": "apertus"
+    },
+    {
+      "name": "ArceeForCausalLM",
+      "graph": "arcee"
+    },
+    {
+      "name": "DeepseekV2ForCausalLM",
+      "graph": "deepseek2"
+    },
+    {
+      "name": "DeepseekV3ForCausalLM",
+      "graph": "deepseek2"
+    },
+    {
+      "name": "Dots1ForCausalLM",
+      "graph": "dots1"
+    },
+    {
+      "name": "Ernie4_5ForCausalLM",
+      "graph": "llama"
+    },
+    {
+      "name": "Ernie4_5_MoeForCausalLM",
+      "graph": "ernie4_5-moe"
+    },
+    {
+      "name": "Exaone4ForCausalLM",
+      "graph": "exaone4"
+    },
+    {
+      "name": "GemmaForCausalLM",
+      "graph": "gemma"
+    },
+    {
+      "name": "Glm4MoeForCausalLM",
+      "graph": "glm4moe"
+    },
+    {
+      "name": "Glm4MoeLiteForCausalLM",
+      "graph": "deepseek2"
+    },
+    {
+      "name": "HunYuanDenseV1ForCausalLM",
+      "graph": "hunyuan"
+    },
+    {
+      "name": "HunYuanMoEV1ForCausalLM",
+      "graph": "hunyuan"
+    },
+    {
+      "name": "KimiK3ForConditionalGeneration",
+      "graph": "kimi-k3"
+    },
+    {
+      "name": "KimiLinearForCausalLM",
+      "graph": "kimilinear"
+    },
+    {
+      "name": "LlamaForCausalLM",
+      "graph": "llama"
+    },
+    {
+      "name": "Ministral3ForCausalLM",
+      "graph": "mistral3"
+    },
+    {
+      "name": "MixtralForCausalLM",
+      "graph": "llama"
+    },
+    {
+      "name": "Olmo2ForCausalLM",
+      "graph": "olmo2"
+    },
+    {
+      "name": "Olmo3ForCausalLM",
+      "graph": "olmo2"
+    },
+    {
+      "name": "OlmoeForCausalLM",
+      "graph": "olmoe"
+    },
+    {
+      "name": "Phi3ForCausalLM",
+      "graph": "phi3"
+    },
+    {
+      "name": "PhiMoEForCausalLM",
+      "graph": "phimoe"
+    },
+    {
+      "name": "PhimoeForCausalLM",
+      "graph": "phimoe"
+    },
+    {
+      "name": "Qwen2ForCausalLM",
+      "graph": "qwen2"
+    },
+    {
+      "name": "Qwen2MoeForCausalLM",
+      "graph": "qwen2moe"
+    },
+    {
+      "name": "Qwen3ForCausalLM",
+      "graph": "qwen3"
+    },
+    {
+      "name": "Qwen3MoeForCausalLM",
+      "graph": "qwen3moe"
+    },
+    {
+      "name": "SeedOssForCausalLM",
+      "graph": "seed_oss"
+    },
+    {
+      "name": "SmolLM3ForCausalLM",
+      "graph": "smollm3"
+    }
+  ],
+  "projectors": [
+    "gemma3",
+    "gemma3nv",
+    "gemma4v",
+    "glm4v",
+    "hunyuanvl",
+    "idefics3",
+    "internvl",
+    "janus_pro",
+    "kimivl",
+    "llama4",
+    "mlp",
+    "phi4",
+    "pixtral",
+    "qwen2.5vl_merger",
+    "qwen2vl_merger",
+    "qwen3vl_merger",
+    "resampler"
+  ],
+  "quantization": {
+    "dequantable": [
+      "F32",
+      "F16",
+      "Q4_0",
+      "Q5_0",
+      "Q5_1",
+      "Q8_0",
+      "Q3_K",
+      "Q4_K",
+      "Q5_K",
+      "Q6_K",
+      "BF16",
+      "MXFP4"
+    ],
+    "packed": [
+      "Q4_0",
+      "Q5_0",
+      "Q5_1",
+      "Q8_0",
+      "Q3_K",
+      "Q4_K",
+      "Q5_K",
+      "Q6_K",
+      "MXFP4"
+    ]
+  },
+  "backends": [
+    {
+      "name": "cpu-amd64-avx2",
+      "kind": "host",
+      "package": "jit/cpu",
+      "implemented": true,
+      "verified": [
+        {
+          "hardware": "Intel Core i9-12900HK laptop (AVX2, AVX-VNNI)",
+          "evidence": [
+            "TestGreedyMatchesLlamaCpp",
+            "TestEveryModelRunsGenerated"
+          ]
+        },
+        {
+          "hardware": "Xeon E5-2680 v4 and D-2123IT (AVX2, no VNNI)",
+          "evidence": [
+            "TestGreedyMatchesLlamaCpp"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "cpu-amd64-sse",
+      "kind": "host",
+      "package": "jit/cpu",
+      "implemented": true,
+      "verified": [
+        {
+          "hardware": "Intel Atom (SSE4.2, no AVX)",
+          "evidence": [
+            "TestEveryModelRunsSSE",
+            "TestGreedyMatchesLlamaCpp"
+          ]
+        }
+      ],
+      "note": "x86 below SSE4.1+SSSE3 refuses to open a model, naming the missing extensions"
+    },
+    {
+      "name": "cpu-arm64",
+      "kind": "host",
+      "package": "jit/cpu",
+      "implemented": true,
+      "verified": [
+        {
+          "hardware": "Apple M4",
+          "evidence": [
+            "TestGreedyMatchesLlamaCpp",
+            "TestBatchMatchesForward",
+            "TestEveryModelRunsGenerated"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "cuda",
+      "kind": "device",
+      "package": "jit/gpu/cuda",
+      "implemented": true,
+      "verified": [
+        {
+          "hardware": "NVIDIA Tesla V100-SXM2-16GB (sm_70)",
+          "evidence": [
+            "TestLayerRelocatesToAnotherDevice",
+            "TestSynthLlama4OnEveryDevice"
+          ]
+        },
+        {
+          "hardware": "NVIDIA RTX 3050 Ti Laptop (sm_86)",
+          "evidence": [
+            "TestLayerRelocatesToAnotherDevice",
+            "TestSynthLlama4OnEveryDevice"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "vulkan",
+      "kind": "device",
+      "package": "jit/gpu/vulkan",
+      "implemented": true,
+      "verified": [
+        {
+          "hardware": "NVIDIA RTX 3050 Ti Laptop",
+          "evidence": [
+            "TestLayerRelocatesToAnotherDevice",
+            "TestSynthLlama4OnEveryDevice"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "metal",
+      "kind": "device",
+      "package": "jit/gpu/metal",
+      "implemented": true,
+      "verified": [
+        {
+          "hardware": "Apple M4 (10-core GPU)",
+          "evidence": [
+            "TestLayerRelocatesToAnotherDevice",
+            "TestSynthLlama4OnEveryDevice"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "hip",
+      "kind": "device",
+      "package": "jit/gpu/hip",
+      "implemented": true,
+      "verified": [],
+      "note": "built and gated offline (every kernel compiles for gfx90a, gfx942, gfx1030, gfx1100 and gfx1201 through comgr); not yet run on an AMD card -- the device gates (TestHIPDeviceRunsTheIR) skip without one. An AMD card without ROCm runs through vulkan. See docs/design/amd-hip.md"
+    }
+  ],
+  "api": {
+    "endpoints": [
+      {
+        "path": "/v1/chat/completions",
+        "methods": [
+          "POST"
+        ],
+        "surface": "openai",
+        "note": "streams with stream:true (SSE); the model's own chat template renders the messages and tools",
+        "fields": [
+          {
+            "name": "model",
+            "type": "string",
+            "note": "a loaded model's id or name"
+          },
+          {
+            "name": "messages",
+            "type": "array",
+            "note": "role and content; content is a string or content parts, of which only text parts are read (an image part is dropped, not refused: no HTTP route takes a picture on this build); tool_calls and tool_call_id carry a tool turn"
+          },
+          {
+            "name": "max_tokens",
+            "type": "integer",
+            "note": "the completion's token limit; absent is the session's KV capacity"
+          },
+          {
+            "name": "stream",
+            "type": "bool",
+            "note": "SSE frames as the API sends them"
+          },
+          {
+            "name": "stop",
+            "type": "array",
+            "note": "a string or an array of strings"
+          },
+          {
+            "name": "user",
+            "type": "string",
+            "note": "accepted and ignored"
+          },
+          {
+            "name": "temperature",
+            "type": "number",
+            "note": "0 is greedy; default 1; not negative"
+          },
+          {
+            "name": "top_p",
+            "type": "number",
+            "note": "nucleus, [0, 1]; default 1"
+          },
+          {
+            "name": "top_k",
+            "type": "integer",
+            "note": "0 or -1 disables"
+          },
+          {
+            "name": "min_p",
+            "type": "number",
+            "note": "[0, 1]; 0 disables"
+          },
+          {
+            "name": "repetition_penalty",
+            "type": "number",
+            "note": "positive; 1 disables; over the last 64 tokens"
+          },
+          {
+            "name": "presence_penalty",
+            "type": "number",
+            "note": "only 0: a non-zero value is refused (repetition_penalty is the engine's)"
+          },
+          {
+            "name": "frequency_penalty",
+            "type": "number",
+            "note": "only 0: a non-zero value is refused (repetition_penalty is the engine's)"
+          },
+          {
+            "name": "seed",
+            "type": "integer",
+            "note": "the draw's seed; seed+i for choice i"
+          },
+          {
+            "name": "n",
+            "type": "integer",
+            "note": "1..128 continuations of one prompt, prefilled once; each on a fresh session"
+          },
+          {
+            "name": "logprobs",
+            "type": "array",
+            "note": "a bool; the raw distribution's log-probabilities. top_logprobs is 0..20"
+          },
+          {
+            "name": "top_logprobs",
+            "type": "integer",
+            "note": "0..20, only with logprobs"
+          },
+          {
+            "name": "tools",
+            "type": "array",
+            "note": "an array of {type: function, function}; handed to the model's own chat template"
+          },
+          {
+            "name": "tool_choice",
+            "type": "array",
+            "note": "none, auto, required, or {type: function, function: {name}}; required and a named function hold the reply to a call in the model's own syntax"
+          },
+          {
+            "name": "parallel_tool_calls",
+            "type": "bool",
+            "note": "false holds a forced reply to one call"
+          },
+          {
+            "name": "max_completion_tokens",
+            "type": "integer",
+            "note": "max_tokens's newer spelling; max_tokens wins when both are set"
+          },
+          {
+            "name": "ignore_eos",
+            "type": "bool",
+            "note": "generate past an end-of-generation token up to max_tokens; refused with a forced tool call or a grammar"
+          },
+          {
+            "name": "jitllm_session",
+            "type": "string",
+            "note": "a server session id: the request continues its KV history"
+          },
+          {
+            "name": "jitllm_priority",
+            "type": "string",
+            "note": "high or normal"
+          },
+          {
+            "name": "jitllm_speculate",
+            "type": "bool",
+            "note": "speculative decoding on or off for this request; absent takes the session's"
+          },
+          {
+            "name": "response_format",
+            "type": "array",
+            "note": "text, json_object, or json_schema (json_schema.schema compiled to a grammar); a forced tool call takes precedence"
+          }
+        ]
+      },
+      {
+        "path": "/v1/completions",
+        "methods": [
+          "POST"
+        ],
+        "surface": "openai",
+        "note": "a bare prompt, no template; prompt is a string, an array of strings, or token ids",
+        "fields": [
+          {
+            "name": "model",
+            "type": "string",
+            "note": "a loaded model's id or name"
+          },
+          {
+            "name": "prompt",
+            "type": "array",
+            "note": "a string, an array of strings, token ids, or arrays of token ids; a list cannot stream"
+          },
+          {
+            "name": "max_tokens",
+            "type": "integer",
+            "note": "the completion's token limit; absent is the session's KV capacity"
+          },
+          {
+            "name": "stream",
+            "type": "bool",
+            "note": "SSE frames as the API sends them; one prompt only"
+          },
+          {
+            "name": "stop",
+            "type": "array",
+            "note": "a string or an array of strings"
+          },
+          {
+            "name": "echo",
+            "type": "bool",
+            "note": "prepend the prompt to the text; refused with logprobs"
+          },
+          {
+            "name": "ignore_eos",
+            "type": "bool",
+            "note": "generate past an end-of-generation token up to max_tokens; refused with a grammar"
+          },
+          {
+            "name": "temperature",
+            "type": "number",
+            "note": "0 is greedy; default 1; not negative"
+          },
+          {
+            "name": "top_p",
+            "type": "number",
+            "note": "nucleus, [0, 1]; default 1"
+          },
+          {
+            "name": "top_k",
+            "type": "integer",
+            "note": "0 or -1 disables"
+          },
+          {
+            "name": "min_p",
+            "type": "number",
+            "note": "[0, 1]; 0 disables"
+          },
+          {
+            "name": "repetition_penalty",
+            "type": "number",
+            "note": "positive; 1 disables; over the last 64 tokens"
+          },
+          {
+            "name": "presence_penalty",
+            "type": "number",
+            "note": "only 0: a non-zero value is refused (repetition_penalty is the engine's)"
+          },
+          {
+            "name": "frequency_penalty",
+            "type": "number",
+            "note": "only 0: a non-zero value is refused (repetition_penalty is the engine's)"
+          },
+          {
+            "name": "seed",
+            "type": "integer",
+            "note": "the draw's seed; seed+i for choice i"
+          },
+          {
+            "name": "n",
+            "type": "integer",
+            "note": "1..128 continuations of one prompt, prefilled once; each on a fresh session"
+          },
+          {
+            "name": "logprobs",
+            "type": "array",
+            "note": "a count, 0..20: the top alternatives per token"
+          },
+          {
+            "name": "top_logprobs",
+            "type": "integer",
+            "note": "not read on this route; logprobs is the count"
+          },
+          {
+            "name": "jitllm_session",
+            "type": "string",
+            "note": "a server session id: the request continues its KV history"
+          },
+          {
+            "name": "jitllm_priority",
+            "type": "string",
+            "note": "high or normal"
+          },
+          {
+            "name": "jitllm_speculate",
+            "type": "bool",
+            "note": "speculative decoding on or off for this request; absent takes the session's"
+          },
+          {
+            "name": "response_format",
+            "type": "array",
+            "note": "text, json_object, or json_schema (json_schema.schema compiled to a grammar)"
+          }
+        ]
+      },
+      {
+        "path": "/v1/models",
+        "methods": [
+          "GET"
+        ],
+        "surface": "openai",
+        "note": "the loaded models, with max_model_len"
+      },
+      {
+        "path": "/v1/embeddings",
+        "methods": [
+          "POST"
+        ],
+        "surface": "openai",
+        "note": "an embedding model only; a text model is refused",
+        "fields": [
+          {
+            "name": "model",
+            "type": "string",
+            "note": "a loaded embedding model's id or name"
+          },
+          {
+            "name": "input",
+            "type": "array",
+            "note": "a string, an array of strings, token ids, or arrays of token ids; none may be empty, and an input longer than the model's limit is refused, never truncated"
+          },
+          {
+            "name": "encoding_format",
+            "type": "string",
+            "note": "float (default) or base64"
+          },
+          {
+            "name": "dimensions",
+            "type": "integer",
+            "note": "at least 1: a Matryoshka prefix of the vector, renormalised"
+          },
+          {
+            "name": "user",
+            "type": "string",
+            "note": "accepted and ignored"
+          }
+        ]
+      },
+      {
+        "path": "/v1/files",
+        "methods": [
+          "GET",
+          "POST"
+        ],
+        "surface": "openai",
+        "note": "multipart upload (field file, purpose batch), at most 200 MiB"
+      },
+      {
+        "path": "/v1/files/",
+        "methods": [
+          "GET",
+          "DELETE"
+        ],
+        "surface": "openai",
+        "note": "/v1/files/{id} and /v1/files/{id}/content"
+      },
+      {
+        "path": "/v1/batches",
+        "methods": [
+          "GET",
+          "POST"
+        ],
+        "surface": "openai",
+        "note": "the Batch API over an uploaded file",
+        "fields": [
+          {
+            "name": "input_file_id",
+            "type": "string",
+            "note": "an uploaded file with purpose batch"
+          },
+          {
+            "name": "endpoint",
+            "type": "string",
+            "note": "/v1/chat/completions, /v1/completions or /v1/embeddings"
+          },
+          {
+            "name": "completion_window",
+            "type": "string",
+            "note": "accepted; default 24h"
+          },
+          {
+            "name": "metadata",
+            "type": "object",
+            "note": "stored and returned"
+          }
+        ]
+      },
+      {
+        "path": "/v1/batches/",
+        "methods": [
+          "GET",
+          "POST"
+        ],
+        "surface": "openai",
+        "note": "/v1/batches/{id} and POST /v1/batches/{id}/cancel"
+      },
+      {
+        "path": "/v1/systemone",
+        "methods": [
+          "POST"
+        ],
+        "surface": "jitllm",
+        "note": "a decision model's answers: a JSON object with state and questions, at most 16 MiB"
+      },
+      {
+        "path": "/v1/messages",
+        "methods": [
+          "POST"
+        ],
+        "surface": "anthropic",
+        "note": "streams with stream:true (SSE events as the Messages API sends them)",
+        "fields": [
+          {
+            "name": "model",
+            "type": "string",
+            "note": "a loaded model's id or name"
+          },
+          {
+            "name": "messages",
+            "type": "array",
+            "note": "role and content; content is a string or blocks: text, tool_use and tool_result are read, any other block (an image) is dropped, not refused"
+          },
+          {
+            "name": "system",
+            "type": "array",
+            "note": "a string or text blocks"
+          },
+          {
+            "name": "max_tokens",
+            "type": "integer",
+            "note": "required, positive"
+          },
+          {
+            "name": "temperature",
+            "type": "number",
+            "note": "0 is greedy; default 1"
+          },
+          {
+            "name": "top_p",
+            "type": "number",
+            "note": "nucleus, [0, 1]"
+          },
+          {
+            "name": "top_k",
+            "type": "integer",
+            "note": "0 disables"
+          },
+          {
+            "name": "stop_sequences",
+            "type": "array",
+            "note": "strings"
+          },
+          {
+            "name": "stream",
+            "type": "bool",
+            "note": "SSE events as the Messages API sends them"
+          },
+          {
+            "name": "tools",
+            "type": "array",
+            "note": "name, description, input_schema; cache_control marks a prompt-cache breakpoint"
+          },
+          {
+            "name": "tool_choice",
+            "type": "array",
+            "note": "auto, any, tool (with name) or none; disable_parallel_tool_use"
+          },
+          {
+            "name": "jitllm_session",
+            "type": "string",
+            "note": "a server session id: the request continues its KV history"
+          },
+          {
+            "name": "jitllm_priority",
+            "type": "string",
+            "note": "high or normal"
+          }
+        ]
+      },
+      {
+        "path": "/metrics",
+        "methods": [
+          "GET"
+        ],
+        "surface": "jitllm",
+        "note": "Prometheus text format"
+      },
+      {
+        "path": "/healthz",
+        "methods": [
+          "GET"
+        ],
+        "surface": "jitllm",
+        "note": "ok once listening"
+      },
+      {
+        "path": "/health",
+        "methods": [
+          "GET"
+        ],
+        "surface": "jitllm",
+        "note": "as /healthz"
+      },
+      {
+        "path": "/v1/capabilities",
+        "methods": [
+          "GET"
+        ],
+        "surface": "jitllm",
+        "note": "this manifest, for the running build"
+      }
+    ],
+    "refusals": [
+      {
+        "id": "presence-penalty",
+        "endpoints": [
+          "/v1/chat/completions",
+          "/v1/completions"
+        ],
+        "when": "presence_penalty is non-zero",
+        "message": "presence_penalty is not supported"
+      },
+      {
+        "id": "frequency-penalty",
+        "endpoints": [
+          "/v1/chat/completions",
+          "/v1/completions"
+        ],
+        "when": "frequency_penalty is non-zero",
+        "message": "frequency_penalty is not supported"
+      },
+      {
+        "id": "n-range",
+        "endpoints": [
+          "/v1/chat/completions",
+          "/v1/completions"
+        ],
+        "when": "n is outside 1..128",
+        "message": "n must be between 1 and 128"
+      },
+      {
+        "id": "top-logprobs-range",
+        "endpoints": [
+          "/v1/chat/completions"
+        ],
+        "when": "top_logprobs is outside 0..20",
+        "message": "top_logprobs must be between 0 and 20"
+      },
+      {
+        "id": "tool-type",
+        "endpoints": [
+          "/v1/chat/completions"
+        ],
+        "when": "a tool is not {type: function} with a name",
+        "message": "only {\"type\": \"function\"} with a name is supported"
+      },
+      {
+        "id": "tool-choice-undeclared",
+        "endpoints": [
+          "/v1/chat/completions",
+          "/v1/messages"
+        ],
+        "when": "tool_choice names a tool the request does not declare",
+        "message": "which is not among the request's tools"
+      },
+      {
+        "id": "completions-list-stream",
+        "endpoints": [
+          "/v1/completions"
+        ],
+        "when": "a list of prompts with stream",
+        "message": "a list of prompts cannot be streamed"
+      },
+      {
+        "id": "completions-logprobs-echo",
+        "endpoints": [
+          "/v1/completions"
+        ],
+        "when": "logprobs with echo",
+        "message": "logprobs with echo would need the prompt's own"
+      },
+      {
+        "id": "completions-list-logprobs-n",
+        "endpoints": [
+          "/v1/completions"
+        ],
+        "when": "logprobs or n with a list of prompts",
+        "message": "logprobs and n with a list of prompts are not built"
+      },
+      {
+        "id": "embedding-format",
+        "endpoints": [
+          "/v1/embeddings"
+        ],
+        "when": "encoding_format is neither float nor base64",
+        "message": "is not one of"
+      },
+      {
+        "id": "embedding-dimensions",
+        "endpoints": [
+          "/v1/embeddings"
+        ],
+        "when": "dimensions is below 1",
+        "message": "dimensions must be at least 1"
+      },
+      {
+        "id": "anthropic-max-tokens",
+        "endpoints": [
+          "/v1/messages"
+        ],
+        "when": "max_tokens is absent or not positive",
+        "message": "max_tokens is required and must be positive"
+      },
+      {
+        "id": "speculation-logprobs",
+        "endpoints": [
+          "/v1/chat/completions",
+          "/v1/completions"
+        ],
+        "when": "speculative decoding with logprobs",
+        "message": "speculation with logprobs is not built"
+      },
+      {
+        "id": "speculation-n",
+        "endpoints": [
+          "/v1/chat/completions",
+          "/v1/completions"
+        ],
+        "when": "speculative decoding with n above 1",
+        "message": "speculation with several choices is not built"
+      },
+      {
+        "id": "n-session",
+        "endpoints": [
+          "/v1/chat/completions",
+          "/v1/completions"
+        ],
+        "when": "n above 1 with jitllm_session",
+        "message": "several choices run on fresh sessions of a model"
+      },
+      {
+        "id": "forced-tool-ignore-eos",
+        "endpoints": [
+          "/v1/chat/completions",
+          "/v1/messages"
+        ],
+        "when": "a forced tool call (tool_choice required, any or named) with ignore_eos",
+        "message": "a forced tool call ends its reply with an end-of-generation token"
+      },
+      {
+        "id": "grammar-ignore-eos",
+        "endpoints": [
+          "/v1/chat/completions",
+          "/v1/completions"
+        ],
+        "when": "response_format json_object or json_schema with ignore_eos",
+        "message": "a grammar ends its reply with an end-of-generation token"
+      },
+      {
+        "id": "embedding-non-embedder",
+        "endpoints": [
+          "/v1/embeddings"
+        ],
+        "when": "the model is not an embedding model",
+        "message": "is not an embedding model"
+      },
+      {
+        "id": "decision-non-decider",
+        "endpoints": [
+          "/v1/systemone"
+        ],
+        "when": "the model is not a decision model",
+        "message": "is not a decision model"
+      }
+    ],
+    "control": [
+      {
+        "name": "jitllm.v1.DeviceService",
+        "methods": [
+          "ListDevices",
+          "GetDevice",
+          "GetMemoryTopology"
+        ]
+      },
+      {
+        "name": "jitllm.v1.InferenceService",
+        "methods": [
+          "Generate",
+          "Complete",
+          "Cancel",
+          "Embed"
+        ]
+      },
+      {
+        "name": "jitllm.v1.ModelService",
+        "methods": [
+          "ListModels",
+          "GetModel",
+          "LoadModel",
+          "UnloadModel",
+          "Convert",
+          "Tokenize",
+          "Detokenize",
+          "ApplyChatTemplate"
+        ]
+      },
+      {
+        "name": "jitllm.v1.PlacementService",
+        "methods": [
+          "GetPlacement",
+          "SetPlacement",
+          "RelocateBlocks",
+          "SetRelocation",
+          "TuneSeam",
+          "GetResidency",
+          "SetPageBudget"
+        ]
+      },
+      {
+        "name": "jitllm.v1.SessionService",
+        "methods": [
+          "CreateSession",
+          "GetSession",
+          "ListSessions",
+          "CloseSession",
+          "ResetSession",
+          "GetDeviceQueue"
+        ]
+      },
+      {
+        "name": "jitllm.v1.TelemetryService",
+        "methods": [
+          "GetStats",
+          "WatchStats",
+          "GetServerInfo"
+        ]
+      }
+    ]
+  }
+}

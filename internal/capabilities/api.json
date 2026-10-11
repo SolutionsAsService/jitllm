@@ -1,0 +1,706 @@
+{
+  "endpoints": [
+    {
+      "path": "/v1/chat/completions",
+      "methods": [
+        "POST"
+      ],
+      "surface": "openai",
+      "note": "streams with stream:true (SSE); the model's own chat template renders the messages and tools",
+      "fields": [
+        {
+          "name": "model",
+          "type": "string",
+          "note": "a loaded model's id or name"
+        },
+        {
+          "name": "messages",
+          "type": "array",
+          "note": "role and content; content is a string or content parts, of which only text parts are read (an image part is dropped, not refused: no HTTP route takes a picture on this build); tool_calls and tool_call_id carry a tool turn"
+        },
+        {
+          "name": "max_tokens",
+          "type": "integer",
+          "note": "the completion's token limit; absent is the session's KV capacity"
+        },
+        {
+          "name": "stream",
+          "type": "bool",
+          "note": "SSE frames as the API sends them"
+        },
+        {
+          "name": "stop",
+          "type": "array",
+          "note": "a string or an array of strings"
+        },
+        {
+          "name": "user",
+          "type": "string",
+          "note": "accepted and ignored"
+        },
+        {
+          "name": "temperature",
+          "type": "number",
+          "note": "0 is greedy; default 1; not negative"
+        },
+        {
+          "name": "top_p",
+          "type": "number",
+          "note": "nucleus, [0, 1]; default 1"
+        },
+        {
+          "name": "top_k",
+          "type": "integer",
+          "note": "0 or -1 disables"
+        },
+        {
+          "name": "min_p",
+          "type": "number",
+          "note": "[0, 1]; 0 disables"
+        },
+        {
+          "name": "repetition_penalty",
+          "type": "number",
+          "note": "positive; 1 disables; over the last 64 tokens"
+        },
+        {
+          "name": "presence_penalty",
+          "type": "number",
+          "note": "only 0: a non-zero value is refused (repetition_penalty is the engine's)"
+        },
+        {
+          "name": "frequency_penalty",
+          "type": "number",
+          "note": "only 0: a non-zero value is refused (repetition_penalty is the engine's)"
+        },
+        {
+          "name": "seed",
+          "type": "integer",
+          "note": "the draw's seed; seed+i for choice i"
+        },
+        {
+          "name": "n",
+          "type": "integer",
+          "note": "1..128 continuations of one prompt, prefilled once; each on a fresh session"
+        },
+        {
+          "name": "logprobs",
+          "type": "array",
+          "note": "a bool; the raw distribution's log-probabilities. top_logprobs is 0..20"
+        },
+        {
+          "name": "top_logprobs",
+          "type": "integer",
+          "note": "0..20, only with logprobs"
+        },
+        {
+          "name": "tools",
+          "type": "array",
+          "note": "an array of {type: function, function}; handed to the model's own chat template"
+        },
+        {
+          "name": "tool_choice",
+          "type": "array",
+          "note": "none, auto, required, or {type: function, function: {name}}; required and a named function hold the reply to a call in the model's own syntax"
+        },
+        {
+          "name": "parallel_tool_calls",
+          "type": "bool",
+          "note": "false holds a forced reply to one call"
+        },
+        {
+          "name": "max_completion_tokens",
+          "type": "integer",
+          "note": "max_tokens's newer spelling; max_tokens wins when both are set"
+        },
+        {
+          "name": "ignore_eos",
+          "type": "bool",
+          "note": "generate past an end-of-generation token up to max_tokens; refused with a forced tool call or a grammar"
+        },
+        {
+          "name": "jitllm_session",
+          "type": "string",
+          "note": "a server session id: the request continues its KV history"
+        },
+        {
+          "name": "jitllm_priority",
+          "type": "string",
+          "note": "high or normal"
+        },
+        {
+          "name": "jitllm_speculate",
+          "type": "bool",
+          "note": "speculative decoding on or off for this request; absent takes the session's"
+        },
+        {
+          "name": "response_format",
+          "type": "array",
+          "note": "text, json_object, or json_schema (json_schema.schema compiled to a grammar); a forced tool call takes precedence"
+        }
+      ]
+    },
+    {
+      "path": "/v1/completions",
+      "methods": [
+        "POST"
+      ],
+      "surface": "openai",
+      "note": "a bare prompt, no template; prompt is a string, an array of strings, or token ids",
+      "fields": [
+        {
+          "name": "model",
+          "type": "string",
+          "note": "a loaded model's id or name"
+        },
+        {
+          "name": "prompt",
+          "type": "array",
+          "note": "a string, an array of strings, token ids, or arrays of token ids; a list cannot stream"
+        },
+        {
+          "name": "max_tokens",
+          "type": "integer",
+          "note": "the completion's token limit; absent is the session's KV capacity"
+        },
+        {
+          "name": "stream",
+          "type": "bool",
+          "note": "SSE frames as the API sends them; one prompt only"
+        },
+        {
+          "name": "stop",
+          "type": "array",
+          "note": "a string or an array of strings"
+        },
+        {
+          "name": "echo",
+          "type": "bool",
+          "note": "prepend the prompt to the text; refused with logprobs"
+        },
+        {
+          "name": "ignore_eos",
+          "type": "bool",
+          "note": "generate past an end-of-generation token up to max_tokens; refused with a grammar"
+        },
+        {
+          "name": "temperature",
+          "type": "number",
+          "note": "0 is greedy; default 1; not negative"
+        },
+        {
+          "name": "top_p",
+          "type": "number",
+          "note": "nucleus, [0, 1]; default 1"
+        },
+        {
+          "name": "top_k",
+          "type": "integer",
+          "note": "0 or -1 disables"
+        },
+        {
+          "name": "min_p",
+          "type": "number",
+          "note": "[0, 1]; 0 disables"
+        },
+        {
+          "name": "repetition_penalty",
+          "type": "number",
+          "note": "positive; 1 disables; over the last 64 tokens"
+        },
+        {
+          "name": "presence_penalty",
+          "type": "number",
+          "note": "only 0: a non-zero value is refused (repetition_penalty is the engine's)"
+        },
+        {
+          "name": "frequency_penalty",
+          "type": "number",
+          "note": "only 0: a non-zero value is refused (repetition_penalty is the engine's)"
+        },
+        {
+          "name": "seed",
+          "type": "integer",
+          "note": "the draw's seed; seed+i for choice i"
+        },
+        {
+          "name": "n",
+          "type": "integer",
+          "note": "1..128 continuations of one prompt, prefilled once; each on a fresh session"
+        },
+        {
+          "name": "logprobs",
+          "type": "array",
+          "note": "a count, 0..20: the top alternatives per token"
+        },
+        {
+          "name": "top_logprobs",
+          "type": "integer",
+          "note": "not read on this route; logprobs is the count"
+        },
+        {
+          "name": "jitllm_session",
+          "type": "string",
+          "note": "a server session id: the request continues its KV history"
+        },
+        {
+          "name": "jitllm_priority",
+          "type": "string",
+          "note": "high or normal"
+        },
+        {
+          "name": "jitllm_speculate",
+          "type": "bool",
+          "note": "speculative decoding on or off for this request; absent takes the session's"
+        },
+        {
+          "name": "response_format",
+          "type": "array",
+          "note": "text, json_object, or json_schema (json_schema.schema compiled to a grammar)"
+        }
+      ]
+    },
+    {
+      "path": "/v1/models",
+      "methods": [
+        "GET"
+      ],
+      "surface": "openai",
+      "note": "the loaded models, with max_model_len"
+    },
+    {
+      "path": "/v1/embeddings",
+      "methods": [
+        "POST"
+      ],
+      "surface": "openai",
+      "note": "an embedding model only; a text model is refused",
+      "fields": [
+        {
+          "name": "model",
+          "type": "string",
+          "note": "a loaded embedding model's id or name"
+        },
+        {
+          "name": "input",
+          "type": "array",
+          "note": "a string, an array of strings, token ids, or arrays of token ids; none may be empty, and an input longer than the model's limit is refused, never truncated"
+        },
+        {
+          "name": "encoding_format",
+          "type": "string",
+          "note": "float (default) or base64"
+        },
+        {
+          "name": "dimensions",
+          "type": "integer",
+          "note": "at least 1: a Matryoshka prefix of the vector, renormalised"
+        },
+        {
+          "name": "user",
+          "type": "string",
+          "note": "accepted and ignored"
+        }
+      ]
+    },
+    {
+      "path": "/v1/files",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "surface": "openai",
+      "note": "multipart upload (field file, purpose batch), at most 200 MiB"
+    },
+    {
+      "path": "/v1/files/",
+      "methods": [
+        "GET",
+        "DELETE"
+      ],
+      "surface": "openai",
+      "note": "/v1/files/{id} and /v1/files/{id}/content"
+    },
+    {
+      "path": "/v1/batches",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "surface": "openai",
+      "note": "the Batch API over an uploaded file",
+      "fields": [
+        {
+          "name": "input_file_id",
+          "type": "string",
+          "note": "an uploaded file with purpose batch"
+        },
+        {
+          "name": "endpoint",
+          "type": "string",
+          "note": "/v1/chat/completions, /v1/completions or /v1/embeddings"
+        },
+        {
+          "name": "completion_window",
+          "type": "string",
+          "note": "accepted; default 24h"
+        },
+        {
+          "name": "metadata",
+          "type": "object",
+          "note": "stored and returned"
+        }
+      ]
+    },
+    {
+      "path": "/v1/batches/",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "surface": "openai",
+      "note": "/v1/batches/{id} and POST /v1/batches/{id}/cancel"
+    },
+    {
+      "path": "/v1/systemone",
+      "methods": [
+        "POST"
+      ],
+      "surface": "jitllm",
+      "note": "a decision model's answers: a JSON object with state and questions, at most 16 MiB"
+    },
+    {
+      "path": "/v1/messages",
+      "methods": [
+        "POST"
+      ],
+      "surface": "anthropic",
+      "note": "streams with stream:true (SSE events as the Messages API sends them)",
+      "fields": [
+        {
+          "name": "model",
+          "type": "string",
+          "note": "a loaded model's id or name"
+        },
+        {
+          "name": "messages",
+          "type": "array",
+          "note": "role and content; content is a string or blocks: text, tool_use and tool_result are read, any other block (an image) is dropped, not refused"
+        },
+        {
+          "name": "system",
+          "type": "array",
+          "note": "a string or text blocks"
+        },
+        {
+          "name": "max_tokens",
+          "type": "integer",
+          "note": "required, positive"
+        },
+        {
+          "name": "temperature",
+          "type": "number",
+          "note": "0 is greedy; default 1"
+        },
+        {
+          "name": "top_p",
+          "type": "number",
+          "note": "nucleus, [0, 1]"
+        },
+        {
+          "name": "top_k",
+          "type": "integer",
+          "note": "0 disables"
+        },
+        {
+          "name": "stop_sequences",
+          "type": "array",
+          "note": "strings"
+        },
+        {
+          "name": "stream",
+          "type": "bool",
+          "note": "SSE events as the Messages API sends them"
+        },
+        {
+          "name": "tools",
+          "type": "array",
+          "note": "name, description, input_schema; cache_control marks a prompt-cache breakpoint"
+        },
+        {
+          "name": "tool_choice",
+          "type": "array",
+          "note": "auto, any, tool (with name) or none; disable_parallel_tool_use"
+        },
+        {
+          "name": "jitllm_session",
+          "type": "string",
+          "note": "a server session id: the request continues its KV history"
+        },
+        {
+          "name": "jitllm_priority",
+          "type": "string",
+          "note": "high or normal"
+        }
+      ]
+    },
+    {
+      "path": "/metrics",
+      "methods": [
+        "GET"
+      ],
+      "surface": "jitllm",
+      "note": "Prometheus text format"
+    },
+    {
+      "path": "/healthz",
+      "methods": [
+        "GET"
+      ],
+      "surface": "jitllm",
+      "note": "ok once listening"
+    },
+    {
+      "path": "/health",
+      "methods": [
+        "GET"
+      ],
+      "surface": "jitllm",
+      "note": "as /healthz"
+    },
+    {
+      "path": "/v1/capabilities",
+      "methods": [
+        "GET"
+      ],
+      "surface": "jitllm",
+      "note": "this manifest, for the running build"
+    }
+  ],
+  "refusals": [
+    {
+      "id": "presence-penalty",
+      "endpoints": [
+        "/v1/chat/completions",
+        "/v1/completions"
+      ],
+      "when": "presence_penalty is non-zero",
+      "message": "presence_penalty is not supported"
+    },
+    {
+      "id": "frequency-penalty",
+      "endpoints": [
+        "/v1/chat/completions",
+        "/v1/completions"
+      ],
+      "when": "frequency_penalty is non-zero",
+      "message": "frequency_penalty is not supported"
+    },
+    {
+      "id": "n-range",
+      "endpoints": [
+        "/v1/chat/completions",
+        "/v1/completions"
+      ],
+      "when": "n is outside 1..128",
+      "message": "n must be between 1 and 128"
+    },
+    {
+      "id": "top-logprobs-range",
+      "endpoints": [
+        "/v1/chat/completions"
+      ],
+      "when": "top_logprobs is outside 0..20",
+      "message": "top_logprobs must be between 0 and 20"
+    },
+    {
+      "id": "tool-type",
+      "endpoints": [
+        "/v1/chat/completions"
+      ],
+      "when": "a tool is not {type: function} with a name",
+      "message": "only {\"type\": \"function\"} with a name is supported"
+    },
+    {
+      "id": "tool-choice-undeclared",
+      "endpoints": [
+        "/v1/chat/completions",
+        "/v1/messages"
+      ],
+      "when": "tool_choice names a tool the request does not declare",
+      "message": "which is not among the request's tools"
+    },
+    {
+      "id": "completions-list-stream",
+      "endpoints": [
+        "/v1/completions"
+      ],
+      "when": "a list of prompts with stream",
+      "message": "a list of prompts cannot be streamed"
+    },
+    {
+      "id": "completions-logprobs-echo",
+      "endpoints": [
+        "/v1/completions"
+      ],
+      "when": "logprobs with echo",
+      "message": "logprobs with echo would need the prompt's own"
+    },
+    {
+      "id": "completions-list-logprobs-n",
+      "endpoints": [
+        "/v1/completions"
+      ],
+      "when": "logprobs or n with a list of prompts",
+      "message": "logprobs and n with a list of prompts are not built"
+    },
+    {
+      "id": "embedding-format",
+      "endpoints": [
+        "/v1/embeddings"
+      ],
+      "when": "encoding_format is neither float nor base64",
+      "message": "is not one of"
+    },
+    {
+      "id": "embedding-dimensions",
+      "endpoints": [
+        "/v1/embeddings"
+      ],
+      "when": "dimensions is below 1",
+      "message": "dimensions must be at least 1"
+    },
+    {
+      "id": "anthropic-max-tokens",
+      "endpoints": [
+        "/v1/messages"
+      ],
+      "when": "max_tokens is absent or not positive",
+      "message": "max_tokens is required and must be positive"
+    },
+    {
+      "id": "speculation-logprobs",
+      "endpoints": [
+        "/v1/chat/completions",
+        "/v1/completions"
+      ],
+      "when": "speculative decoding with logprobs",
+      "message": "speculation with logprobs is not built"
+    },
+    {
+      "id": "speculation-n",
+      "endpoints": [
+        "/v1/chat/completions",
+        "/v1/completions"
+      ],
+      "when": "speculative decoding with n above 1",
+      "message": "speculation with several choices is not built"
+    },
+    {
+      "id": "n-session",
+      "endpoints": [
+        "/v1/chat/completions",
+        "/v1/completions"
+      ],
+      "when": "n above 1 with jitllm_session",
+      "message": "several choices run on fresh sessions of a model"
+    },
+    {
+      "id": "forced-tool-ignore-eos",
+      "endpoints": [
+        "/v1/chat/completions",
+        "/v1/messages"
+      ],
+      "when": "a forced tool call (tool_choice required, any or named) with ignore_eos",
+      "message": "a forced tool call ends its reply with an end-of-generation token"
+    },
+    {
+      "id": "grammar-ignore-eos",
+      "endpoints": [
+        "/v1/chat/completions",
+        "/v1/completions"
+      ],
+      "when": "response_format json_object or json_schema with ignore_eos",
+      "message": "a grammar ends its reply with an end-of-generation token"
+    },
+    {
+      "id": "embedding-non-embedder",
+      "endpoints": [
+        "/v1/embeddings"
+      ],
+      "when": "the model is not an embedding model",
+      "message": "is not an embedding model"
+    },
+    {
+      "id": "decision-non-decider",
+      "endpoints": [
+        "/v1/systemone"
+      ],
+      "when": "the model is not a decision model",
+      "message": "is not a decision model"
+    }
+  ],
+  "control": [
+    {
+      "name": "jitllm.v1.DeviceService",
+      "methods": [
+        "ListDevices",
+        "GetDevice",
+        "GetMemoryTopology"
+      ]
+    },
+    {
+      "name": "jitllm.v1.InferenceService",
+      "methods": [
+        "Generate",
+        "Complete",
+        "Cancel",
+        "Embed"
+      ]
+    },
+    {
+      "name": "jitllm.v1.ModelService",
+      "methods": [
+        "ListModels",
+        "GetModel",
+        "LoadModel",
+        "UnloadModel",
+        "Convert",
+        "Tokenize",
+        "Detokenize",
+        "ApplyChatTemplate"
+      ]
+    },
+    {
+      "name": "jitllm.v1.PlacementService",
+      "methods": [
+        "GetPlacement",
+        "SetPlacement",
+        "RelocateBlocks",
+        "SetRelocation",
+        "TuneSeam",
+        "GetResidency",
+        "SetPageBudget"
+      ]
+    },
+    {
+      "name": "jitllm.v1.SessionService",
+      "methods": [
+        "CreateSession",
+        "GetSession",
+        "ListSessions",
+        "CloseSession",
+        "ResetSession",
+        "GetDeviceQueue"
+      ]
+    },
+    {
+      "name": "jitllm.v1.TelemetryService",
+      "methods": [
+        "GetStats",
+        "WatchStats",
+        "GetServerInfo"
+      ]
+    }
+  ]
+}
