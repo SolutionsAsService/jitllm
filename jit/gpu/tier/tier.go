@@ -180,6 +180,10 @@ type Config struct {
 	// (a power of two) rather than one built at the chunk's own grain width:
 	// the A/B arm and the bisection switch.
 	NoExactPrompt bool
+	// NoPromptPrewarm leaves the exact prompt widths' kernels to the first
+	// prompt of each width (prewarmPromptWidths): the violation arm of the
+	// gate that a placed model's prompts compile nothing.
+	NoPromptPrewarm bool
 	// NoVoltaMoE keeps a batched mixture's expert matvecs on the dp4a grouped
 	// kernel where sm_70's grouped GemmVolta -- or Metal's grouped GemmTile --
 	// would run them (moegroup.go): the A/B arm for that, and its bisection
@@ -868,6 +872,9 @@ type Stats struct {
 	// ExactPrompts counts prompt chunks run in a scratch of their own grain
 	// width rather than a wider one they pad.
 	ExactPrompts int
+	// PromptWidthsWarmed counts the prompt grain widths whose kernels were
+	// built at the end of a placement (prewarmPromptWidths).
+	PromptWidthsWarmed int
 	// SoftmaxLanes is 32 when the device passed pickSoftmax's on-device check
 	// of the warp reduction, and 1 when it fell back to a thread per head. The
 	// two produce slightly different floats (a tree sum against a sequential
@@ -1111,6 +1118,7 @@ func (s *Stats) add(o Stats) {
 	s.TileMV += o.TileMV
 	s.TileTail += o.TileTail
 	s.ExactPrompts += o.ExactPrompts
+	s.PromptWidthsWarmed += o.PromptWidthsWarmed
 	if o.TileWhy != "" {
 		s.TileWhy = o.TileWhy
 	}
@@ -1501,6 +1509,7 @@ type devShared struct {
 	ragKerns            map[moeKernKey]backend.Kernel // a batched mixture's grouped matvecs (moegroup.go)
 	moeVolta            map[moeVoltaKey]moeVoltaMV    // their tensor-core twins; see voltaGroupedMV
 	ragK                map[ragKey]backend.Kernel     // a ragged step's matvecs; see ragMV
+	kshared             map[string]backend.Kernel     // scratch kernels by content; see compileShared
 	// convK, conv and convN are the convolutional blocks' kernels, their
 	// shared scratch and how many hold it (conv.go).
 	convK   map[convKey]backend.Kernel
@@ -2019,7 +2028,7 @@ func freeScratch(bs *blockScratch) {
 	for n, rk := range bs.ragLin { // a map, which the walk does not follow either
 		for _, k := range []backend.Kernel{rk.conv, rk.shift, rk.delta} {
 			if k != nil {
-				k.Close()
+				closeKern(k)
 			}
 		}
 		delete(bs.ragLin, n)
@@ -2042,7 +2051,7 @@ func freeScratch(bs *blockScratch) {
 				Elem().Interface().(backend.Kernel)
 			if ok && k != nil && !seenK[k] {
 				seenK[k] = true
-				k.Close()
+				closeKern(k)
 			}
 			continue
 		}
@@ -2151,11 +2160,11 @@ func (g *devTier) Close() {
 	// on one would panic.
 	for _, k := range g.kerns {
 		if k != nil {
-			k.Close()
+			closeKern(k)
 		}
 	}
 	for _, k := range g.idKerns {
-		k.Close()
+		closeKern(k)
 	}
 	for _, r := range g.res {
 		if r.ok {
@@ -2168,11 +2177,11 @@ func (g *devTier) Close() {
 	}
 	for _, k := range g.reduce {
 		if k != nil {
-			k.Close()
+			closeKern(k)
 		}
 	}
 	for _, k := range g.restrides {
-		k.Close()
+		closeKern(k)
 	}
 	// Every layer left the pool with its block; what remains is the pool
 	// itself and its charge.
@@ -2187,7 +2196,7 @@ func (g *devTier) Close() {
 	g.closePick()
 	g.lane0.freePick()
 	for _, k := range g.recCopies {
-		k.Close()
+		closeKern(k)
 	}
 	g.freeAltNorms()
 	if g.recNext != nil {
@@ -2195,33 +2204,34 @@ func (g *devTier) Close() {
 	}
 	for _, k := range g.segKerns {
 		if k != nil {
-			k.Close()
+			closeKern(k)
 		}
 	}
 	for _, k := range g.ragKerns {
 		if k != nil {
-			k.Close()
+			closeKern(k)
 		}
 	}
 	for _, k := range g.ragK {
 		if k != nil {
-			k.Close()
+			closeKern(k)
 		}
 	}
 	for _, k := range g.convK {
 		if k != nil {
-			k.Close()
+			closeKern(k)
 		}
 	}
 	for _, k := range g.unks {
 		if k != nil {
-			k.Close()
+			closeKern(k)
 		}
 	}
 	g.dropGraph()
 	// The block scratches, which nothing else frees (see freeScratch), and
 	// the staging, refunded as they go.
 	g.dropAllScratch()
+	g.closeShared()
 	if g.rawBuf != nil {
 		g.rawBuf.Free()
 	}

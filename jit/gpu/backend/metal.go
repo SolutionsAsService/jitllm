@@ -110,6 +110,10 @@ func (m *mtlDev) GuaranteedLanes(w int) (bool, string) {
 }
 
 func (m *mtlDev) Compile(k *ir.Kernel) (Kernel, error) {
+	compiles.Add(1)
+	if CompileLog != nil {
+		CompileLog(k.Name)
+	}
 	src, err := msl.Emit(k)
 	if err != nil {
 		return nil, err

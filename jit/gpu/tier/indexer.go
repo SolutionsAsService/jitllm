@@ -139,7 +139,7 @@ func (ix *idxScratch) free() {
 	for _, k := range []backend.Kernel{ix.lnPart, ix.lnVar, ix.lnApply, ix.copyK, ix.ropeK, ix.writeK,
 		ix.copyQ, ix.ropeQ, ix.scores, ix.sel, ix.gather, ix.desc} {
 		if k != nil {
-			k.Close()
+			closeKern(k)
 		}
 	}
 	for _, b := range []backend.Buf{ix.kRaw, ix.kPart, ix.kVar, ix.kn, ix.kRot, ix.qRaw, ix.qRot, ix.wts,

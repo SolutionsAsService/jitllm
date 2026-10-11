@@ -222,6 +222,7 @@ func (h *hipDev) Alloc(n int) (Buf, error) {
 // offline gate (lowertest.TestAMDGPULowersForEveryTarget) holds every shipped
 // kernel to, checked here too because a shape no gate registered reaches it.
 func (h *hipDev) Compile(k *ir.Kernel) (Kernel, error) {
+	compiles.Add(1)
 	src, err := amdgpu.Lower(k, h.tg)
 	if err != nil {
 		return nil, err

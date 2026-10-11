@@ -192,13 +192,13 @@ func (g *devTier) setWindowsLocked(runs []nn.KeyRun, perRow bool) bool {
 		}
 		att, err := g.dev.Alloc(ar * bs.p.NHead * bs.sstride * 4)
 		if err != nil {
-			c.Close()
+			closeKern(c)
 			return fail("windowed runs: %v", err)
 		}
 		wins := make([]backend.Buf, bs.rows/ar)
 		for i := range wins {
 			if wins[i], err = g.dev.Alloc(ar * 8); err != nil {
-				c.Close()
+				closeKern(c)
 				att.Free()
 				for _, b := range wins[:i] {
 					b.Free()

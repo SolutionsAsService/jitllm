@@ -320,7 +320,7 @@ func (g *devTier) prepRowsHead(bs *blockScratch, rowsHead *nn.Head, n int) bool 
 		if bs.ragCap == nil {
 			b, err := g.dev.Alloc(R * head.nrows * 4)
 			if err != nil {
-				k.Close()
+				closeKern(k)
 				return fail(err)
 			}
 			bs.ragCap = b
@@ -1144,7 +1144,7 @@ func (g *devTier) prepRagLinear(bs *blockScratch, n int) bool {
 		if err != nil {
 			for _, c := range []backend.Kernel{rk.conv, rk.shift, rk.delta} {
 				if c != nil {
-					c.Close()
+					closeKern(c)
 				}
 			}
 			return fail(err)
