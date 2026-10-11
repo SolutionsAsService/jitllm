@@ -46,8 +46,7 @@ are [desktop](#desktop-app) and [terminal](#terminal-app) apps too.
 open it and drag **jitllm** to Applications (or take the signed app alone,
 `jitllm_<version>_darwin_<arch>.app.zip`, and unzip it there). The app carries `jitllm` and
 `jitllmd`; on first launch it offers to put them on your `PATH`, and its
-Settings can start the server at login. With Homebrew (available once the tap
-is published):
+Settings can start the server at login. With Homebrew:
 
 ```sh
 brew tap jitllm/jitllm
