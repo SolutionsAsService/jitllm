@@ -17,12 +17,14 @@ func Lower(k *ir.Kernel, target string) (string, error) {
 	if err := k.Validate(); err != nil {
 		return "", err
 	}
+	sm := smOf(target)
 	for i, o := range k.Ops {
-		if o.Kind == ir.OpPhi && o.Tile != nil {
-			// Named here and not at the phi, whose register is allocated at the
-			// loop head before the walk reaches any tile op's refusal below.
-			return "", fmt.Errorf("ptx: op %d: a loop-carried collective tile has no lowering: "+
-				"this backend takes the fragment-shaped mma (ir.OpMMA)", i)
+		// Refused before anything is emitted, so a tile phi's registers are
+		// never allocated for a type with no lowering.
+		if o.Tile != nil {
+			if err := tileSupported(*o.Tile, sm); err != nil {
+				return "", fmt.Errorf("op %d (%s): %w", i, o.Kind, err)
+			}
 		}
 	}
 	var b Buf
@@ -63,6 +65,16 @@ func Lower(k *ir.Kernel, target string) (string, error) {
 			return "s32"
 		default:
 			return "u32"
+		}
+	}
+
+	// The collective tiles' registers and lane coordinates (tile.go).
+	var tl *tileLower
+	for _, o := range k.Ops {
+		if o.Tile != nil {
+			tl = &tileLower{b: &b, sm: sm, regs: map[ir.Value][]Reg{}, shared: shared}
+			tl.prologue()
+			break
 		}
 	}
 
@@ -371,6 +383,49 @@ func Lower(k *ir.Kernel, target string) (string, error) {
 			b.Op("mov.b32 %v,%v;", r, dst)
 			reg[v] = r
 
+		case ir.OpSubgroupReduce:
+			// A butterfly over the warp: after the five steps every lane holds
+			// the combination of all 32. shfl.sync carries the warp-wide
+			// convergence point OpShuffleXor's comment describes. (redux.sync
+			// would do an integer reduction in one instruction on sm_80+, but
+			// not a float one, and one lowering for every type keeps the
+			// combination order one thing.)
+			cur := reg[a0]
+			for m := ir.SubgroupLanes / 2; m >= 1; m /= 2 {
+				src, dst := b.Reg(B32), b.Reg(B32)
+				b.Op("mov.b32 %v,%v;", src, cur)
+				b.Op("shfl.sync.bfly.b32 %v,%v,%d,31,-1;", dst, src, m)
+				other := b.Reg(class(o.Type))
+				b.Op("mov.b32 %v,%v;", other, dst)
+				r := b.Reg(class(o.Type))
+				b.Op("%s.%s %v,%v,%v;", reduceOp(ir.ReduceOf(o)), sfx(o.Type), r, cur, other)
+				cur = r
+			}
+			reg[v] = cur
+
+		case ir.OpSubgroupBroadcast, ir.OpShuffle:
+			// shfl.sync.idx reads the lane the source register names. The
+			// source is masked to the warp first: the IR defines lane & 31,
+			// and idx mode with c=31 would otherwise clamp rather than wrap.
+			lane := b.Reg(B32)
+			b.Op("and.b32 %v,%v,31;", lane, reg[a1])
+			src, dst := b.Reg(B32), b.Reg(B32)
+			b.Op("mov.b32 %v,%v;", src, reg[a0])
+			b.Op("shfl.sync.idx.b32 %v,%v,%v,31,-1;", dst, src, lane)
+			r := b.Reg(class(o.Type))
+			b.Op("mov.b32 %v,%v;", r, dst)
+			reg[v] = r
+
+		case ir.OpLaneID:
+			r := b.Reg(B32)
+			b.Op("mov.u32 %v,%%laneid;", r)
+			reg[v] = r
+
+		case ir.OpSubgroupSize:
+			r := b.Reg(B32)
+			b.Op("mov.u32 %v,WARP_SZ;", r)
+			reg[v] = r
+
 		case ir.OpLoop:
 			// Loop-carried values are initialised BEFORE the label, which needs
 			// a scan forward to the matching EndLoop.
@@ -394,6 +449,12 @@ func Lower(k *ir.Kernel, target string) (string, error) {
 			}
 			for _, p := range f.phis {
 				po := k.Ops[p-1]
+				if po.Tile != nil {
+					rs := tl.fresh(*po.Tile)
+					tl.move(rs, tl.regs[po.Args[0]], *po.Tile)
+					tl.regs[p] = rs
+					continue
+				}
 				r := b.Reg(class(po.Type))
 				reg[p] = r
 				b.Op("mov.%s %v,%v;", movSuffix(po.Type), r, reg[po.Args[0]])
@@ -422,6 +483,10 @@ func Lower(k *ir.Kernel, target string) (string, error) {
 			stack = stack[:len(stack)-1]
 			for _, p := range f.phis {
 				po := k.Ops[p-1]
+				if po.Tile != nil {
+					tl.move(tl.regs[p], tl.regs[po.Args[1]], *po.Tile)
+					continue
+				}
 				if reg[po.Args[1]] != reg[p] {
 					b.Op("mov.%s %v,%v;", movSuffix(po.Type), reg[p], reg[po.Args[1]])
 				}
@@ -434,20 +499,40 @@ func Lower(k *ir.Kernel, target string) (string, error) {
 				b.Bind(f.merge)
 			}
 
-		default:
-			if ir.IsTileOp(o.Kind) {
-				// A deliberate refusal: PTX's mma.sync takes per-lane fragments
-				// with a documented layout (ir.OpMMA); a collective tile is the
-				// opposite contract, with no lane layout to map.
-				return "", fmt.Errorf("ptx: no lowering for %s: this backend takes the "+
-					"fragment-shaped mma (ir.OpMMA), and a collective tile has no lane "+
-					"layout to map onto one", o.Kind)
+		case ir.OpTileLoad:
+			tl.regs[v] = tl.access(o, reg[a0], reg[a1], reg[a2], nil)
+
+		case ir.OpTileStore:
+			tl.access(o, reg[a0], reg[a1], reg[a2], tl.regs[o.Vargs[0]])
+
+		case ir.OpTileSplat:
+			if k.Ops[a0-1].Type != ir.F32 {
+				return "", fmt.Errorf("ptx: op %d: a %v splat of a %s; the f16 and f32 tiles take an f32",
+					i, *o.Tile, k.Ops[a0-1].Type)
 			}
+			tl.regs[v] = tl.splat(*o.Tile, reg[a0])
+
+		case ir.OpTileMMA:
+			tl.regs[v] = tl.mma(*k.Ops[a0-1].Tile, *k.Ops[a1-1].Tile, *k.Ops[a2-1].Tile,
+				tl.regs[a0], tl.regs[a1], tl.regs[a2])
+
+		default:
 			return "", fmt.Errorf("ptx: no lowering for %s", o.Kind)
 		}
 	}
 	b.Op("ret;")
 	return b.Text(target, k.Name, params), nil
+}
+
+// reduceOp is the PTX instruction an OpSubgroupReduce combines with.
+func reduceOp(r ir.ReduceOp) string {
+	switch r {
+	case ir.ReduceMax:
+		return "max"
+	case ir.ReduceMin:
+		return "min"
+	}
+	return "add"
 }
 
 func elemSize(t ir.Type) int {

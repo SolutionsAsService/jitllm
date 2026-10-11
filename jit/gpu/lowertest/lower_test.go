@@ -85,6 +85,12 @@ func all(t *testing.T) map[string]*ir.Kernel {
 		return b.Done(), nil
 	})
 
+	// Every subgroup collective at every scalar type, so the assemblers see
+	// the reductions, the indexed shuffle and the lane builtins.
+	for _, ty := range []ir.Type{ir.F32, ir.I32, ir.U32} {
+		add("subgroup/"+ty.String(), func() (*ir.Kernel, error) { return kernels.SubgroupProbe(ty) })
+	}
+
 	for _, q := range []kernels.Quant{kernels.Q4_0, kernels.Q8_0, kernels.Q4_K,
 		kernels.Q3_K, kernels.Q5_K, kernels.Q6_K} {
 		for _, split := range []int{1, 4} {
@@ -271,6 +277,9 @@ var widthDependent = map[string]int{
 	"softmax-sink-warp": 32, // the same, with the sink folded in after
 	"softmax-sink-rows": 32,
 	"headnorm":          32, // the butterfly sum of squares
+	"subgroup/f32":      32, // every subgroup collective
+	"subgroup/i32":      32,
+	"subgroup/u32":      32,
 	// The matvec-mma and mmaprobe entries are added by the sweep itself: they
 	// are built by mmaKernels and are PTX-only.
 }

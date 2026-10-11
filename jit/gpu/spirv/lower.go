@@ -42,7 +42,13 @@ type lowerer struct {
 	comps       map[ir.TileElem]uint32
 	tiles       map[ir.TileType]uint32
 	needShuffle bool
-	cur         uint32 // label of the block being filled
+	// needArith and the two builtins serve the subgroup collectives: the
+	// reductions' capability, and the lane index and width as Input
+	// variables, declared only for a kernel that reads them.
+	needArith        bool
+	laneVar, sizeVar uint32
+	laneID, sgSize   uint32
+	cur              uint32 // label of the block being filled
 	// anchorLoop is the op index of the loop whose count takes the descriptor
 	// anchor, anchorBuf the parameter it reads, and anchorNever the entry's
 	// always-false predicate; -1 when the module needs none. See anchorFor.
@@ -132,8 +138,14 @@ func Emit(k *ir.Kernel) ([]byte, error) {
 		switch o.Kind {
 		case ir.OpDot4:
 			l.needDot = true
-		case ir.OpShuffleXor:
+		case ir.OpShuffleXor, ir.OpShuffle, ir.OpSubgroupBroadcast:
 			l.needShuffle = true
+		case ir.OpSubgroupReduce:
+			l.needArith = true
+		case ir.OpLaneID:
+			l.laneVar = 1 // allocated in build
+		case ir.OpSubgroupSize:
+			l.sizeVar = 1
 		}
 	}
 	l.anchorLoop, l.anchorBuf = anchorFor(k)
@@ -157,6 +169,16 @@ func (l *lowerer) build() error {
 		// enables, which depends on it. Both are core in SPIR-V 1.3.
 		inst(&m.caps, opCapability, capGroupNonUniform)
 		inst(&m.caps, opCapability, capGroupNonUniformShuffle)
+	}
+	if l.needArith || l.laneVar != 0 || l.sizeVar != 0 {
+		// GroupNonUniform is what the builtins and every GroupNonUniform
+		// instruction stand on; declared once, as spirv-val wants.
+		if !l.needShuffle {
+			inst(&m.caps, opCapability, capGroupNonUniform)
+		}
+		if l.needArith {
+			inst(&m.caps, opCapability, capGroupNonUniformArithmetic)
+		}
 	}
 	if hasTiles(l.k) {
 		l.tileCaps()
@@ -255,9 +277,28 @@ func (l *lowerer) build() error {
 	vBase := m.id()
 	inst(&m.types, opVariable, pBaseSt, vBase, storagePushConstant)
 
+	// The lane index and the subgroup width, scalar u32 Input builtins.
+	iface := []uint32{vLocal, vGroup}
+	if l.laneVar != 0 || l.sizeVar != 0 {
+		pu := m.id()
+		inst(&m.types, opTypePointer, pu, storageInput, l.tu32)
+		if l.laneVar != 0 {
+			l.laneVar = m.id()
+			inst(&m.types, opVariable, pu, l.laneVar, storageInput)
+			inst(&m.deco, opDecorate, l.laneVar, decoBuiltIn, builtInSubgroupLocalInvocation)
+			iface = append(iface, l.laneVar)
+		}
+		if l.sizeVar != 0 {
+			l.sizeVar = m.id()
+			inst(&m.types, opVariable, pu, l.sizeVar, storageInput)
+			inst(&m.deco, opDecorate, l.sizeVar, decoBuiltIn, builtInSubgroupSize)
+			iface = append(iface, l.sizeVar)
+		}
+	}
+
 	fn, entry := m.id(), m.id()
 	name := append([]uint32{execModelGLCompute, fn}, str(l.k.Name)...)
-	inst(&m.entry, opEntryPoint, append(name, vLocal, vGroup)...)
+	inst(&m.entry, opEntryPoint, append(name, iface...)...)
 	inst(&m.exec, opExecutionMode, fn, execModeLocalSize,
 		uint32(l.k.Group[0]), uint32(l.k.Group[1]), uint32(l.k.Group[2]))
 
@@ -283,6 +324,15 @@ func (l *lowerer) build() error {
 		inst(&m.funcs, opArrayLength, l.tu32, n, l.bufs[l.anchorBuf], 0)
 		l.anchorNever = m.id()
 		inst(&m.funcs, opIEqual, l.tbool, l.anchorNever, n, l.u32c(^uint32(0)))
+	}
+
+	if l.laneVar != 0 {
+		l.laneID = m.id()
+		inst(&m.funcs, opLoad, l.tu32, l.laneID, l.laneVar)
+	}
+	if l.sizeVar != 0 {
+		l.sgSize = m.id()
+		inst(&m.funcs, opLoad, l.tu32, l.sgSize, l.sizeVar)
 	}
 
 	l.cur = entry
@@ -414,6 +464,10 @@ func (l *lowerer) block(lo, hi int) error {
 			l.val[v] = l.ctaid
 		case ir.OpNTID:
 			l.val[v] = l.u32c(uint32(l.k.Group[0]))
+		case ir.OpLaneID:
+			l.val[v] = l.laneID
+		case ir.OpSubgroupSize:
+			l.val[v] = l.sgSize
 		case ir.OpTileLoad, ir.OpTileSplat, ir.OpTileMMA, ir.OpTileStore:
 			if err := l.tileOp(o, v); err != nil {
 				return fmt.Errorf("spirv: op %d: %w", i, err)
@@ -564,6 +618,30 @@ func (l *lowerer) arith(o ir.Op) (uint32, error) {
 		// non-uniform shuffle.
 		inst(&l.m.funcs, opGroupNonUniformShuffleXor, t, id,
 			l.u32c(scopeSubgroup), a, l.u32c(uint32(o.Imm)))
+	case ir.OpSubgroupReduce:
+		var op uint32
+		switch ir.ReduceOf(o) {
+		case ir.ReduceAdd:
+			op = pick(opGroupNonUniformIAdd, opGroupNonUniformFAdd)
+		case ir.ReduceMax:
+			op = sel(f, sign, opGroupNonUniformFMax, opGroupNonUniformSMax, opGroupNonUniformUMax)
+		case ir.ReduceMin:
+			op = sel(f, sign, opGroupNonUniformFMin, opGroupNonUniformSMin, opGroupNonUniformUMin)
+		}
+		inst(&l.m.funcs, op, t, id, l.u32c(scopeSubgroup), groupOperationReduce, a)
+	case ir.OpSubgroupBroadcast, ir.OpShuffle:
+		// OpGroupNonUniformShuffle for both: OpGroupNonUniformBroadcast wants
+		// a constant lane before SPIR-V 1.5, and this module is 1.3. The lane
+		// is masked to the subgroup first, as the IR defines it.
+		// The lane operand must be an unsigned integer.
+		src := b
+		if l.k.Ops[o.Args[1]-1].Type == ir.I32 {
+			src = l.m.id()
+			inst(&l.m.funcs, opBitcast, l.tu32, src, b)
+		}
+		lane := l.m.id()
+		inst(&l.m.funcs, opBitwiseAnd, l.tu32, lane, src, l.u32c(31))
+		inst(&l.m.funcs, opGroupNonUniformShuffle, t, id, l.u32c(scopeSubgroup), a, lane)
 	case ir.OpMMA, ir.OpMMAGet:
 		// Declined: VK_KHR_cooperative_matrix is an extension not required of
 		// a device, and its fragment layout is opaque, so it needs a different

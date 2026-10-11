@@ -18,7 +18,8 @@ func TestWidthDependentIsTheWholeClass(t *testing.T) {
 			got = append(got, k)
 		}
 	}
-	want := []Kind{OpShuffleXor, OpMMA, OpTileLoad, OpTileSplat, OpTileMMA, OpTileStore}
+	want := []Kind{OpShuffleXor, OpMMA, OpTileLoad, OpTileSplat, OpTileMMA, OpTileStore,
+		OpSubgroupReduce, OpSubgroupBroadcast, OpShuffle, OpLaneID}
 	if len(got) != len(want) {
 		t.Fatalf("width-dependent ops are %v, want %v", got, want)
 	}
@@ -29,7 +30,8 @@ func TestWidthDependentIsTheWholeClass(t *testing.T) {
 	}
 	// OpMMAGet reads a fragment the MMA already produced in this lane, so it
 	// is not itself cross-lane.
-	for _, k := range []Kind{OpShared, OpBarrier, OpMMAGet, OpLoad, OpStore} {
+	// OpSubgroupSize reports the width rather than depending on it.
+	for _, k := range []Kind{OpShared, OpBarrier, OpMMAGet, OpLoad, OpStore, OpSubgroupSize} {
 		if WidthDependent(k) {
 			t.Errorf("%s is classified as width-dependent", k)
 		}

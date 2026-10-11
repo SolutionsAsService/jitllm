@@ -99,9 +99,9 @@ func (l *lowerer) typeOf(v ir.Value) ir.Type { return l.k.Ops[v-1].Type }
 func (l *lowerer) lower() (string, error) {
 	k := l.k
 	for _, o := range k.Ops {
-		if o.Kind == ir.OpShuffleXor {
+		switch o.Kind {
+		case ir.OpShuffleXor, ir.OpShuffle, ir.OpSubgroupBroadcast, ir.OpSubgroupReduce, ir.OpLaneID:
 			l.lane = "%lane"
-			break
 		}
 	}
 	l.label("entry")
@@ -519,6 +519,42 @@ func (l *lowerer) op(i int, o ir.Op, v ir.Value) error {
 		} else {
 			l.emit("%s = or i32 %s, 0", r, got)
 		}
+	case ir.OpSubgroupReduce:
+		// The butterfly OpShuffleXor spells, each step a ds_bpermute inside
+		// the lane's aligned 32, so a 64-wide wave runs it as two subgroups.
+		cur := val(a0)
+		for m := ir.SubgroupLanes / 2; m >= 1; m /= 2 {
+			got := l.permute(cur, o.Type, func(addr string) {
+				x := l.fresh()
+				l.emit("%s = xor i32 %s, %d", x, l.lane, m)
+				l.emit("%s = shl i32 %s, 2", addr, x)
+			})
+			nx := l.fresh()
+			l.combine(nx, ir.ReduceOf(o), o.Type, cur, got)
+			cur = nx
+		}
+		l.copy(r, o.Type, cur)
+	case ir.OpSubgroupBroadcast, ir.OpShuffle:
+		// Lane (src & 31) of the lane's own aligned 32: the high bits of
+		// the lane index pick which half of a 64-wide wave.
+		got := l.permute(val(a0), o.Type, func(addr string) {
+			hi, lo, idx := l.fresh(), l.fresh(), l.fresh()
+			l.emit("%s = and i32 %s, -32", hi, l.lane)
+			l.emit("%s = and i32 %s, 31", lo, val(a1))
+			l.emit("%s = or i32 %s, %s", idx, hi, lo)
+			l.emit("%s = shl i32 %s, 2", addr, idx)
+		})
+		l.copy(r, o.Type, got)
+	case ir.OpLaneID:
+		l.emit("%s = and i32 %s, 31", r, l.lane)
+	case ir.OpSubgroupSize:
+		// The IR's subgroup is the aligned 32 its collectives act on when the
+		// kernel declares Lanes; otherwise it is the wave the device runs.
+		n := l.t.Wave
+		if l.k.Lanes != 0 {
+			n = ir.SubgroupLanes
+		}
+		l.emit("%s = add i32 %d, 0", r, n)
 	case ir.OpPhi:
 		// Written at the loop header by loop().
 	case ir.OpEndLoop:
@@ -527,6 +563,58 @@ func (l *lowerer) op(i int, o ir.Op, v ir.Value) error {
 		return fmt.Errorf("amdgpu: no lowering for %s", o.Kind)
 	}
 	return nil
+}
+
+// permute reads x from the lane whose byte address addr computes, through
+// ds_bpermute, bitcasting a float through i32. It returns the value read.
+func (l *lowerer) permute(x string, t ir.Type, addr func(addr string)) string {
+	l.declare("declare i32 @llvm.amdgcn.ds.bpermute(i32, i32)")
+	src := x
+	if t == ir.F32 {
+		b := l.fresh()
+		l.emit("%s = bitcast float %s to i32", b, x)
+		src = b
+	}
+	ad, got := l.fresh(), l.fresh()
+	addr(ad)
+	l.emit("%s = call i32 @llvm.amdgcn.ds.bpermute(i32 %s, i32 %s)", got, ad, src)
+	if t != ir.F32 {
+		return got
+	}
+	f := l.fresh()
+	l.emit("%s = bitcast i32 %s to float", f, got)
+	return f
+}
+
+// combine is r = op(a, b) for an OpSubgroupReduce step.
+func (l *lowerer) combine(r string, op ir.ReduceOp, t ir.Type, a, b string) {
+	if op == ir.ReduceAdd {
+		if t == ir.F32 {
+			l.emit("%s = fadd float %s, %s", r, a, b)
+		} else {
+			l.emit("%s = add i32 %s, %s", r, a, b)
+		}
+		return
+	}
+	fn := map[ir.ReduceOp][3]string{
+		ir.ReduceMin: {"llvm.minnum.f32", "llvm.smin.i32", "llvm.umin.i32"},
+		ir.ReduceMax: {"llvm.maxnum.f32", "llvm.smax.i32", "llvm.umax.i32"},
+	}[op]
+	n := fn[2]
+	if t == ir.F32 {
+		n = fn[0]
+	} else if t == ir.I32 {
+		n = fn[1]
+	}
+	tt := ty(t)
+	l.declare(fmt.Sprintf("declare %s @%s(%s, %s)", tt, n, tt, tt))
+	l.emit("%s = call %s @%s(%s %s, %s %s)", r, tt, n, tt, a, tt, b)
+}
+
+// copy names x as r: LLVM has no move, and an fadd of zero would turn -0
+// into +0, so a select that cannot pick anything else does it.
+func (l *lowerer) copy(r string, t ir.Type, x string) {
+	l.emit("%s = select i1 true, %s %s, %s %s", r, ty(t), x, ty(t), x)
 }
 
 // dot4 is acc + the dot product of two words of four signed bytes.

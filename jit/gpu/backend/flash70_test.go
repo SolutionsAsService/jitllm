@@ -72,7 +72,8 @@ func TestFlashPrefill70IsGated(t *testing.T) {
 
 // TestFlashPrefillTileMatchesReference is the same reference and the same
 // poisoned slots for kernels.FlashPrefillTile, on every device that lowers the
-// ir tile ops (Metal), at the blocking FlashTileFor picks per head width.
+// ir tile ops at its 8x8 shape (Metal's simdgroup_matrix, PTX's mma.sync), at
+// the blocking FlashTileFor picks per head width.
 func TestFlashPrefillTileMatchesReference(t *testing.T) {
 	gpuLock(t)
 	devs := backend.Open()
@@ -84,7 +85,8 @@ func TestFlashPrefillTileMatchesReference(t *testing.T) {
 	}
 	ran := 0
 	for _, d := range devs {
-		if d.API() != "msl" {
+		if ok, why := backend.LowersTile(d, tile8f32); !ok {
+			t.Logf("%s: no 8x8 float32 tile: %s", d.API(), why)
 			continue
 		}
 		for _, c := range append(flash70Cases, flash70Case{8, 256, 1, 64, 90, 0, 0}) {
@@ -94,7 +96,7 @@ func TestFlashPrefillTileMatchesReference(t *testing.T) {
 		}
 	}
 	if ran == 0 {
-		t.Skip("no Metal device here: the tile ops lower on msl only")
+		t.Skip("no device here lowers an 8x8 collective tile")
 	}
 }
 
@@ -109,11 +111,20 @@ func TestFlashPrefillTileIsGated(t *testing.T) {
 		defer d.Close()
 	}
 	for _, d := range devs {
-		if d.API() == "msl" {
+		if ok, _ := backend.LowersTile(d, tile8f32); ok {
 			t.Run(d.API(), func(t *testing.T) { flashRun(t, d, flash70Cases[1], true, flashTileBuild) })
 		}
 	}
 }
+
+// tile8 is the collective shape GemmTile and FlashPrefillTile multiply in.
+var tile8 = backend.TileShape{M: 8, N: 8, K: 8, Elem: ir.TileF16, Acc: ir.TileF32}
+
+// tile8f32 is FlashPrefillTile's P*V product: float32 operands.
+var tile8f32 = backend.TileShape{M: 8, N: 8, K: 8, Elem: ir.TileF32, Acc: ir.TileF32}
+
+// tile16x8 is TileGemm.Tall's shape: a 16-row A tile by an 8x8 B.
+var tile16x8 = backend.TileShape{M: 16, N: 8, K: 8, Elem: ir.TileF16, Acc: ir.TileF32}
 
 // flashBuild returns a flash kernel for a shape and its launch geometry.
 type flashBuild func(sh kernels.FlashPrefill70Shape) (*ir.Kernel, int, int, error)

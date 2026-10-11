@@ -166,7 +166,7 @@ var flashPrefillShapes = []struct {
 }
 
 // TestPagedFlashPrefill holds the paged FlashPrefill70 (m8n8k4: sm_70, and
-// sm_86 runs it too) and FlashPrefillTile (Metal's simdgroup matrices) to the
+// sm_86 runs it too) and FlashPrefillTile (the collective tiles: Metal's simdgroup matrices, PTX's mma.sync) to the
 // oracle over every prefill case, at no split, one (the merge normalising and
 // adding the sink) and more than the keys need (empty runs); to their
 // contiguous kernels where those can express the case; and demands failure
@@ -185,7 +185,7 @@ func TestPagedFlashPrefill(t *testing.T) {
 		var tdevs []backend.Device
 		if tile {
 			for _, d := range devs {
-				if d.API() == "msl" {
+				if ok, _ := backend.LowersTile(d, tile8f32); ok {
 					tdevs = append(tdevs, d)
 				}
 			}

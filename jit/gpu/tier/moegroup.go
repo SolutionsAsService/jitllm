@@ -325,12 +325,61 @@ func (g *devTier) sm70() bool {
 }
 
 // tileMoE is whether a batched mixture's experts run as the grouped
-// kernels.GemmTile -- Metal's simdgroup_matrix -- asked by name as tileMV asks
-// for the dense one, and off once the device has refused a tile.
+// kernels.GemmTile -- the collective tiles, wherever the device lowers them
+// (tilesOK) -- as tileMV asks for the dense one, and off once the device has
+// refused a tile.
 func (g *devTier) tileMoE() bool {
 	// A build reached from inside a submission takes g.mu (subLock).
 	defer g.subUnlock(g.subLock())
-	return !g.tileOff && !g.NoVolta && !g.NoVoltaMoE && g.dev.API() == "msl"
+	return !g.NoVolta && !g.NoVoltaMoE && g.tilesOK()
+}
+
+// tilesOK reports whether this device lowers the collective tile ops at the
+// 8x8 binary16 shape GemmTile and FlashPrefillTile multiply in -- Metal's
+// simdgroup_matrix, mma.sync on sm_75 and later -- asked once by compiling a
+// probe (backend.LowersTile) instead of naming a backend. It is false once a
+// built tile kernel has been refused (tileOff).
+func (g *devTier) tilesOK() bool {
+	if g.tileCap == 0 {
+		g.tileCap = -1
+		// A device that does not lower them is not a refusal (TileWhy is
+		// what a device said about a kernel it was asked to build): it is
+		// simply not asked.
+		if ok, _ := backend.LowersTile(g.dev, backend.TileShape{M: 8, N: 8, K: 8, Elem: ir.TileF16, Acc: ir.TileF32}); ok {
+			g.tileCap = 1
+		}
+	}
+	return g.tileCap == 1 && !g.tileOff
+}
+
+// tileF32 reports whether the device also lowers float32-operand tiles, which
+// kernels.FlashPrefillTile multiplies P by V in: Metal's float
+// simdgroup_matrix, and mma.sync from sm_80 (three tf32 products). sm_75 has
+// the f16 tiles GemmTile needs and not these.
+func (g *devTier) tileF32() bool {
+	if !g.tilesOK() {
+		return false
+	}
+	if g.tileF32Cap == 0 {
+		g.tileF32Cap = -1
+		if ok, _ := backend.LowersTile(g.dev, backend.TileShape{M: 8, N: 8, K: 8, Elem: ir.TileF32, Acc: ir.TileF32}); ok {
+			g.tileF32Cap = 1
+		}
+	}
+	return g.tileF32Cap == 1
+}
+
+// tileTall reports whether the device also lowers the 16-row tile
+// (kernels.TileGemm.Tall): mma.sync's own m16, which the 8-row tile runs
+// with half its rows zero. Metal's simdgroup_matrix is 8x8 only.
+func (g *devTier) tileTall() bool {
+	if g.tileTallCap == 0 {
+		g.tileTallCap = -1
+		if ok, _ := backend.LowersTile(g.dev, backend.TileShape{M: 16, N: 8, K: 8, Elem: ir.TileF16, Acc: ir.TileF32}); ok {
+			g.tileTallCap = 1
+		}
+	}
+	return g.tileTallCap == 1
 }
 
 // tileGroupTiles is GemmTile's grouped blocking for rows at a padding unit of
@@ -466,6 +515,7 @@ func (g *devTier) buildVoltaGroupedMV(m mv, bank, np, unit int, bias bool, nsrc 
 	if g.tileMoE() {
 		key.kind = "groupedtile"
 		for _, tl := range tileGroupTiles(m.q, m.rows, unit) {
+			tl.Tall = g.tileTall() && tl.MT%2 == 0
 			key.tt = tl
 			if v.kern = g.moeKern(key, why, func() (*ir.Kernel, error) { return kernels.GemmTile(s, tl) }); v.kern != nil {
 				v.width, v.rowBlocks = tl.Threads(), kernels.GemmTileGrouped(s, tl, 1)

@@ -5592,3 +5592,57 @@ while its datacenter driver on the V100 overlaps them (1.00x). The way past
 it on that driver is to record the sessions' work into one submission,
 which is the step loop's batching.
 
+## The collective tiles lower on PTX, and the subgroup collectives are ops
+
+**"A collective tile has no lane layout to map onto mma.sync" was a choice,
+not a hardware limit (RULE 11e).** A collective tile leaves the lane layout to
+the lowering, and mma.sync documents one, so `ptx/tile.go` picks it: every
+tile is a grid of 8x8 atoms, and a lane holds of each atom the two elements
+m16n8k16's fragments give it (A row g, columns 2t..2t+1; B rows 2t..2t+1,
+column g; C row g, columns 2t..2t+1, with g = lane>>2, t = lane&3). A TileMMA of
+any shape whose sides are multiples of 8 is then a run of m16n8k16 (m16n8k8 on
+sm_75) over atoms with no data movement; an 8-row tile -- Metal's 8x8 -- runs
+the m16 instruction with its second row of atoms zero. Loads and stores go
+element by element from the view (a stride-0 bias is just an address); the
+ceiling of that form is the load count, and ldmatrix over a shared view whose
+rows the kernel asserts aligned is the upgrade. float32 operands (FlashPrefillTile's
+P*V) are three tf32 products, a_hi*b_lo + a_lo*b_hi + a_hi*b_hi, about 21
+mantissa bits through the matrix unit; tf32 is sm_80, so sm_75 lowers the f16
+tiles and refuses the f32 ones by name. On FlashPrefillTile's gate one tf32
+product read NMSE ~1.3e-7 and the three ~7e-8, both far inside the 1e-5 bound;
+the three are kept because the IR type is float32 and a single tf32 product is
+a silent precision substitution.
+
+So Metal's prompt path (GemmTile, FlashPrefillTile) is ordinary IR on CUDA
+too, gated by a capability -- `backend.LowersTile` compiles a staged,
+loop-carried probe of the shape -- instead of `API() == "msl"`. Measured
+correctness, all against the float64 reference with poisoned outputs:
+GemmTile on every binary16-dequant format (NMSE 7e-8..1.6e-7, against the dp4a
+path's 2-3.6e-5), its grouped form bit-equal to dense per expert, the tail
+launch, FlashPrefillTile and its paged form, on the RTX 3050 Ti (sm_86), a T4
+(sm_75; f16 only) and the M4; end to end with every block placed against the
+host (TestTilePrefillMatchesTheHost) on sm_86, a T4 and the M4. A violation
+(B's atom layout off by one element) fails TestTileMatchesReference at
+|d| 131-173.
+
+`TileGemm.Tall` multiplies 16-row A tiles where the device lowers 16x8x8
+(PTX), two of the 8-row slots each: the staging is unchanged and the m16
+instruction stops multiplying zeros.
+
+Selection on CUDA is unchanged by default: the m16n8 GEMMs and FlashPrefill80
+run ahead of the tiles, which are reached where those decline, or ahead of them
+with Config.PreferTiles (JITLLM_GPU_PREFER_TILES) -- the arm
+TestTilePrefillMatchesTheHost pins and the A/B uses. On a T4, before the m16n8
+GEMMs landed, the tile GEMM against MatVecMMA read 0.989 (IQR 0.090, A/A
+1.0136 at IQR 0.083): parity, within a noisy box.
+
+The subgroup collectives (`ir/subgroup.go`: reduce add/max/min, broadcast from
+a uniform lane, shuffle from a per-lane lane & 31, lane id, width) lower to a
+shfl butterfly / shfl.idx / %laneid / WARP_SZ on PTX, OpGroupNonUniform*
+(Reduce) / Shuffle / the two builtins on SPIR-V, simd_sum / simd_shuffle and
+the simdgroup attributes on MSL, and ds_bpermute on AMDGPU.
+TestSubgroupCollectivesMatchTheReference holds every one at f32, i32 and u32
+on CUDA, Vulkan and Metal; a butterfly missing its last step, a reduction
+lowered as the wrong op and a shuffle clamped to 16 lanes each fail it. The
+lane mask is not observable on NVIDIA (CUDA and Vulkan wrap a source past 31
+themselves); it is the IR's definition for the targets that do not.

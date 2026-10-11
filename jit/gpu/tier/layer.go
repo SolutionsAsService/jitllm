@@ -9462,6 +9462,11 @@ func (g *devTier) actWinFor(ntok int) int {
 func (g *devTier) batchMV(m mv, ntok, tok int) (mv, bool) {
 	// A build reached from inside a submission takes g.mu (subLock).
 	defer g.subUnlock(g.subLock())
+	if g.PreferTiles {
+		if bm, ok := g.tileMV(m, ntok); ok {
+			return bm, true
+		}
+	}
 	if bm, ok := g.int8Gemm(m, ntok); ok {
 		return bm, true
 	}
@@ -10818,14 +10823,14 @@ func (g *devTier) voltaBlock(l *layer, ntok, tok int) bool {
 }
 
 // flashTileAttn builds kernels.FlashPrefillTile for a batched block where it
-// takes the shape: Metal (the only backend that lowers the tile ops), the
+// takes the shape: a device that lowers the collective tiles (tilesOK), the
 // transposed float32 K cache and float32 V, no sinks and no chunked window, a
 // chunk that is a whole number of the kernel's query blocks. It leaves fpT nil
 // otherwise, and the three-kernel path runs.
 func (g *devTier) flashTileAttn(bs *blockScratch, kvDim, gqa int, scale float32) {
 	p := &bs.p
 	kst := g.kStride(p)
-	if g.NoFlashPrefill || g.tileOff || g.dev.API() != "msl" || g.KVF16 || bs.rows <= 1 || kst <= 0 ||
+	if g.NoFlashPrefill || g.KVF16 || bs.rows <= 1 || kst <= 0 || !g.tileF32() ||
 		p.MLA() || p.NonCausal || p.AttnSinks || p.SWAChunked || kvDim%4 != 0 {
 		return
 	}

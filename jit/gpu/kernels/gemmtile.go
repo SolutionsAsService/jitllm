@@ -15,6 +15,12 @@ type TileGemm struct {
 	// NoSplit keeps the duplicate staging where a sub-block could split
 	// between threads: the A/B arm and the bisection switch.
 	NoSplit bool
+	// Tall multiplies 16-row A tiles (and 16-row accumulators), two of the
+	// MT 8-row slots each, where the device lowers a 16x8x8 product
+	// (backend.LowersTile): mma.sync's own m16 shape, where 8-row tiles run it
+	// with half its rows zero. The staging and the block are unchanged; MT
+	// must be even. Metal's simdgroup_matrix is 8x8 only.
+	Tall bool
 	// TokOff is the first token this launch covers: a prompt whose token
 	// count the widest block does not divide runs the widest block over the
 	// leading tokens and a narrower one over the rest at an offset, both
@@ -87,7 +93,7 @@ func GemmTile(s MatVecShape, t TileGemm) (*ir.Kernel, error) {
 		return nil, fmt.Errorf("kernels: GemmTile: an unsplit shape only (split %d)", s.Split)
 	}
 	qi := qtab[s.T]
-	if t.MT < 1 || t.NT < 1 || t.WM < 1 || t.WN < 1 || t.KB < 1 {
+	if t.MT < 1 || t.NT < 1 || t.WM < 1 || t.WN < 1 || t.KB < 1 || t.Tall && t.MT%2 != 0 {
 		return nil, fmt.Errorf("kernels: GemmTile: tile %+v", t)
 	}
 	BM, BN, nth := t.Rows(), t.Toks(), t.Threads()
@@ -143,6 +149,9 @@ func GemmTile(s MatVecShape, t TileGemm) (*ir.Kernel, error) {
 		s.Rows, s.K, s.NTok, t.MT, t.NT, t.WM, t.WN, t.KB)
 	if parts > 1 {
 		name += fmt.Sprintf("_p%d", parts)
+	}
+	if t.Tall {
+		name += "_tall"
 	}
 	if grouped {
 		name += fmt.Sprintf("_e%d", s.Experts)
@@ -339,9 +348,14 @@ func GemmTile(s MatVecShape, t TileGemm) (*ir.Kernel, error) {
 	wn := b.Div(ir.U32, sg, c(int64(t.WM)))
 	rowW := b.Mul(ir.U32, wm, c(int64(8*t.MT)))
 	tokW := b.Mul(ir.U32, wn, c(int64(8*t.NT)))
-	aT := ir.TileType{Rows: 8, Cols: 8, Elem: ir.TileF16, Use: ir.TileA}
+	// TM rows a tile, MA tiles down the subgroup's rows (see Tall).
+	TM, MA := 8, t.MT
+	if t.Tall {
+		TM, MA = 16, t.MT/2
+	}
+	aT := ir.TileType{Rows: TM, Cols: 8, Elem: ir.TileF16, Use: ir.TileA}
 	bT := ir.TileType{Rows: 8, Cols: 8, Elem: ir.TileF16, Use: ir.TileB}
-	cT := ir.TileType{Rows: 8, Cols: 8, Elem: ir.TileF32, Use: ir.TileAcc}
+	cT := ir.TileType{Rows: TM, Cols: 8, Elem: ir.TileF32, Use: ir.TileAcc}
 	rowG := b.Add(ir.U32, rowBlk, rowW)
 	tokG := b.Add(ir.U32, tokBlk, tokW)
 	// Half-word offsets of the subgroup's first A row and first B token.
@@ -349,14 +363,14 @@ func GemmTile(s MatVecShape, t TileGemm) (*ir.Kernel, error) {
 	bH := b.Mul(ir.U32, tokW, c(int64(2*RS)))
 	strideH := c(int64(2 * RS))
 	zero := c(0)
-	init := make([][]ir.Value, t.MT)
+	init := make([][]ir.Value, MA)
 	for i := range init {
 		init[i] = make([]ir.Value, t.NT)
 		for j := range init[i] {
 			if s.Bias {
 				// Column-major at stride 0: element (r, c) is pBias[row+r],
 				// and a grouped bias is a bank, [expert][row].
-				bi := add(rowG, int64(8*i))
+				bi := add(rowG, int64(TM*i))
 				if grouped {
 					bi = b.Add(ir.U32, b.Mul(ir.U32, eSel, c(int64(s.Rows))), bi)
 				}
@@ -368,7 +382,7 @@ func GemmTile(s MatVecShape, t TileGemm) (*ir.Kernel, error) {
 	}
 
 	b.Loop(int64(trips))
-	accs := make([][]ir.Value, t.MT)
+	accs := make([][]ir.Value, MA)
 	for i := range accs {
 		accs[i] = make([]ir.Value, t.NT)
 		for j := range accs[i] {
@@ -396,22 +410,22 @@ func GemmTile(s MatVecShape, t TileGemm) (*ir.Kernel, error) {
 		xR[i] = b.Phi(ir.U32, x1[i])
 	}
 
-	d := make([][]ir.Value, t.MT)
+	d := make([][]ir.Value, MA)
 	for i := range d {
 		d[i] = append([]ir.Value{}, accs[i]...)
 	}
 	baseAH := b.Add(ir.U32, b.Shl(ir.U32, curA, c(1)), aH)
 	baseBH := b.Add(ir.U32, b.Shl(ir.U32, curB, c(1)), bH)
 	for kk := 0; kk < KT/8; kk++ {
-		av := make([]ir.Value, t.MT)
+		av := make([]ir.Value, MA)
 		for i := range av {
-			av[i] = b.TileLoad(aT, shA, add(baseAH, int64(8*i*2*RS+8*kk)), strideH, false)
+			av[i] = b.TileLoad(aT, shA, add(baseAH, int64(TM*i*2*RS+8*kk)), strideH, false)
 		}
 		bv := make([]ir.Value, t.NT)
 		for j := range bv {
 			bv[j] = b.TileLoad(bT, shB, add(baseBH, int64(8*j*2*RS+8*kk)), strideH, true)
 		}
-		for i := 0; i < t.MT; i++ {
+		for i := 0; i < MA; i++ {
 			for j := 0; j < t.NT; j++ {
 				d[i][j] = b.TileMMA(av[i], bv[j], d[i][j])
 			}
@@ -422,7 +436,7 @@ func GemmTile(s MatVecShape, t TileGemm) (*ir.Kernel, error) {
 	subN, WN, BN2 := advance(subR, WR, BR)
 	na, nb := load(WN, BN2, subN)
 	b.Barrier()
-	for i := 0; i < t.MT; i++ {
+	for i := 0; i < MA; i++ {
 		for j := 0; j < t.NT; j++ {
 			b.SetPhi(accs[i][j], d[i][j])
 		}
@@ -455,9 +469,9 @@ func GemmTile(s MatVecShape, t TileGemm) (*ir.Kernel, error) {
 	// value on every target, while on MSL the MMA result is scoped inside the
 	// loop body.
 	nrows := c(int64(s.Rows))
-	for i := 0; i < t.MT; i++ {
+	for i := 0; i < MA; i++ {
 		for j := 0; j < t.NT; j++ {
-			off := b.Add(ir.U32, b.Mul(ir.U32, add(tokG, int64(8*j)), nrows), add(rowG, int64(8*i)))
+			off := b.Add(ir.U32, b.Mul(ir.U32, add(tokG, int64(8*j)), nrows), add(rowG, int64(TM*i)))
 			b.TileStore(pOut, off, nrows, accs[i][j], true)
 		}
 	}

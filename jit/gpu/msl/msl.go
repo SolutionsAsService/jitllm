@@ -176,6 +176,20 @@ func Emit(k *ir.Kernel) (string, error) {
 	}
 	pad := ",\n" + strings.Repeat(" ", 13+len(k.Name))
 	fmt.Fprintf(&l.b, "%suint jitllm_tid [[thread_position_in_threadgroup]]", pad)
+	// The lane and width attributes only where a kernel asks, so no other
+	// kernel's source changes.
+	for _, o := range k.Ops {
+		if o.Kind == ir.OpLaneID {
+			fmt.Fprintf(&l.b, "%suint jitllm_lane [[thread_index_in_simdgroup]]", pad)
+			break
+		}
+	}
+	for _, o := range k.Ops {
+		if o.Kind == ir.OpSubgroupSize {
+			fmt.Fprintf(&l.b, "%suint jitllm_sgsize [[threads_per_simdgroup]]", pad)
+			break
+		}
+	}
 	fmt.Fprintf(&l.b, "%suint jitllm_ctaid [[threadgroup_position_in_grid]]) {\n", pad)
 
 	if err := l.block(0, len(k.Ops)); err != nil {
@@ -394,6 +408,21 @@ func (l *lowerer) arith(i int, o ir.Op) error {
 		// simd_shuffle_xor is the direct equivalent of PTX's shfl.sync.bfly;
 		// an Apple simdgroup is 32 lanes, the width ir's mask bound assumes.
 		l.def(i, o.Type, "simd_shuffle_xor(%s, ushort(%d))", a, o.Imm)
+	case ir.OpSubgroupReduce:
+		// simd_sum/simd_max/simd_min reduce across the simdgroup and return
+		// the result in every lane; an Apple simdgroup is the 32 lanes the IR
+		// defines the op over.
+		fn := map[ir.ReduceOp]string{ir.ReduceAdd: "simd_sum", ir.ReduceMax: "simd_max", ir.ReduceMin: "simd_min"}[ir.ReduceOf(o)]
+		l.def(i, o.Type, "%s(%s)", fn, a)
+	case ir.OpSubgroupBroadcast, ir.OpShuffle:
+		// simd_shuffle for both: it takes a per-lane source, so it is also a
+		// broadcast when the source is uniform, with no uniformity contract
+		// of its own to honour.
+		l.def(i, o.Type, "simd_shuffle(%s, ushort(%s & 31u))", a, b)
+	case ir.OpLaneID:
+		l.name[i+1] = "jitllm_lane"
+	case ir.OpSubgroupSize:
+		l.name[i+1] = "jitllm_sgsize"
 	case ir.OpTileLoad, ir.OpTileSplat, ir.OpTileMMA, ir.OpTileStore:
 		return l.tile(i, o)
 	case ir.OpMMA, ir.OpMMAGet:
