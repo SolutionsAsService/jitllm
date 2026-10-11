@@ -418,3 +418,32 @@ Anthropic-compatible endpoint, environment or config), without touching the
 agent's own settings files. `jitllm agents` lists which it found installed and
 which can run against the loaded model, naming what is missing (tool calling,
 context, a vision projector) when one cannot.
+
+## 20. Relieving memory pressure across models
+
+**Not started.** The server holds several models, and today a model stays loaded
+until a caller unloads it. When memory runs short -- a new model asked for, a
+session's KV growing, another process taking RAM or VRAM -- the orchestrator
+should make room on its own: first by paging (shrink a model's resident pages and
+KV toward its floor), then by unloading a model nobody is using.
+
+Which model gives way is a policy, chosen by the caller (a `With...()` option and
+a server flag), never one fixed rule:
+- **Inputs the policy weighs:** each model's footprint per tier (weights, KV,
+  expert pages), how recently and how often it was used, its live sessions and
+  queued requests, its reload cost (container size against the disk's measured
+  read rate, plus warm-up), and a caller-given priority or pin.
+- **Policies to ship:** least recently used; least used, decayed; cost-aware
+  (the bytes freed against the time a reload would cost, weighted by the
+  model's expected next use); and never-unload with pins.
+- **Actions in order of cost:** trim pages within a model, move blocks to a
+  cheaper tier (relocation), park idle sessions' KV to disk, then unload the
+  whole model. A model with a running request is never unloaded mid-token; a
+  model is reloaded on its next request.
+- **Pressure signals:** the engine's own budgets, the device ledger, and the
+  host's (PSI memory, the cgroup's limits) so another process taking memory
+  counts as well.
+
+Every decision is reported (what was trimmed, moved or unloaded, and why) in the
+server's stats and logs. Builds on paging, relocation, session parking and the
+server's per-model instances.
