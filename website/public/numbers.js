@@ -65,6 +65,17 @@
     ['Qwen3-Next-80B-A3B', 'hybrid MoE', 4, 1104, 4506],
     ['gpt-oss-120b MXFP4', 'MoE', 5, 1080, 1876],
   ]
+  // Metal, every block on the GPU, scripts/vs-llamacpp.sh gpu, n=40 interleaved,
+  // against llama.cpp b10825. One row per model so a rerun replaces one line.
+  // [model, prefill ratio, decode ratio, jitllm decode tok/s, llama.cpp decode tok/s, MLX decode tok/s]
+  const M4_METAL = [
+    ['Ministral-3-3B-Instruct', 1.019, 1.095, 46.18, 41.70, 49.99],
+    ['Qwen3-4B', 1.012, 1.030, 38.88, 37.86, 41.74],
+    ['Llama-3.2-3B', 1.017, 1.030, 48.61, 47.09, 52.78],
+    ['Gemma-3-4B', 0.955, 1.018, 38.89, 38.07, 43.15],
+    ['Mistral-7B', 0.981, 1.030, 23.69, 23.16, 24.69],
+  ]
+  // An earlier pass, small models, llama.cpp b10985.
   // [model, Metal prefill, Metal decode, CPU prefill, CPU decode]
   const M4 = [
     ['stories15M', 0.86, 1.53, 0.32, 0.95],
@@ -156,10 +167,14 @@
   const m4 = root.querySelector('[data-board="m4"]')
   const cell = (x) => `<td>${ratio(x, 1.8, 'ratio')}</td>`
   m4.innerHTML =
-    `<table class="btable"><caption class="sr-only">jitllm against llama.cpp b10985 on an Apple M4, ratios</caption><thead><tr><th scope="col">Model</th><th scope="col">Metal prefill</th><th scope="col">Metal decode</th><th scope="col">CPU prefill</th><th scope="col">CPU decode</th></tr></thead><tbody>` +
+    `<table class="btable"><caption class="sr-only">jitllm against llama.cpp b10825 on Apple M4 Metal, Q4_K_M, ratios and decode tok/s</caption><thead><tr><th scope="col">Model</th><th scope="col">Prefill vs llama.cpp</th><th scope="col">Decode vs llama.cpp</th><th scope="col" class="n">jitllm</th><th scope="col" class="n">llama.cpp</th><th scope="col" class="n">MLX</th></tr></thead><tbody>` +
+    M4_METAL.map(([m, p, d, j, l, x]) => `<tr><td class="name">${m}</td>${cell(p)}${cell(d)}<td class="n">${j.toFixed(1)}</td><td class="n">${l.toFixed(1)}</td><td class="n">${x.toFixed(1)}</td></tr>`).join('') +
+    `</tbody></table>` +
+    `<p class="bnote">Mac mini M4, Metal, Q4_K_M, every block on the GPU. Ratios: <code>scripts/vs-llamacpp.sh</code>, 40 interleaved rounds, ~415-token prompt, 128 decoded tokens, against llama.cpp b10825. jitllm decodes faster than llama.cpp on all five (1.02–1.10×); prefill is at parity except Gemma-3-4B (0.96×). The tok/s columns are decode, a separate same-pass run (median of 3, fresh jitllm process each time); MLX ran mlx-community 4-bit files, which are smaller than Q4_K_M, so it is not a same-weights comparison. MLX is 4–10% ahead on decode and 5–12% on prefill.</p>` +
+    `<table class="btable"><caption class="sr-only">jitllm against llama.cpp b10985 on an Apple M4, small models, ratios</caption><thead><tr><th scope="col">Model (earlier pass)</th><th scope="col">Metal prefill</th><th scope="col">Metal decode</th><th scope="col">CPU prefill</th><th scope="col">CPU decode</th></tr></thead><tbody>` +
     M4.map(([m, ...r]) => `<tr><td class="name">${m}</td>${r.map(cell).join('')}</tr>`).join('') +
     `</tbody></table>` +
-    `<p class="bnote">Mac mini M4 against llama.cpp b10985, one machine, one pass. Metal decode is ahead on four of seven models and CPU prefill on the three k-quant ones. Metal prefill and small-model CPU prefill, where llama.cpp runs Apple's Accelerate, are still behind.</p>`
+    `<p class="bnote">Small models, an earlier pass against llama.cpp b10985 (<code>speed -r 2</code> against <code>llama-bench -r 3</code>), before the Metal changes behind the table above; not re-measured since.</p>`
 
   // Tabs.
   const tabs = [...root.querySelectorAll('[role="tab"]')]
