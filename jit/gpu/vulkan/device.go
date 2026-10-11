@@ -30,6 +30,8 @@ type candidate struct {
 	// and the instance asking for 1.3 says nothing about what the device
 	// answers to; see readSubgroups.
 	apiVer uint32
+	// driverVer is VkPhysicalDeviceProperties.driverVersion, vendor-encoded.
+	driverVer uint32
 	// uuid is VkPhysicalDeviceIDProperties.deviceUUID, and uuidOK is false when
 	// the device cannot be asked for one. See readDeviceUUID.
 	uuid   [uuidSize]byte
@@ -155,7 +157,7 @@ func enumerate(inst Instance) ([]candidate, error) {
 		var props physProps
 		vkGetPhysicalDeviceProperties(p, up(&props))
 		c := candidate{phys: p, idx: i, name: gostr(props.name[:]), devType: props.devType,
-			family: noFamily, apiVer: props.apiVer}
+			family: noFamily, apiVer: props.apiVer, driverVer: props.driverVer}
 		c.uuid, c.uuidOK = readDeviceUUID(p, props.apiVer)
 		c.maxStorage = props.maxStorageBufferRange()
 		c.maxGroups = props.maxComputeWorkGroupCount()

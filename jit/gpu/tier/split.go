@@ -44,6 +44,19 @@ func (g *devTier) tuneSplit(q kernels.Quant, rows, k int, r *resident) int {
 	fallback := chooseSplit(rows, k/32, g.kb.split)
 	g.splits[key] = fallback // so a failure below is not retried per layer
 
+	// A measured answer persisted by an earlier process on this device, driver
+	// and executable (WithTuneCache). An entry that does not parse, or names a
+	// split this shape cannot take, is measured again and overwritten.
+	ck := g.tuneKey(fmt.Sprintf("%v-%dx%d", q, rows, k))
+	if v, ok := lookupCache(g.kb.cacheDir, "gpusplit1", ck); ok && g.kb.tune != TuneForce {
+		var s, gi int
+		if n, err := fmt.Sscanf(v, "%d %d", &s, &gi); n == 2 && err == nil && s >= 1 && nb32ok(k, s) &&
+			(gi == 0 || gi == 1 && !g.NoGroupSplit && kernels.GroupSplitOK(rows, s)) {
+			g.splits[key], g.groupSplit[key] = s, gi == 1
+			return s
+		}
+	}
+
 	nb := k / 32
 	out, err := g.dev.Alloc(rows * 4)
 	if err != nil {
@@ -98,7 +111,7 @@ func (g *devTier) tuneSplit(q kernels.Quant, rows, k int, r *resident) int {
 			// The in-group kernel writes the final row, so it needs no partial
 			// plane, but it launches the same grid as the arm it is compared
 			// against: `grp` says the output contract, `split` the grid.
-			rate, ok := g.timeSplitMode(kern, red, r, d, out, rows, split, grp)
+			rate, ok := splitTrial(g, kern, red, r, d, out, rows, split, grp)
 			if ok && rate > bestRate {
 				best, bestRate, bestGroup = split, rate, grp
 			}
@@ -109,11 +122,35 @@ func (g *devTier) tuneSplit(q kernels.Quant, rows, k int, r *resident) int {
 	}
 	g.groupSplit[key] = bestGroup
 	g.splits[key] = best
+	gi := 0
+	if bestGroup {
+		gi = 1
+	}
+	saveCache(g.kb.cacheDir, "gpusplit1", ck, fmt.Sprintf("%d %d", best, gi))
 	if backend.Verbose() {
 		fmt.Fprintf(os.Stderr, "tier: %s %dx%d split %d%s measured (%.0f/s), table says %d\n",
 			q, rows, k, best, map[bool]string{true: " in-group"}[bestGroup], bestRate, fallback)
 	}
 	return best
+}
+
+// splitTrial is one timed candidate of tuneSplit; a gate swaps it to count
+// trials and fix the winner.
+var splitTrial = (*devTier).timeSplitMode
+
+// nb32ok reports that split divides a k-wide row's 32-element blocks the way
+// splitCands offers it.
+func nb32ok(k, split int) bool { return split <= k/32 && (k/32)%split == 0 }
+
+// tuneKey is a cache key for one shape on this tier's device: the
+// executable's fingerprint, the device's UUID and driver, and the shape. ""
+// when any part is unknown, and then nothing is read or written.
+func (g *devTier) tuneKey(shape string) string {
+	id, dk := binaryID(), deviceKey([]backend.Device{g.dev})
+	if id == "" || dk == "" {
+		return ""
+	}
+	return id + "-" + dk + "-" + shape
 }
 
 func (g *devTier) timeSplitMode(kern, red backend.Kernel, r *resident, d, out backend.Buf, rows, split int, grp bool) (float64, bool) {
@@ -219,10 +256,7 @@ func (g *devTier) retuneDecode() {
 		for _, u := range us[:min(len(us), 16)] {
 			rs = append(rs, u.r)
 		}
-		ck := ""
-		if id := binaryID(); id != "" {
-			ck = fmt.Sprintf("%s-%s-%v-%dx%d", id, deviceKey([]backend.Device{g.dev}), key.q, key.rows, key.k)
-		}
+		ck := g.tuneKey(fmt.Sprintf("%v-%dx%d", key.q, key.rows, key.k))
 		var cands []splitCand
 		nb := key.k / 32
 		for _, split := range splitCands(nb, 64) {
@@ -255,7 +289,7 @@ func (g *devTier) retuneDecode() {
 			return c.t
 		}
 		best, bestT, bestGrp := 0, 0.0, false
-		if v, ok := lookupCache("gpusplit", ck); ok && ck != "" && g.kb.tune != TuneForce {
+		if v, ok := lookupCache(g.kb.cacheDir, "gpusplit", ck); ok && g.kb.tune != TuneForce {
 			var gi int
 			if n, _ := fmt.Sscanf(v, "%d %d", &best, &gi); n != 2 {
 				best = 0
@@ -272,7 +306,7 @@ func (g *devTier) retuneDecode() {
 				if bestGrp {
 					gi = 1
 				}
-				saveCache("gpusplit", ck, fmt.Sprintf("%d %d", best, gi))
+				saveCache(g.kb.cacheDir, "gpusplit", ck, fmt.Sprintf("%d %d", best, gi))
 			}
 		}
 		m0 := us[0].m
@@ -385,11 +419,7 @@ func (g *devTier) retuneIndexed() bool {
 			continue
 		}
 		nout := key.rows * key.slots
-		ck := ""
-		if id := binaryID(); id != "" {
-			ck = fmt.Sprintf("%s-%s-%v-%dx%d-e%dx%d-%v", id, deviceKey([]backend.Device{g.dev}),
-				key.q, key.rows, key.k, key.experts, key.slots, key.slotAct)
-		}
+		ck := g.tuneKey(fmt.Sprintf("%v-%dx%d-e%dx%d-%v", key.q, key.rows, key.k, key.experts, key.slots, key.slotAct))
 		mk := func(split int, grp bool) (backend.Kernel, backend.Kernel, bool) {
 			kern, err := kernels.MatVec(kernels.MatVecShape{Center: g.center, T: key.q, K: key.k, Rows: key.rows,
 				Split: split, Experts: key.experts, Slots: key.slots, SlotAct: key.slotAct, GroupSplit: grp})
@@ -409,7 +439,7 @@ func (g *devTier) retuneIndexed() bool {
 			return c, red, true
 		}
 		best, bestGrp := 0, false
-		if v, ok := lookupCache("gpusplitid", ck); ok && ck != "" && g.kb.tune != TuneForce {
+		if v, ok := lookupCache(g.kb.cacheDir, "gpusplitid", ck); ok && g.kb.tune != TuneForce {
 			var gi int
 			if n, _ := fmt.Sscanf(v, "%d %d", &best, &gi); n != 2 {
 				best = 0
@@ -472,7 +502,7 @@ func (g *devTier) retuneIndexed() bool {
 				if bestGrp {
 					gi = 1
 				}
-				saveCache("gpusplitid", ck, fmt.Sprintf("%d %d", best, gi))
+				saveCache(g.kb.cacheDir, "gpusplitid", ck, fmt.Sprintf("%d %d", best, gi))
 			}
 			if backend.Verbose() && best > 0 {
 				fmt.Fprintf(os.Stderr, "tier: %s %dx%d e%dx%d indexed, retuned over %d blocks: split %d%s -> %d%s (%.1f us a launch)\n",

@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -30,6 +31,11 @@ func gpuOptions() []tier.Option {
 	}
 	set := func(k string) bool { return os.Getenv(k) != "" }
 
+	// The tuners' answers persist under the user cache directory, keyed by
+	// device UUID, driver and executable (tier.WithTuneCache).
+	if d, err := os.UserCacheDir(); err == nil {
+		o = append(o, tier.WithTuneCache(filepath.Join(d, "jitllm")))
+	}
 	if v := str("JITLLM_GPU_API"); v != "" {
 		o = append(o, tier.WithAPI(v))
 	}

@@ -133,3 +133,25 @@ var (
 	_ Identified = (*vkDev)(nil)
 	_ Identified = (*mtlDev)(nil)
 )
+
+// Driven is the optional interface a backend implements when it can name the
+// driver behind a Device. A measurement cached against a device is keyed by its
+// identity AND its driver: a driver update recompiles every kernel.
+type Driven interface{ DriverVersion() string }
+
+// DriverOf names a device's driver, or "" when the backend cannot say.
+func DriverOf(d Device) string {
+	if v, ok := d.(Driven); ok {
+		return v.DriverVersion()
+	}
+	return ""
+}
+
+func (c *cudaDev) DriverVersion() string {
+	if v, ok := cuda.DriverVersion(); ok {
+		return fmt.Sprintf("cuda%d", v)
+	}
+	return ""
+}
+
+func (v *vkDev) DriverVersion() string { return fmt.Sprintf("vk%08x", v.c.DriverVersion()) }
