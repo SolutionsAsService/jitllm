@@ -269,9 +269,14 @@ func speedCmd(args []string) error {
 		if err != nil {
 			return err
 		}
-		tgr, err := perSecond(fmt.Sprintf("tg%d", *n), *n, tg)
-		if err != nil {
-			return err
+		// -n 0 times no decode (the prefill harness's warm row): its span is
+		// whatever the clock read around nothing, zero on some runs, and a
+		// refusal there threw away the prompt's rate with it.
+		tgr := 0.0
+		if *n > 0 {
+			if tgr, err = perSecond(fmt.Sprintf("tg%d", *n), *n, tg); err != nil {
+				return err
+			}
 		}
 		pps = append(pps, ppr)
 		tgs = append(tgs, tgr)
