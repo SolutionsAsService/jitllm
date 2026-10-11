@@ -622,6 +622,57 @@ func TestForceUnloadStopsAGenerateMidDecode(t *testing.T) {
 	}
 }
 
+// TestForceUnloadStopsAStepLoopRowWhileItsClientIsBusy: a row of the step
+// loop does not wait for its client, so an unload arriving while the client
+// is still inside a token's callback must reach the loop then, not when the
+// callback returns. The callback holds on until the loop has let go of the
+// row, which is the case of a device decoding faster than its client reads (a
+// whole model on Metal): with the cancel noticed only by the drain between
+// callbacks, the row runs to max_tokens and finishes MAX_TOKENS.
+func TestForceUnloadStopsAStepLoopRowWhileItsClientIsBusy(t *testing.T) {
+	e, lm, _ := loadedEngine(t, smallModel, "small", LoadOptions{})
+	if lm.loop == nil {
+		t.Fatal("the model has no step loop: this gate would run the one-at-a-time path")
+	}
+	lp := lm.loop
+	s, err := e.CreateSession(SessionOptions{ModelID: "small", SessionID: "busy", MaxSeq: 512})
+	if err != nil {
+		t.Fatal(err)
+	}
+	unloaded := make(chan error, 1)
+	var fin *Finished
+	err = e.Generate(context.Background(), GenerateOptions{
+		SessionID: "busy", Prompt: Prompt{Kind: PromptText, Text: story}, MaxTokens: 400,
+	}, func(ev Event) error {
+		switch ev.Kind {
+		case EventToken:
+			if ev.Token.Index == 0 {
+				go func() {
+					_, err := e.UnloadModel("small", true)
+					unloaded <- err
+				}()
+				waitFor(t, "the unload to mark the session closed", s.closed.Load)
+				waitFor(t, "the loop to let go of the row", func() bool {
+					live, _ := lp.snapshot()
+					return len(live) == 0
+				})
+			}
+		case EventFinished:
+			fin = ev.Finished
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("the generate failed rather than finishing cancelled: %v", err)
+	}
+	if fin == nil || fin.Reason != FinishCancelled {
+		t.Fatalf("finished %+v, want reason CANCELLED", fin)
+	}
+	if err := <-unloaded; err != nil {
+		t.Fatalf("UnloadModel(force): %v", err)
+	}
+}
+
 // TestCancelReportsWhetherAGenerateWasRunning: "was it generating" and "does
 // the session exist" are different answers. A cancel from inside the stream
 // stops the decode at the next token. With cancelGeneration not calling the
