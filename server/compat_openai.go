@@ -277,7 +277,7 @@ func (e *compat) openAIChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	chat := &ChatInput{AddGenerationPrompt: true}
-	pics := &pictures{p: e.img}
+	pics := newPictures(e.img)
 	for i, m := range req.Messages {
 		c, imgs, err := oaContent(m.Content)
 		if err != nil {
@@ -286,7 +286,7 @@ func (e *compat) openAIChatCompletions(w http.ResponseWriter, r *http.Request) {
 		}
 		for _, ip := range imgs {
 			err := pics.add(fmt.Sprintf("messages[%d].content[%d].image_url", i, ip.index), func() (image.Image, error) {
-				return e.img.imageURL(r.Context(), ip.url)
+				return pics.p.imageURL(r.Context(), ip.url)
 			})
 			if err != nil {
 				oaFail(w, http.StatusBadRequest, err.Error(), "invalid_request_error")

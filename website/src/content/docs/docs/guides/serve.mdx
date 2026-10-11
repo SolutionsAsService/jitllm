@@ -56,8 +56,13 @@ jitllmd serve -addr 127.0.0.1:8080 -models ./models \
 | `-image-max SIZE` | `20M` | the most encoded bytes one picture in a request may be |
 | `-image-max-pixels N` | 16777216 | the most pixels (width x height) one picture may be, read from its header before decoding |
 | `-image-max-count N` | 8 | the most pictures one request may carry |
-| `-image-fetch` | false | fetch a picture named by an `http(s)` URL; off, only inline base64 pictures are taken. Private, loopback and link-local addresses are refused either way |
-| `-image-fetch-timeout D` | `10s` | how long `-image-fetch` waits for one picture |
+| `-image-max-request SIZE` | `64M` | the most encoded bytes all of a request's pictures may be |
+| `-image-decode-timeout D` | `5s` | how long decoding one picture may take |
+| `-image-fetch-allow LIST` | | comma-separated hosts a picture named by an `http(s)` URL may be fetched from: exact names, or `*.example.com` for one label under it. Empty fetches nothing; inline base64 pictures are always taken |
+| `-image-fetch-http` | false | let a fetch use plain http (https only otherwise) |
+| `-image-fetch-ports LIST` | `443,80` | ports a fetch may connect to |
+| `-image-fetch-concurrency N` | 4 | remote fetches running at once across the server |
+| `-image-fetch-timeout D` | `10s` | how long one remote fetch may take |
 
 More models can be loaded and unloaded while the server runs; see [Manage a running server](#manage-a-running-server). Requests beyond what a model runs at once wait in its queue; past `-max-queue` the server answers 429 with a `Retry-After`.
 
@@ -153,7 +158,7 @@ On a model converted with its vision projector (`jitllm convert model.gguf mmpro
 
 The pictures keep the order you sent them and go where the model's own chat template puts its image markers, and the model's vision tower encodes each one as `jitllm run -image` does. They combine with `tools` and a forced `tool_choice`, with `n` (the prompt, picture included, is prefilled once), and with a continued session (the history keeps its earlier pictures).
 
-One picture may be 20 MiB and 4096x4096 pixels, and a request may carry 8 (`-image-max`, `-image-max-pixels`, `-image-max-count`). A picture named by an `http(s)` URL is not fetched unless the server runs with `-image-fetch`, and even then a private, loopback or link-local address is refused. A picture sent to a model without a vision tower, an unsupported, mismatched, oversized or undecodable picture, or a remote URL with fetching off is a 400 that names the part, never a reply from a model that did not see it. A request with pictures prefills alone rather than joining the step loop.
+One picture may be 20 MiB and 4096x4096 pixels, and a request may carry 8 (`-image-max`, `-image-max-pixels`, `-image-max-count`). Inline pictures are always taken. A picture named by an `http(s)` URL is fetched only from the hosts listed in `-image-fetch-allow`, matched exactly (or one label under a `*.example.com` entry) on the first URL and every redirect, over https on ports 443 or 80 unless `-image-fetch-http` and `-image-fetch-ports` say otherwise, with no userinfo, no downgrade to http, at most three redirects, and never to a private, loopback, link-local, NAT64, IPv4-mapped or other special-use address, checked as each connection is made. A picture sent to a model without a vision tower, an unsupported, mismatched, oversized or undecodable picture, or a remote URL with fetching off is a 400 that names the part, never a reply from a model that did not see it. A request with pictures prefills alone rather than joining the step loop.
 
 ## Tool calls
 

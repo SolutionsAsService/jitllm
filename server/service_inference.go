@@ -68,7 +68,7 @@ func generateOptionsWith(m *v1.GenerateRequest, p ImagePolicy) (GenerateOptions,
 		if in.Chat.System != nil {
 			c.System, c.HasSystem = in.Chat.GetSystem(), true
 		}
-		pics := &pictures{p: p}
+		pics := newPictures(p)
 		for i, msg := range in.Chat.GetMessages() {
 			cm := chatMessage(msg.GetRole(), msg.GetContent())
 			for j, img := range msg.GetImages() {
@@ -81,7 +81,7 @@ func generateOptionsWith(m *v1.GenerateRequest, p ImagePolicy) (GenerateOptions,
 								"image/jpeg, image/webp and image/gif", img.GetMediaType())
 						}
 					}
-					return p.decodeImage(img.GetData(), mt)
+					return pics.p.decodeImage(img.GetData(), mt)
 				})
 				if err != nil {
 					return o, invalid("generate: %v", err)

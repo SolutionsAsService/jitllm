@@ -97,14 +97,36 @@ as `jitllm run -image` does it.
 | encoded bytes per picture | 20 MiB | `-image-max` |
 | pixels (width x height) per picture, read from the header before decoding | 4096 x 4096 | `-image-max-pixels` |
 | pictures per request | 8 | `-image-max-count` |
-| remote `http(s)` URLs | not fetched | `-image-fetch` (with `-image-fetch-timeout`, 10 s) |
+| encoded bytes of all of a request's pictures | 64 MiB | `-image-max-request` |
+| decoding one picture | 5 s | `-image-decode-timeout` |
+| remote `http(s)` URLs | not fetched | `-image-fetch-allow host1,host2` |
 
-Remote fetching is off by default, because a server that fetches what a
-request names is a proxy into its own network. With `-image-fetch`
-(`Config.Images.FetchRemote`) an `http(s)` image URL or Anthropic `url` source
-is fetched with the byte limit and timeout above, at most three redirects, no
-proxy, and a connection to a loopback, private, link-local, shared (100.64/10),
-multicast or unspecified address refused as it is dialled. Every refusal is a
+Inline pictures -- `data:` URLs, Anthropic `base64` sources and Connect
+bytes -- are always taken, under the limits above and nothing else. Remote
+fetching is off unless the operator lists the hosts it may reach, because a
+server that fetches what a request names is a proxy into its own network.
+With `-image-fetch-allow` (`Config.Images.FetchAllow`) an `http(s)` image URL
+or Anthropic `url` source is fetched only when:
+
+- its host, lower-cased, in IDNA ASCII form and without a trailing dot, is
+  on the list exactly, or under an entry `*.example.com` by exactly one label
+  (nothing matches by suffix); the first URL and every redirect are checked;
+- it is https (`-image-fetch-http` allows plain http), on port 443 or 80
+  (`-image-fetch-ports`), with no userinfo and no IPv6 zone, and no redirect
+  goes from https to http; at most three redirects are followed, through no
+  proxy;
+- the address each connection is about to be made to -- after resolution, so
+  a name cannot pass a check with one address and connect to another -- is in
+  none of the special-use ranges of the IANA IPv4 and IPv6 special-purpose
+  registries: this network, private, shared, loopback, link-local, the IETF
+  protocol blocks (Teredo), documentation, 6to4, benchmarking, multicast,
+  reserved, broadcast, unspecified, IPv4-mapped, both NAT64 prefixes,
+  discard-only and unique-local;
+- fewer than `-image-fetch-concurrency` (4) fetches are running across the
+  server, and it finishes within `-image-fetch-timeout` (10 s) with at most
+  64 KiB of headers and the byte limits above.
+
+Every refusal is a
 400 naming the part (`messages[0].content[1].image_url ...`): a picture sent
 to a model with no tower ("model X does not accept images"), an unsupported
 or mismatched type, a picture over a limit, undecodable bytes, a remote URL

@@ -211,6 +211,8 @@ type Engine struct {
 // or LoadModel does.
 func New(cfg Config) *Engine {
 	cfg.withDefaults()
+	// One fetch bound for the whole server, shared by every surface.
+	cfg.Images = cfg.Images.ready()
 	return &Engine{
 		cfg:      cfg,
 		started:  time.Now(),

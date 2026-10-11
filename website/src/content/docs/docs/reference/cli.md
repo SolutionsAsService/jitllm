@@ -149,8 +149,13 @@ Every client command takes `-addr` (`host:port`, `:port` or a full URL; default 
 | `-image-max SIZE` | `20M` | the most encoded bytes one picture in a request may be |
 | `-image-max-pixels N` | 16777216 | the most pixels (width x height) one picture may be, read from its header before decoding |
 | `-image-max-count N` | 8 | the most pictures one request may carry |
-| `-image-fetch` | false | fetch a picture named by an `http(s)` URL; off, only inline base64 pictures are taken. Private, loopback and link-local addresses are refused either way |
-| `-image-fetch-timeout D` | `10s` | how long `-image-fetch` waits for one picture |
+| `-image-max-request SIZE` | `64M` | the most encoded bytes all of a request's pictures may be |
+| `-image-decode-timeout D` | `5s` | how long decoding one picture may take |
+| `-image-fetch-allow LIST` | | comma-separated hosts a picture named by an `http(s)` URL may be fetched from: exact names, or `*.example.com` for one label under it. Empty fetches nothing; inline base64 pictures are always taken |
+| `-image-fetch-http` | false | let a fetch use plain http (https only otherwise) |
+| `-image-fetch-ports LIST` | `443,80` | ports a fetch may connect to |
+| `-image-fetch-concurrency N` | 4 | remote fetches running at once across the server |
+| `-image-fetch-timeout D` | `10s` | how long one remote fetch may take |
 | `-version S` | `dev` | the version `GetServerInfo` reports |
 
 ### run

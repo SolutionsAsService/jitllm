@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"hash/crc32"
 	"image"
@@ -15,10 +14,7 @@ import (
 	"image/jpeg"
 	"image/png"
 	"io"
-	"net"
-	"net/http"
 	"net/http/httptest"
-	"net/netip"
 	"os"
 	"strings"
 	"testing"
@@ -134,66 +130,6 @@ func TestImagePolicyRefusals(t *testing.T) {
 		_, err := c.p.imageURL(context.Background(), c.url)
 		if err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%s: err %v, want one containing %q", c.name, err, c.want)
-		}
-	}
-}
-
-// TestRemoteImageFetch: fetching is off unless asked for; on, it reads the
-// picture, and a private address is refused at connect time.
-func TestRemoteImageFetch(t *testing.T) {
-	pic := testPNG(t, 6, 2, color.White)
-	hits := 0
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		hits++
-		if r.URL.Path == "/big" {
-			w.Write(make([]byte, 64))
-			return
-		}
-		w.Write(pic)
-	}))
-	defer srv.Close()
-
-	if _, err := (ImagePolicy{}).withDefaults().imageURL(context.Background(), srv.URL); !errors.Is(err, errImageFetchOff) {
-		t.Fatalf("the default policy: %v, want the fetching-off refusal", err)
-	}
-	if hits != 0 {
-		t.Fatal("the default policy reached the server")
-	}
-	on := ImagePolicy{FetchRemote: true}.withDefaults()
-	if _, err := on.imageURL(context.Background(), srv.URL); err == nil ||
-		!strings.Contains(err.Error(), "private, loopback or link-local") {
-		t.Fatalf("a loopback URL: %v, want the private-address refusal", err)
-	}
-	if hits != 0 {
-		t.Fatal("the private-address refusal reached the server")
-	}
-	on.allowPrivate = true
-	img, err := on.imageURL(context.Background(), srv.URL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if img.Bounds().Dx() != 6 {
-		t.Fatalf("fetched %v", img.Bounds())
-	}
-	on.MaxBytes = 32
-	if _, err := on.imageURL(context.Background(), srv.URL+"/big"); err == nil || !strings.Contains(err.Error(), "over the limit") {
-		t.Fatalf("an oversized body: %v", err)
-	}
-}
-
-func TestPublicAddr(t *testing.T) {
-	// The IPv4 addresses are built from their bytes: the tree's private-value
-	// gate refuses a literal outside the documentation ranges.
-	v4 := func(a, b, c, d byte) string { return netip.AddrFrom4([4]byte{a, b, c, d}).String() }
-	for a, want := range map[string]bool{
-		"192.0.2.1": true, "2606:4700::1111": true,
-		"127.0.0.1": false, v4(10, 1, 2, 3): false, v4(192, 168, 1, 1): false, v4(172, 16, 0, 1): false,
-		v4(169, 254, 169, 254): false, v4(100, 64, 0, 1): false, "0.0.0.0": false, "::1": false,
-		"fe80::1": false, "fd00::1": false, "::ffff:127.0.0.1": false, v4(224, 0, 0, 1): false,
-	} {
-		err := refusePrivate("tcp", net.JoinHostPort(a, "80"), nil)
-		if (err == nil) != want {
-			t.Errorf("%s: %v, want public=%v", a, err, want)
 		}
 	}
 }

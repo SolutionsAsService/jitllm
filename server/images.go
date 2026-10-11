@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"crypto/x509"
 	"context"
 	"encoding/base64"
 	"errors"
@@ -10,12 +11,8 @@ import (
 	_ "image/gif" // a GIF's first frame, which image.Decode returns
 	_ "image/jpeg"
 	_ "image/png"
-	"io"
-	"net"
-	"net/http"
 	"net/netip"
 	"strings"
-	"syscall"
 	"time"
 
 	_ "golang.org/x/image/webp"
@@ -38,33 +35,57 @@ import (
 // ImagePolicy bounds the pictures a request may carry. The zero value takes
 // every default and fetches nothing remote.
 type ImagePolicy struct {
-	// FetchRemote lets a request name a picture by an http(s) URL, which the
-	// server then fetches. It is off by default: a server that fetches what a
-	// request names is a proxy into whatever network it sits on. Even on, an
-	// address that resolves to a loopback, private, link-local, multicast or
-	// unspecified IP is refused at connect time, and no proxy is used.
-	FetchRemote bool
+	// FetchAllow is the hosts a picture named by an http(s) URL may be
+	// fetched from (imagefetch.go): exact names, or "*.example.com" for one
+	// label under example.com. Empty, the default, fetches nothing: a server
+	// that fetches what a request names is a proxy into whatever network it
+	// sits on.
+	FetchAllow []string
+	// FetchHTTP lets a fetch use plain http (default https only).
+	FetchHTTP bool
+	// FetchPorts is the ports a fetch may connect to (default 443 and 80).
+	FetchPorts []int
+	// FetchConcurrency bounds the fetches running at once across the server
+	// (default 4).
+	FetchConcurrency int
 	// FetchTimeout bounds one fetch, the connection and the body together
 	// (default 10 s).
 	FetchTimeout time.Duration
+	// DecodeTimeout bounds decoding one picture (default 5 s).
+	DecodeTimeout time.Duration
 	// MaxBytes bounds one picture's encoded bytes (default 20 MiB).
 	MaxBytes int64
+	// MaxRequestBytes bounds the encoded bytes of all of a request's pictures
+	// (default 64 MiB).
+	MaxRequestBytes int64
 	// MaxPixels bounds one picture's width times height (default 4096x4096).
 	MaxPixels int64
 	// MaxImages bounds the pictures of one request (default 8).
 	MaxImages int
 
-	// allowPrivate lets a fetch reach a private address; only tests set it,
-	// since an httptest server is on the loopback.
-	allowPrivate bool
+	// fetchSlots is the server-wide fetch bound, made once by withDefaults.
+	fetchSlots chan struct{}
+	// exempt is the addresses a fetch may connect to whatever their range; only
+	// tests set it, since an httptest server is on the loopback. Nothing a
+	// request carries reaches it.
+	exempt []netip.AddrPort
+	// roots is the TLS roots a fetch trusts, nil for the system's; only tests
+	// set it.
+	roots *x509.CertPool
+	// spent is the encoded bytes a request's pictures have used, per request
+	// (newPictures).
+	spent *int64
 }
 
 // The ImagePolicy defaults.
 const (
-	DefaultImageMaxBytes     = 20 << 20
-	DefaultImageMaxPixels    = 4096 * 4096
-	DefaultImageMaxImages    = 8
-	DefaultImageFetchTimeout = 10 * time.Second
+	DefaultImageMaxBytes         = 20 << 20
+	DefaultImageMaxRequestBytes  = 64 << 20
+	DefaultImageMaxPixels        = 4096 * 4096
+	DefaultImageMaxImages        = 8
+	DefaultImageFetchTimeout     = 10 * time.Second
+	DefaultImageDecodeTimeout    = 5 * time.Second
+	DefaultImageFetchConcurrency = 4
 )
 
 func (p ImagePolicy) withDefaults() ImagePolicy {
@@ -80,7 +101,58 @@ func (p ImagePolicy) withDefaults() ImagePolicy {
 	if p.FetchTimeout <= 0 {
 		p.FetchTimeout = DefaultImageFetchTimeout
 	}
+	if p.DecodeTimeout <= 0 {
+		p.DecodeTimeout = DefaultImageDecodeTimeout
+	}
+	if p.MaxRequestBytes <= 0 {
+		p.MaxRequestBytes = DefaultImageMaxRequestBytes
+	}
+	if len(p.FetchPorts) == 0 {
+		p.FetchPorts = []int{443, 80}
+	}
+	if p.FetchConcurrency <= 0 {
+		p.FetchConcurrency = DefaultImageFetchConcurrency
+	}
+	if p.fetchSlots == nil {
+		p.fetchSlots = make(chan struct{}, p.FetchConcurrency)
+	}
 	return p
+}
+
+// ready is p with its defaults and its allow-list normalised. An entry that
+// does not normalise turns fetching off rather than fetch from a list nobody
+// meant; jitllmd refuses such a list at start (Validate).
+func (p ImagePolicy) ready() ImagePolicy {
+	p = p.withDefaults()
+	v, err := p.Validate()
+	if err != nil {
+		p.FetchAllow = nil
+		return p
+	}
+	return v
+}
+
+// Validate normalises the allow-list, refusing an entry that is not a host
+// name or a one-label wildcard, and a port that is not one.
+func (p ImagePolicy) Validate() (ImagePolicy, error) {
+	allow := make([]string, 0, len(p.FetchAllow))
+	for _, e := range p.FetchAllow {
+		if strings.TrimSpace(e) == "" {
+			continue
+		}
+		h, err := normAllow(e)
+		if err != nil {
+			return p, err
+		}
+		allow = append(allow, h)
+	}
+	p.FetchAllow = allow
+	for _, port := range p.FetchPorts {
+		if port <= 0 || port > 65535 {
+			return p, fmt.Errorf("image fetch port %d is not a port", port)
+		}
+	}
+	return p, nil
 }
 
 // imageFormats maps a decoder's format name to the media type it is sent as.
@@ -106,16 +178,18 @@ func imageMediaType(mt string) (string, bool) {
 	return "", false
 }
 
-// errImageFetchOff is a remote picture on a server that does not fetch.
-var errImageFetchOff = errors.New("names a picture by a remote URL, and this server does not fetch " +
-	"remote images: send it inline (base64), or start the server with remote image fetching " +
-	"enabled (jitllmd -image-fetch, server.Config.Images.FetchRemote)")
-
 // decodeImage decodes b, a picture whose declared media type is mt ("" for
 // none), within p's bounds.
 func (p ImagePolicy) decodeImage(b []byte, mt string) (image.Image, error) {
 	if int64(len(b)) > p.MaxBytes {
 		return nil, fmt.Errorf("is %d bytes, over the limit of %d", len(b), p.MaxBytes)
+	}
+	if p.spent != nil {
+		if *p.spent+int64(len(b)) > p.MaxRequestBytes {
+			return nil, fmt.Errorf("brings the request's pictures to %d bytes, over the limit of %d",
+				*p.spent+int64(len(b)), p.MaxRequestBytes)
+		}
+		*p.spent += int64(len(b))
 	}
 	cfg, format, err := image.DecodeConfig(bytes.NewReader(b))
 	if err != nil {
@@ -134,11 +208,29 @@ func (p ImagePolicy) decodeImage(b []byte, mt string) (image.Image, error) {
 	if px := int64(cfg.Width) * int64(cfg.Height); px > p.MaxPixels {
 		return nil, fmt.Errorf("is %dx%d, %d pixels, over the limit of %d", cfg.Width, cfg.Height, px, p.MaxPixels)
 	}
-	img, _, err := image.Decode(bytes.NewReader(b))
-	if err != nil {
-		return nil, fmt.Errorf("does not decode: %v", err)
+	// The decode is bounded by the pixel limit above; the deadline bounds its
+	// time apart from any fetch's. A decode past it finishes in the
+	// background, within the same pixel bound, and its picture is dropped.
+	type result struct {
+		img image.Image
+		err error
 	}
-	return img, nil
+	done := make(chan result, 1)
+	go func() {
+		img, _, err := image.Decode(bytes.NewReader(b))
+		done <- result{img, err}
+	}()
+	t := time.NewTimer(p.DecodeTimeout)
+	defer t.Stop()
+	select {
+	case r := <-done:
+		if r.err != nil {
+			return nil, fmt.Errorf("does not decode: %v", r.err)
+		}
+		return r.img, nil
+	case <-t.C:
+		return nil, fmt.Errorf("did not decode within %s", p.DecodeTimeout)
+	}
 }
 
 // decodeBase64Image decodes a base64 payload declared as mt, sizing nothing
@@ -208,86 +300,11 @@ func (p ImagePolicy) imageURL(ctx context.Context, u string) (image.Image, error
 	if !http1 && !https {
 		return nil, errors.New("is neither a data: URL nor an http(s) URL")
 	}
-	if !p.FetchRemote {
-		return nil, errImageFetchOff
-	}
 	b, err := p.fetch(ctx, u)
 	if err != nil {
 		return nil, err
 	}
 	return p.decodeImage(b, "")
-}
-
-// fetch reads u's body, at most MaxBytes of it, within FetchTimeout.
-func (p ImagePolicy) fetch(ctx context.Context, u string) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(ctx, p.FetchTimeout)
-	defer cancel()
-	d := &net.Dialer{Timeout: p.FetchTimeout}
-	if !p.allowPrivate {
-		// The address is checked as dialled, after resolution, so a name that
-		// resolves to a public address for the check and a private one for
-		// the connection has no window to do it in.
-		d.Control = refusePrivate
-	}
-	c := &http.Client{
-		Transport: &http.Transport{Proxy: nil, DialContext: d.DialContext,
-			TLSHandshakeTimeout: p.FetchTimeout, ResponseHeaderTimeout: p.FetchTimeout},
-		CheckRedirect: func(r *http.Request, via []*http.Request) error {
-			if len(via) >= 3 {
-				return errors.New("more than 3 redirects")
-			}
-			if r.URL.Scheme != "http" && r.URL.Scheme != "https" {
-				return fmt.Errorf("a redirect to a %s URL", r.URL.Scheme)
-			}
-			return nil
-		},
-	}
-	defer c.CloseIdleConnections()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-	if err != nil {
-		return nil, fmt.Errorf("is not a URL: %v", err)
-	}
-	resp, err := c.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("could not be fetched: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("could not be fetched: %s", resp.Status)
-	}
-	if resp.ContentLength > p.MaxBytes {
-		return nil, fmt.Errorf("is %d bytes, over the limit of %d", resp.ContentLength, p.MaxBytes)
-	}
-	b, err := io.ReadAll(io.LimitReader(resp.Body, p.MaxBytes+1))
-	if err != nil {
-		return nil, fmt.Errorf("could not be fetched: %v", err)
-	}
-	if int64(len(b)) > p.MaxBytes {
-		return nil, fmt.Errorf("is over the limit of %d bytes", p.MaxBytes)
-	}
-	return b, nil
-}
-
-// cgnat is the shared address space (RFC 6598), private in all but name.
-var cgnat = netip.PrefixFrom(netip.AddrFrom4([4]byte{100, 64, 0, 0}), 10)
-
-// refusePrivate is a dialer's Control: it refuses an address that is not a
-// public unicast one.
-func refusePrivate(network, address string, _ syscall.RawConn) error {
-	ap, err := netip.ParseAddrPort(address)
-	if err != nil {
-		return fmt.Errorf("refusing %s: %v", address, err)
-	}
-	if !publicAddr(ap.Addr()) {
-		return fmt.Errorf("refusing %s: a remote image may not be fetched from a private, loopback "+
-			"or link-local address", ap.Addr())
-	}
-	return nil
-}
-
-func publicAddr(a netip.Addr) bool {
-	a = a.Unmap()
-	return a.IsValid() && a.IsGlobalUnicast() && !a.IsPrivate() && !cgnat.Contains(a)
 }
 
 // imageError names the part of a request a picture came from.
@@ -302,8 +319,13 @@ func (e *imageError) Unwrap() error { return e.err }
 // pictures collects a request's pictures in order, against p's bounds.
 type pictures struct {
 	p    ImagePolicy
-	ctx  context.Context
 	imgs []image.Image
+}
+
+// newPictures is a request's collector: p with a byte count of its own.
+func newPictures(p ImagePolicy) *pictures {
+	p.spent = new(int64)
+	return &pictures{p: p}
 }
 
 // add decodes one picture with load, naming part on failure.

@@ -238,7 +238,7 @@ func (e *compat) anthropicMessages(w http.ResponseWriter, r *http.Request) {
 	} else if sys != "" {
 		chat.System, chat.HasSystem = sys, true
 	}
-	pics := &pictures{p: e.img}
+	pics := newPictures(e.img)
 	for i, m := range req.Messages {
 		ms, err := e.anMessages(r.Context(), i, m, pics)
 		if err != nil {
@@ -507,7 +507,7 @@ func (e *compat) anMessages(ctx context.Context, mi int, m anMessage, pics *pict
 			text.WriteString(b.Text)
 		case "image":
 			part := fmt.Sprintf("messages[%d].content[%d].source", mi, bi)
-			if err := pics.add(part, func() (image.Image, error) { return e.img.anImage(ctx, b.Source) }); err != nil {
+			if err := pics.add(part, func() (image.Image, error) { return pics.p.anImage(ctx, b.Source) }); err != nil {
 				return nil, err
 			}
 			images++

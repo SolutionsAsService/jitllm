@@ -90,7 +90,7 @@ func CompatHandler(b Backend) http.Handler {
 // CompatHandlerWith is CompatHandler with the pictures a request may carry
 // bounded by p.
 func CompatHandlerWith(b Backend, p ImagePolicy) http.Handler {
-	c := &compat{b: b, img: p.withDefaults()}
+	c := &compat{b: b, img: p.ready()}
 	mux := http.NewServeMux()
 	c.mux = mux
 	mux.HandleFunc("/v1/files", c.openAIFiles)
