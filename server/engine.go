@@ -23,11 +23,11 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	"unicode/utf8"
 
 	"github.com/jitllm/jitllm/engine/model"
 	"github.com/jitllm/jitllm/engine/nn"
 	"github.com/jitllm/jitllm/jit/gpu/tier"
+	"github.com/jitllm/jitllm/tok"
 )
 
 // Config is what a server is built with. Every field has a working default.
@@ -2029,10 +2029,7 @@ func (t *streamText) flush() string {
 // truncPartialRune drops a trailing incomplete UTF-8 sequence so a multi-byte
 // rune is never split across two writes.
 func truncPartialRune(s string) string {
-	for s != "" && !utf8.ValidString(s) {
-		s = s[:len(s)-1]
-	}
-	return s
+	return s[:tok.Complete(s)]
 }
 
 // ---------------------------------------------------------------- scanning

@@ -22,7 +22,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/jitllm/jitllm/engine/sched"
 	"github.com/jitllm/jitllm/format/quant"
@@ -763,21 +762,17 @@ func run(path, prompt string, n, depth int, devSpec string, gpuLayers int, vram,
 	if chat == nil {
 		fmt.Print(prompt)
 	}
-	printed := 0
+	// Each new id is decoded once (tok.ChatStream); a rune a token leaves
+	// unfinished waits in held for the token that completes it.
+	cs, decoded, held := m.Vocab.NewChatStream(), 0, ""
 	emitOf := func(out []int32) {
-		full := m.Vocab.DecodeChat(out)
-		if len(full) <= printed {
-			return
+		for _, id := range out[decoded:] {
+			held += cs.Next(id)
 		}
-		chunk := full[printed:]
-		// Never split a multi-byte rune across two writes: hold the tail back
-		// until the token that completes it arrives.
-		for chunk != "" && !utf8.ValidString(chunk) {
-			chunk = chunk[:len(chunk)-1]
-		}
-		if chunk != "" {
-			fmt.Print(chunk)
-			printed += len(chunk)
+		decoded = len(out)
+		if k := tok.Complete(held); k > 0 {
+			fmt.Print(held[:k])
+			held = held[k:]
 		}
 	}
 	// Printing runs beside the next token, off the GPU's critical path. One

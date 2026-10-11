@@ -246,3 +246,21 @@ func TestStreamTextDecodesEachTokenOnce(t *testing.T) {
 		t.Fatalf("decoded %d ids for %d tokens", decoded, len(ids))
 	}
 }
+
+// TestAnInvalidByteDoesNotStallTheStream: a byte that can never become part
+// of a rune is shown at once, and every byte after it streams too. Holding
+// back until the chunk is valid UTF-8 held back the rest of the generation.
+func TestAnInvalidByteDoesNotStallTheStream(t *testing.T) {
+	v := fakeVocab{pieces: map[int32]string{1: "abc", 2: "\x80", 3: "def", 4: "\xe2\x82"}}
+	st := newStreamText(v.next, nil)
+	var got string
+	ids := []int32{}
+	for _, id := range []int32{1, 2, 3, 4} {
+		ids = append(ids, id)
+		chunk, _, _ := st.push(ids)
+		got += chunk
+	}
+	if want := "abc\x80def"; got != want {
+		t.Fatalf("streamed %q before the end, want %q (the unfinished rune held back)", got, want)
+	}
+}
