@@ -1,0 +1,113 @@
+{
+  "input_formats": [
+    {
+      "name": "gguf",
+      "example": "jitllm convert model.gguf out.jlm",
+      "note": "a GGUF of an architecture in architectures; its tensor types must be in quantization.dequantable",
+      "evidence": ["TestGreedyMatchesLlamaCpp"]
+    },
+    {
+      "name": "gguf+mmproj",
+      "example": "jitllm convert model.gguf mmproj.gguf out.jlm",
+      "note": "a text GGUF and its vision projector, joined into one container; the projector must be in projectors",
+      "evidence": ["TestOneContainerCarriesTextAndVision"]
+    },
+    {
+      "name": "safetensors",
+      "example": "jitllm convert ./hf-model-dir out.jlm",
+      "note": "a Hugging Face directory whose config.json class is in safetensors_classes; -q8 stores the matrices as Q8_0",
+      "evidence": ["TestSafetensorsMatchTransformers"]
+    },
+    {
+      "name": "url",
+      "example": "jitllm convert hf://owner/repo/model.gguf out.jlm",
+      "note": "an hf:// or https:// URL, downloaded into JITLLM_MODELS first",
+      "evidence": ["TestLibraryArgsExpandsANameAndNothingElse"]
+    },
+    {
+      "name": "catalogue name",
+      "example": "jitllm convert qwen3-0.6b",
+      "note": "a name from `jitllm library`",
+      "evidence": ["TestLibraryArgsExpandsANameAndNothingElse", "TestEveryArchitectureIsObtainable"]
+    },
+    {
+      "name": "jlm",
+      "example": "jitllm run out.jlm 'Hello'",
+      "note": "the only format the engine runs; a container of another version is refused with the convert command",
+      "evidence": ["TestEveryModelRunsGenerated"]
+    }
+  ],
+  "backends": [
+    {
+      "name": "cpu-amd64-avx2",
+      "kind": "host",
+      "package": "jit/cpu",
+      "implemented": true,
+      "verified": [
+        {"hardware": "Intel Core i9-12900HK laptop (AVX2, AVX-VNNI)", "evidence": ["TestGreedyMatchesLlamaCpp", "TestEveryModelRunsGenerated"]},
+        {"hardware": "Xeon E5-2680 v4 and D-2123IT (AVX2, no VNNI)", "evidence": ["TestGreedyMatchesLlamaCpp"]}
+      ]
+    },
+    {
+      "name": "cpu-amd64-sse",
+      "kind": "host",
+      "package": "jit/cpu",
+      "implemented": true,
+      "verified": [
+        {"hardware": "Intel Atom (SSE4.2, no AVX)", "evidence": ["TestEveryModelRunsSSE", "TestGreedyMatchesLlamaCpp"]}
+      ],
+      "note": "x86 below SSE4.1+SSSE3 refuses to open a model, naming the missing extensions"
+    },
+    {
+      "name": "cpu-arm64",
+      "kind": "host",
+      "package": "jit/cpu",
+      "implemented": true,
+      "verified": [
+        {"hardware": "Apple M4", "evidence": ["TestGreedyMatchesLlamaCpp", "TestBatchMatchesForward", "TestEveryModelRunsGenerated"]}
+      ]
+    },
+    {
+      "name": "cuda",
+      "kind": "device",
+      "package": "jit/gpu/cuda",
+      "implemented": true,
+      "verified": [
+        {"hardware": "NVIDIA Tesla V100-SXM2-16GB (sm_70)", "evidence": ["TestLayerRelocatesToAnotherDevice", "TestSynthLlama4OnEveryDevice"]},
+        {"hardware": "NVIDIA RTX 3050 Ti Laptop (sm_86)", "evidence": ["TestLayerRelocatesToAnotherDevice", "TestSynthLlama4OnEveryDevice"]},
+        {"hardware": "NVIDIA T4 (sm_75)", "evidence": ["TestLayerRelocatesToAnotherDevice", "TestSynthLlama4OnEveryDevice"]},
+        {"hardware": "NVIDIA A10G (sm_86)", "evidence": ["TestLayerRelocatesToAnotherDevice", "TestSynthLlama4OnEveryDevice"]},
+        {"hardware": "NVIDIA L4 (sm_89)", "evidence": ["TestLayerRelocatesToAnotherDevice", "TestSynthLlama4OnEveryDevice"]},
+        {"hardware": "NVIDIA L40S (sm_89)", "evidence": ["TestLayerRelocatesToAnotherDevice", "TestSynthLlama4OnEveryDevice"]},
+        {"hardware": "NVIDIA A100 (sm_80)", "evidence": ["TestLayerRelocatesToAnotherDevice", "TestSynthLlama4OnEveryDevice"]},
+        {"hardware": "NVIDIA H100 (sm_90)", "evidence": ["TestLayerRelocatesToAnotherDevice", "TestSynthLlama4OnEveryDevice"]}
+      ]
+    },
+    {
+      "name": "vulkan",
+      "kind": "device",
+      "package": "jit/gpu/vulkan",
+      "implemented": true,
+      "verified": [
+        {"hardware": "NVIDIA RTX 3050 Ti Laptop", "evidence": ["TestLayerRelocatesToAnotherDevice", "TestSynthLlama4OnEveryDevice"]}
+      ]
+    },
+    {
+      "name": "metal",
+      "kind": "device",
+      "package": "jit/gpu/metal",
+      "implemented": true,
+      "verified": [
+        {"hardware": "Apple M4 (10-core GPU)", "evidence": ["TestLayerRelocatesToAnotherDevice", "TestSynthLlama4OnEveryDevice"]}
+      ]
+    },
+    {
+      "name": "hip",
+      "kind": "device",
+      "package": "jit/gpu/hip",
+      "implemented": true,
+      "verified": [],
+      "note": "built and gated offline (every kernel compiles for gfx90a, gfx942, gfx1030, gfx1100 and gfx1201 through comgr); not yet run on an AMD card -- the device gates (TestHIPDeviceRunsTheIR) skip without one. An AMD card without ROCm runs through vulkan. See docs/design/amd-hip.md"
+    }
+  ]
+}

@@ -36,6 +36,8 @@ type knobs struct {
 	arena         uint64          // packed-arena retention budget
 	mlaFault      MLAFault        // produce a wrong latent attention on purpose
 	scaleFault    ScaleFault      // drop one of Granite's scales on purpose
+	cacheDir      string          // where the tuners' answers persist; "" keeps none
+	lazyTune      bool            // tune a missing shape in the background; see WithLazyTune
 }
 
 // TuneMode is whether the tier measures the devices it was given.
@@ -79,6 +81,22 @@ func WithAPI(s string) Option { return func(o *openOpts) { o.kb.api = s } }
 // WithDeviceTune decides whether the tier probes the devices it opened. See
 // TuneMode.
 func WithDeviceTune(m TuneMode) Option { return func(o *openOpts) { o.kb.tune = m } }
+
+// WithTuneCache names the directory the device tuners keep their answers in
+// (the backend probe, the split tuner and the sequence retune), so a second
+// process on the same device, driver and executable reads them instead of
+// timing again. An entry is keyed by the device UUID, never its name, by the
+// driver version and by the executable's fingerprint; a device with no UUID or
+// no driver version caches nothing. "" (the default) keeps nothing on disk.
+func WithTuneCache(dir string) Option { return func(o *openOpts) { o.kb.cacheDir = dir } }
+
+// WithLazyTune moves the split tuner off the placement path: a shape with no
+// answer in the WithTuneCache directory runs the table's split at once, and a
+// background goroutine times the candidates between the device's own work
+// and writes the winner to the cache and to the tier, where every matvec
+// built after it takes it (and every later process reads it). It needs a
+// cache directory; without one the tuner measures at placement as before.
+func WithLazyTune(on bool) Option { return func(o *openOpts) { o.kb.lazyTune = on } }
 
 // WithVerbose traces every backend's open attempt, the device probe and the
 // ordering to stderr. It sets package backend's trace switch, which is

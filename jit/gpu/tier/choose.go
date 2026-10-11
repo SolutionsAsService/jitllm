@@ -69,7 +69,7 @@ func choose(devs []backend.Device, kb knobs) backend.Device {
 	if kb.tune == TuneOff {
 		return keep(cand[0])
 	}
-	if api, ok := lookupGPUAPI(key); ok && kb.tune != TuneForce {
+	if api, ok := lookupCache(kb.cacheDir, "gpuapi", key); ok && kb.tune != TuneForce {
 		for _, j := range cand {
 			if devs[j].API() == api {
 				return keep(j)
@@ -82,7 +82,7 @@ func choose(devs []backend.Device, kb knobs) backend.Device {
 			fmt.Fprintf(os.Stderr, "jitllm: probe %-6s %-40s %8.1f Gmac/s\n", d.API(), d.Name(), rates[i])
 		}
 	}
-	saveGPUAPI(key, sub[best].API())
+	saveCache(kb.cacheDir, "gpuapi", key, sub[best].API())
 	return keep(cand[best])
 }
 
@@ -93,6 +93,7 @@ func choose(devs []backend.Device, kb knobs) backend.Device {
 // probe costs a few milliseconds. It measures the kernel, not the bandwidth
 // ceiling, because the kernel is what will run.
 func probe(devs []backend.Device) (best int, rates []float64) {
+	tuneTrials.Add(1)
 	const rows, k = 2048, 2048
 	rates = make([]float64, len(devs))
 	nb := k / 32
@@ -192,12 +193,18 @@ func timeOne(d backend.Device, qs, dw, a []uint32, ax []float32,
 	return rs[len(rs)/2]
 }
 
-// deviceKey identifies the set of devices present, so a cached answer does not
-// survive a hardware or driver change.
+// deviceKey identifies the set of devices present by UUID and driver version,
+// so a cached answer does not survive a hardware or driver change, and two
+// identical cards are never one entry by their shared name. "" when any device
+// cannot say, and then nothing is cached.
 func deviceKey(devs []backend.Device) string {
 	var names []string
 	for _, d := range devs {
-		names = append(names, d.API()+"/"+d.Name())
+		id, drv := backend.IdentityOf(d), backend.DriverOf(d)
+		if !id.Known() || drv == "" {
+			return ""
+		}
+		names = append(names, d.API()+"/"+id.Key+"/"+drv)
 	}
 	sort.Strings(names)
 	h := fnv.New64a()
@@ -208,22 +215,23 @@ func deviceKey(devs []backend.Device) string {
 	return fmt.Sprintf("%016x", h.Sum64())
 }
 
-// cachePath is a per-host tuner cache file under the user cache directory:
-// "gpuapi" for choose, "gpusplit" for retuneDecode.
-func cachePath(name string) string {
-	dir, err := os.UserCacheDir()
-	if err != nil {
+// cachePath is a tuner cache file in the directory WithTuneCache named:
+// "gpuapi" for choose, "gpusplit1" for tuneSplit, "gpusplit" and "gpusplitid"
+// for the sequence retunes. "" when there is no directory.
+func cachePath(dir, name string) string {
+	if dir == "" {
 		return ""
 	}
-	return filepath.Join(dir, "jitllm", name)
+	return filepath.Join(dir, name)
 }
 
-func lookupGPUAPI(key string) (string, bool) { return lookupCache("gpuapi", key) }
-
-func saveGPUAPI(key, api string) { saveCache("gpuapi", key, api) }
-
-func lookupCache(name, key string) (string, bool) {
-	p := cachePath(name)
+// lookupCache reads one entry. A file that cannot be read or a line that does
+// not parse is no entry: the caller measures again and rewrites it.
+func lookupCache(dir, name, key string) (string, bool) {
+	if key == "" {
+		return "", false
+	}
+	p := cachePath(dir, name)
 	if p == "" {
 		return "", false
 	}
@@ -242,9 +250,9 @@ func lookupCache(name, key string) (string, bool) {
 	return "", false
 }
 
-func saveCache(name, key, val string) {
-	p := cachePath(name)
-	if p == "" {
+func saveCache(dir, name, key, val string) {
+	p := cachePath(dir, name)
+	if p == "" || key == "" {
 		return
 	}
 	if os.MkdirAll(filepath.Dir(p), 0o755) != nil {
@@ -270,5 +278,10 @@ func saveCache(name, key, val string) {
 	for _, k := range keys {
 		fmt.Fprintf(&out, "%s %s\n", k, lines[k])
 	}
-	os.WriteFile(p, []byte(out.String()), 0o644)
+	// Written whole and renamed into place, so a concurrent reader sees the
+	// old file or the new one, never half of either.
+	tmp := fmt.Sprintf("%s.%d.tmp", p, os.Getpid())
+	if os.WriteFile(tmp, []byte(out.String()), 0o644) == nil {
+		os.Rename(tmp, p)
+	}
 }

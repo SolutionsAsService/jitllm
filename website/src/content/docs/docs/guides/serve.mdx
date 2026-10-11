@@ -42,6 +42,7 @@ jitllmd serve -addr 127.0.0.1:8080 -models ./models \
 | `-prompt-chunk N` | 0 | prompt tokens a joining request feeds into one shared step; 0 is one device prefill chunk |
 | `-step-prompt-tokens N` | 0 | prompt tokens one step carries beside decoding rows; 0 measures it: the tokens that cost one decode step's time |
 | `-step-cost X` | 0 | with `-step-prompt-tokens 0`, how many decode steps' time a step carrying prompt tokens may take; 0 is the engine's default |
+| `-fairness N` | 100 | 0 to 100: 0 serves requests first come first served, each to its end (the most tokens a second); higher time-slices running rows for waiting ones and feeds the next prompts beside the oldest (shorter, evener waits for a first token) |
 | `-joint-steps MODE` | `auto` | `auto` times a joint step against the rows one after another, per row count, and runs the faster; `always` or `never` force it |
 | `-warm` | true | after every load, run a short prefill and a decode step so the first request does not pay for them |
 | `-no-mem-cache` | false | turn off each model's memory cache of prompt prefixes: every request prefills its whole prompt |
@@ -53,6 +54,16 @@ jitllmd serve -addr 127.0.0.1:8080 -models ./models \
 | `-kv-f16` | engine's own | the KV cache width of every load that names none: `-kv-f16` binary16, `-kv-f16=false` f32 |
 | `-kv-cache DIR` | | where sessions created with `prompt_cache` keep their prompt prefixes; without it such a session is refused |
 | `-kv-cache-max SIZE` | `8G` | what `-kv-cache` may occupy before its least recently used pages go; 0 is unbounded |
+| `-image-max SIZE` | `20M` | the most encoded bytes one picture in a request may be |
+| `-image-max-pixels N` | 16777216 | the most pixels (width x height) one picture may be, read from its header before decoding |
+| `-image-max-count N` | 8 | the most pictures one request may carry |
+| `-image-max-request SIZE` | `64M` | the most encoded bytes all of a request's pictures may be |
+| `-image-decode-timeout D` | `5s` | how long decoding one picture may take |
+| `-image-fetch-allow LIST` | | comma-separated hosts a picture named by an `http(s)` URL may be fetched from: exact names, or `*.example.com` for one label under it. Empty fetches nothing; inline base64 pictures are always taken |
+| `-image-fetch-http` | false | let a fetch use plain http (https only otherwise) |
+| `-image-fetch-ports LIST` | `443,80` | ports a fetch may connect to |
+| `-image-fetch-concurrency N` | 4 | remote fetches running at once across the server |
+| `-image-fetch-timeout D` | `10s` | how long one remote fetch may take |
 
 More models can be loaded and unloaded while the server runs; see [Manage a running server](#manage-a-running-server). Requests beyond what a model runs at once wait in its queue; past `-max-queue` the server answers 429 with a `Retry-After`.
 
@@ -136,6 +147,20 @@ print(msg.content[0].text)
 
 `system` may be a string or a list of text blocks, and so may `content`. Supported sampling fields are `temperature`, `top_p`, `top_k` and `stop_sequences`. A stream is the named event sequence (`message_start`, `content_block_start`, `content_block_delta`, `content_block_stop`, `message_delta`, `message_stop`), and `stop_reason` is `end_turn`, `max_tokens`, `stop_sequence` or `tool_use`.
 
+## Pictures
+
+On a model converted with its vision projector (`jitllm convert model.gguf mmproj.gguf out.jlm`), a chat request may carry pictures: `image_url` content parts on `/v1/chat/completions`, `image` blocks on `/v1/messages`, and `images` on a Connect `ChatMessage`. PNG, JPEG, WebP and GIF (its first frame) are taken, inline as base64:
+
+```json
+{"model": "smolvlm", "messages": [{"role": "user", "content": [
+  {"type": "image_url", "image_url": {"url": "data:image/png;base64,iVBORw0KGgo..."}},
+  {"type": "text", "text": "What is in this picture?"}]}]}
+```
+
+The pictures keep the order you sent them and go where the model's own chat template puts its image markers, and the model's vision tower encodes each one as `jitllm run -image` does. They combine with `tools` and a forced `tool_choice`, with `n` (the prompt, picture included, is prefilled once), and with a continued session (the history keeps its earlier pictures).
+
+One picture may be 20 MiB and 4096x4096 pixels, and a request may carry 8 (`-image-max`, `-image-max-pixels`, `-image-max-count`). Inline pictures are always taken. A picture named by an `http(s)` URL is fetched only from the hosts listed in `-image-fetch-allow`, matched exactly (or one label under a `*.example.com` entry) on the first URL and every redirect, over https on ports 443 or 80 unless `-image-fetch-http` and `-image-fetch-ports` say otherwise, with no userinfo, no downgrade to http, at most three redirects, and never to a private, loopback, link-local, NAT64, IPv4-mapped or other special-use address, checked as each connection is made. A picture sent to a model without a vision tower, an unsupported, mismatched, oversized or undecodable picture, or a remote URL with fetching off is a 400 that names the part, never a reply from a model that did not see it. A request with pictures prefills alone rather than joining the step loop.
+
 ## Tool calls
 
 Both APIs accept tool definitions in their own shapes: OpenAI's `tools` with `function.parameters`, Anthropic's `tools` with `input_schema`. They reach the model's own chat template, so a model trained for tool use sees the prompt it was trained on: OpenAI definitions exactly as sent, Anthropic ones converted to the OpenAI shape with `input_schema` kept byte for byte.
@@ -193,7 +218,7 @@ A request may also name a session instead of a model with `"jitllm_session"` and
 ```sh
 jitllmd models                           # the model directory, and what is loaded
 jitllmd models -load gemma-3-4b.jlm -id gemma -devices cuda:0
-jitllmd models -unload gemma
+jitllmd models -unload gemma            # -force closes sessions holding it instead of refusing
 
 jitllmd devices                          # hardware and spendable memory
 jitllmd stats -watch                     # engine counters, streamed

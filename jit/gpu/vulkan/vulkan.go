@@ -191,10 +191,13 @@ type Ctx struct {
 		n    int
 		live map[*Queue]bool
 	}
-	mem     memProps
-	name    string
-	devType uint32 // VkPhysicalDeviceType of the device that was picked
-	idx     int    // enumeration index of the device that was picked
+	mem  memProps
+	name string
+	// driverVer is VkPhysicalDeviceProperties.driverVersion, vendor-encoded:
+	// compared for equality only (DriverVersion).
+	driverVer uint32
+	devType   uint32 // VkPhysicalDeviceType of the device that was picked
+	idx       int    // enumeration index of the device that was picked
 	// uuid is this physical device's identity and uuidOK says it could be
 	// asked for one; see UUID and readDeviceUUID.
 	uuid   [uuidSize]byte
@@ -293,6 +296,7 @@ func OpenDeviceWith(sel string, cfg Config) (*Ctx, error) {
 	c.phys, c.family, c.devType, c.idx = pick.phys, pick.family, pick.devType, pick.idx
 	c.name = pick.name
 	c.uuid, c.uuidOK = pick.uuid, pick.uuidOK
+	c.driverVer = pick.driverVer
 	c.maxStorage = pick.maxStorage
 	c.maxGroups = pick.maxGroups
 	if cfg.MaxGroups > 0 && cfg.MaxGroups < c.maxGroups {
@@ -585,6 +589,10 @@ func (c *Ctx) Index() int { return c.idx }
 // specifications promise the same sixteen bytes. The name is not: two identical
 // cards report the same string.
 func (c *Ctx) UUID() ([uuidSize]byte, bool) { return c.uuid, c.uuidOK }
+
+// DriverVersion is the device's VkPhysicalDeviceProperties.driverVersion, in
+// its vendor's encoding: fit to tell one driver from another, not to order them.
+func (c *Ctx) DriverVersion() uint32 { return c.driverVer }
 
 // MaxBuffer is the most bytes one storage buffer may be bound with
 // (maxStorageBufferRange): a larger buffer binds short.

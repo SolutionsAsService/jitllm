@@ -389,15 +389,18 @@ func (g *devTier) prewarmPromptWidths() {
 		return
 	}
 	g.prewarmHeadKernels()
-	if g.NoExactPrompt || g.promptW <= batchGrain {
+	g.prewarmPrompt()
+	grain := g.promptGrain()
+	if g.NoExactPrompt || g.promptW <= grain {
 		return
 	}
-	for w := batchGrain; w < g.promptW; w += batchGrain {
+	for w := grain; w < g.promptW; w += grain {
 		if g.bbs[w] != nil || w == g.stepW {
 			continue
 		}
 		if g.prepBatch(w) {
 			g.PromptWidthsWarmed++
+			g.prewarmFused(g.bbs[w])
 		}
 		g.dropBatch(w)
 	}

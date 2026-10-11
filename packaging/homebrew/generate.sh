@@ -4,12 +4,13 @@
 #
 #   packaging/homebrew/generate.sh v1.2.3 dist/checksums.txt packaging/homebrew/tap
 #
-# The output directory is laid out as the tap repository jitllm/homebrew-tap
+# The output directory is laid out as the tap repository jitllm/homebrew-jitllm
 # is (Casks/jitllm.rb, Formula/jitllm.rb), so publishing is copying it there
 # and pushing. Then:
 #
-#   brew install --cask jitllm/tap/jitllm   # jitllm.app, with jitllm and jitllmd on PATH
-#   brew install jitllm/tap/jitllm          # jitllm and jitllmd only
+#   brew tap jitllm/jitllm && brew trust jitllm/jitllm
+#   brew install --cask jitllm   # jitllm.app, with jitllm and jitllmd on PATH
+#   brew install jitllm          # jitllm and jitllmd only
 #
 # Every URL is the release's own asset and every sha256 is read from its
 # checksums.txt; an asset missing from it is an error, not a blank.
@@ -54,7 +55,6 @@ cask "jitllm" do
   end
 
   depends_on macos: ">= :monterey"
-  conflicts_with formula: "jitllm"
 
   app "jitllm.app"
   binary "#{appdir}/jitllm.app/Contents/Resources/bin/jitllm"

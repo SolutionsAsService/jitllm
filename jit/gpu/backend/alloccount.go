@@ -113,5 +113,5 @@ var compiles atomic.Int64
 // not inside a time to first token.
 func Compiles() int64 { return compiles.Load() }
 
-// CompileLog, when set, is told the name of every kernel Metal compiles.
+// CompileLog, when set, is told the name of every kernel Metal and CUDA compile.
 var CompileLog func(name string)

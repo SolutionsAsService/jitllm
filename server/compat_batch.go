@@ -85,6 +85,14 @@ type oaBatch struct {
 	Errors           *oaBatchErrors    `json:"errors"`
 }
 
+// oaBatchCreate is POST /v1/batches's body.
+type oaBatchCreate struct {
+	InputFileID      string            `json:"input_file_id"`
+	Endpoint         string            `json:"endpoint"`
+	CompletionWindow string            `json:"completion_window"`
+	Metadata         map[string]string `json:"metadata"`
+}
+
 type oaBatchErrors struct {
 	Object string         `json:"object"`
 	Data   []oaBatchError `json:"data"`
@@ -332,12 +340,7 @@ func (c *compat) openAIBatches(w http.ResponseWriter, r *http.Request) {
 	id, sub, _ := strings.Cut(rest, "/")
 	switch {
 	case rest == "" && r.Method == http.MethodPost:
-		var req struct {
-			InputFileID      string            `json:"input_file_id"`
-			Endpoint         string            `json:"endpoint"`
-			CompletionWindow string            `json:"completion_window"`
-			Metadata         map[string]string `json:"metadata"`
-		}
+		var req oaBatchCreate
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			oaFail(w, http.StatusBadRequest, err.Error(), "invalid_request_error")
 			return

@@ -123,6 +123,7 @@ func (s *State) allocRecurrent(nseq int) {
 	}
 	g := c.delta()
 	s.dg = g
+	s.lin.ref = s.m.opt.linRowByRow
 	s.rconv = make([][]float32, c.NLayer)
 	s.rstate = make([][]float32, c.NLayer)
 	for i := 0; i < c.NLayer; i++ {
@@ -212,7 +213,7 @@ func (s *State) linearAttn(li int, l *layer, row int, h, out []float32) error {
 		return s.shortConv(li, l, row, h, out)
 	}
 
-	if err := s.mv(s.dMixed, l.wq, h); err != nil {
+	if err := s.lproj(s.dMixed, s.lin.mixed, l.wq, h); err != nil {
 		return err
 	}
 	if g.chanDecay {
@@ -222,9 +223,11 @@ func (s *State) linearAttn(li int, l *layer, row int, h, out []float32) error {
 		if l.ssmGA.rows == 0 {
 			// Kimi-K3's full-rank output gate: one matrix, the z projection's
 			// place.
-			if err := s.mv(s.dZ, l.ssmGate, h); err != nil {
+			if err := s.lproj(s.dZ, s.lin.z, l.ssmGate, h); err != nil {
 				return err
 			}
+		} else if s.lin.on {
+			s.lrow(s.dZ, s.lin.z, l.ssmGB.rows)
 		} else {
 			if err := s.mv(s.dLowRank, l.ssmGA, h); err != nil {
 				return err
@@ -233,23 +236,27 @@ func (s *State) linearAttn(li int, l *layer, row int, h, out []float32) error {
 				return err
 			}
 		}
-		if err := s.mv(s.dLowRank, l.ssmFA, h); err != nil {
-			return err
-		}
-		if err := s.mv(s.dAlpha, l.ssmFB, s.dLowRank); err != nil {
-			return err
+		if s.lin.on {
+			s.lrow(s.dAlpha, s.lin.alpha, l.ssmFB.rows)
+		} else {
+			if err := s.mv(s.dLowRank, l.ssmFA, h); err != nil {
+				return err
+			}
+			if err := s.mv(s.dAlpha, l.ssmFB, s.dLowRank); err != nil {
+				return err
+			}
 		}
 		// ssmBA is b_proj alone here: beta's logits, one per value head. There
 		// is no alpha stream in it to deinterleave -- the forget gate above is
 		// where KDA's alpha comes from.
-		if err := s.mv(s.dBRaw, l.ssmBA, h); err != nil {
+		if err := s.lproj(s.dBRaw, s.lin.braw, l.ssmBA, h); err != nil {
 			return err
 		}
 	} else {
-		if err := s.mv(s.dZ, l.ssmGate, h); err != nil {
+		if err := s.lproj(s.dZ, s.lin.z, l.ssmGate, h); err != nil {
 			return err
 		}
-		if err := s.mv(s.dBA, l.ssmBA, h); err != nil {
+		if err := s.lproj(s.dBA, s.lin.braw, l.ssmBA, h); err != nil {
 			return err
 		}
 	}
@@ -333,11 +340,7 @@ func (s *State) linearAttn(li int, l *layer, row int, h, out []float32) error {
 	}
 	s.jit.NewInput()
 	s.m.trace(li, "final_output", s.dZ)
-	if err := s.mv(out, l.ssmOut, s.dZ); err != nil {
-		return err
-	}
-	s.m.trace(li, "linear_attn_out", out)
-	return nil
+	return s.lout(li, "linear_attn_out", out, l.ssmOut, s.dZ)
 }
 
 // conv1d runs the causal convolution over dMixed in place and advances the
@@ -412,13 +415,13 @@ func (s *State) ssdNorm(y, w []float32) {
 //	out     MUL_MAT(ssm_out, y)
 func (s *State) ssdAttn(li int, l *layer, row int, h, out []float32) error {
 	c := s.m.Cfg
-	if err := s.mv(s.dMixed, l.mixIn(), h); err != nil {
+	if err := s.lproj(s.dMixed, s.lin.mixed, l.mixIn(), h); err != nil {
 		return err
 	}
-	if err := s.mv(s.dZ, l.ssmGate, h); err != nil {
+	if err := s.lproj(s.dZ, s.lin.z, l.ssmGate, h); err != nil {
 		return err
 	}
-	if err := s.mv(s.dBRaw, l.ssmBA, h); err != nil {
+	if err := s.lproj(s.dBRaw, s.lin.braw, l.ssmBA, h); err != nil {
 		return err
 	}
 	s.m.trace(li, "xBC", s.dMixed)
@@ -447,11 +450,7 @@ func (s *State) ssdAttn(li int, l *layer, row int, h, out []float32) error {
 		s.ssdNorm(s.dZ, l.ssmNorm)
 	}
 	s.m.trace(li, "ssm_norm", s.dZ)
-	if err := s.mv(out, l.ssmOut, s.dZ); err != nil {
-		return err
-	}
-	s.m.trace(li, "ssm_out", out)
-	return nil
+	return s.lout(li, "ssm_out", out, l.ssmOut, s.dZ)
 }
 
 // splitQGate deinterleaves n rows of a double-width query projection. A
@@ -525,13 +524,13 @@ func (l *layer) mixIn() tensor {
 func (s *State) shortConv(li int, l *layer, row int, h, out []float32) error {
 	n := s.dg.chans
 	b, cg := s.dZ[:n], s.dZ[n:2*n]
-	if err := s.mv(s.dMixed, l.wq, h); err != nil {
+	if err := s.lproj(s.dMixed, s.lin.mixed, l.wq, h); err != nil {
 		return err
 	}
-	if err := s.mv(b, l.ssmGate, h); err != nil {
+	if err := s.lproj(b, s.lin.z, l.ssmGate, h); err != nil {
 		return err
 	}
-	if err := s.mv(cg, l.ssmBA, h); err != nil {
+	if err := s.lproj(cg, s.lin.braw, l.ssmBA, h); err != nil {
 		return err
 	}
 	nn.ActMul32JIT(s.dMixed, b, nn.ActIdentity)
@@ -540,11 +539,7 @@ func (s *State) shortConv(li int, l *layer, row int, h, out []float32) error {
 	s.m.trace(li, "conv", s.dMixed)
 	nn.ActMul32JIT(s.dMixed, cg, nn.ActIdentity)
 	s.jit.NewInput()
-	if err := s.mv(out, l.ssmOut, s.dMixed); err != nil {
-		return err
-	}
-	s.m.trace(li, "shortconv_out", out)
-	return nil
+	return s.lout(li, "shortconv_out", out, l.ssmOut, s.dMixed)
 }
 
 // mamba1Attn runs one token of one sequence through layer li's Mamba-1
@@ -563,10 +558,10 @@ func (s *State) shortConv(li int, l *layer, row int, h, out []float32) error {
 //	out     MUL_MAT(ssm_out, y)
 func (s *State) mamba1Attn(li int, l *layer, row int, h, out []float32) error {
 	c := s.m.Cfg
-	if err := s.mv(s.dMixed, l.wq, h); err != nil {
+	if err := s.lproj(s.dMixed, s.lin.mixed, l.wq, h); err != nil {
 		return err
 	}
-	if err := s.mv(s.dZ, l.ssmGate, h); err != nil {
+	if err := s.lproj(s.dZ, s.lin.z, l.ssmGate, h); err != nil {
 		return err
 	}
 	s.m.trace(li, "x", s.dMixed)
@@ -601,11 +596,7 @@ func (s *State) mamba1Attn(li int, l *layer, row int, h, out []float32) error {
 	s.m.trace(li, "ssm_y", s.dOut)
 	nn.ActMul32JIT(s.dZ, s.dOut, nn.ActSiLU)
 	s.jit.NewInput()
-	if err := s.mv(out, l.ssmOut, s.dZ); err != nil {
-		return err
-	}
-	s.m.trace(li, "ssm_out", out)
-	return nil
+	return s.lout(li, "ssm_out", out, l.ssmOut, s.dZ)
 }
 
 // mamba1Scan runs the selective scan over every channel of layer li, fanned

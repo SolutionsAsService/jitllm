@@ -466,7 +466,7 @@ type ragKey struct {
 // card, with a Reduce after.
 func (g *devTier) ragMV(m mv, ntok int) (mv, bool) {
 	if _, _, ok := g.mmaTile(m.rows, ntok); ok && !kernels.IsFloat(m.q) {
-		return g.batchMV(m, ntok, 1)
+		return g.intBatchMV(m, ntok, 1)
 	}
 	if bm, ok := g.voltaMV(m, ntok); ok {
 		return bm, true
@@ -999,15 +999,358 @@ var voltaTiles = []kernels.VoltaTile{
 func (g *devTier) voltaGemm(m mv, ntok int) (mv, bool) {
 	// A build reached from inside a submission takes g.mu (subLock).
 	defer g.subUnlock(g.subLock())
+	return g.stagedGemm(m, ntok, voltaTiles, 0, 0)
+}
+
+// f16Tiles are GemmVolta's m16n8 blockings, widest first: four warps as 2x2,
+// each four m-tiles of 16 rows by up to eight n-tiles of 8 tokens, so a
+// 128-row block meets 128, 64 or 32 tokens. The 96- and 32-row blocks serve
+// matrices no 128-row block divides.
+var f16Tiles = []kernels.VoltaTile{
+	{MT: 4, NT: 4, WM: 2, WN: 2}, {MT: 4, NT: 2, WM: 2, WN: 2},
+	{MT: 3, NT: 4, WM: 2, WN: 2}, {MT: 3, NT: 2, WM: 2, WN: 2},
+	{MT: 2, NT: 4, WM: 2, WN: 2}, {MT: 2, NT: 2, WM: 2, WN: 2}, {MT: 1, NT: 2, WM: 2, WN: 2},
+}
+
+// f16GemmK is the k of the m16n8 binary16 instruction this device lowers
+// (16 from sm_80, 8 on sm_75), or 0 where it lowers neither. Probed once by a
+// compile: the PTX target decides, and a refusal is the device's, not the
+// shape's. Callers hold g.mu.
+func (g *devTier) f16GemmK() int {
+	if g.f16K == 0 {
+		g.f16K = -1
+		if g.dev.API() == "ptx" {
+			for _, k := range []int{16, 8} {
+				ker, err := kernels.GemmVolta(kernels.MatVecShape{Center: g.center, T: kernels.Q8_0, K: 32, Rows: 32, NTok: 32},
+					kernels.VoltaTile{MT: 1, NT: 2, WM: 2, WN: 2, KB: 1, F16K: k})
+				if err != nil {
+					continue
+				}
+				if c, err := g.dev.Compile(ker); err == nil {
+					c.Close()
+					g.f16K = k
+					break
+				}
+			}
+		}
+	}
+	return max(g.f16K, 0)
+}
+
+// f16Gemm is m's batched twin as GemmVolta on the m16n8 binary16
+// instruction (sm_75 on): the weights dequantized once a workgroup into
+// shared memory with their scales folded in, the activations ActF16T's, and
+// the dot accumulated in float32 over the whole k. MatVecMMA reads both
+// operands from global memory inside its loop, re-dequantizes a weight for
+// every 32 tokens and pays a float epilogue per sub-block per instruction;
+// this form pays neither. False where the device lowers no m16n8 shape, the
+// format has no binary16 dequant, or no tile divides the shape. NoVolta
+// refuses it, as it refuses every binary16-activation twin.
+func (g *devTier) f16Gemm(m mv, ntok int) (mv, bool) {
+	// A build reached from inside a submission takes g.mu (subLock).
+	defer g.subUnlock(g.subLock())
+	if g.NoVolta || m.slots > 0 || !kernels.Volta70OK(m.q) {
+		return mv{}, false
+	}
+	k := g.f16GemmK()
+	if k == 0 {
+		return mv{}, false
+	}
+	// About a workgroup an SM: a sixteenth of the threads the card holds
+	// resident (Slots, asked of the driver; 1536 or 2048 an SM, 128 a
+	// workgroup). The card decides it, not the shape: the 128x64 block gives
+	// a 1024x1024 projection at 512 rows 64 workgroups, three an SM of an
+	// RTX 3050 Ti's 20 and fewer than one an SM of a 142-SM card. The bar is
+	// sm_70's measured one (kb0Split: a V100's 128-row blocks were fastest
+	// unsplit from 64 workgroups on 80 SMs), not full residency: a staged
+	// block's shared memory holds an SM to a few of them anyway.
+	return g.stagedGemm(m, ntok, f16Tiles, k, g.dev.Slots()/16)
+}
+
+// fusedKern is a prompt chunk's fused operand kernel under key, compiled on
+// first use from build, or nil where the generator or the device refuses it
+// -- remembered, so the caller keeps its two launches without asking again.
+func (g *devTier) fusedKern(key ragKey, build func() (*ir.Kernel, error)) backend.Kernel {
+	// A build reached from inside a submission takes g.mu (subLock).
+	defer g.subUnlock(g.subLock())
+	if k, ok := g.ragK[key]; ok {
+		return k
+	}
+	ker, err := build()
+	var c backend.Kernel
+	if err == nil {
+		if c, err = g.dev.Compile(ker); err != nil {
+			c = nil
+		}
+	}
+	if g.ragK == nil {
+		g.ragK = map[ragKey]backend.Kernel{}
+	}
+	g.ragK[key] = c
+	return c
+}
+
+// rmsF16For is the RMSNorm that also writes m's binary16 operand
+// (kernels.RMSNormF16TRows; with add, x+y and its norm as bs.addRms), and
+// the conversion it stands in for: m's batched twin's ActF16T kernel, which
+// the caller names in the conversion memo so the GEMM finds its operand
+// written. nil where m's twin reads int8 (no conversion to save), where the
+// norm is not RMSNorm's one launch, or NoOperandFuse.
+func (g *devTier) rmsF16For(bs *blockScratch, m mv, ntok int, add bool) (norm, conv backend.Kernel) {
+	if g.NoOperandFuse || m.kern == nil || bs.rms == nil || bs.normVar != nil {
+		return nil, nil
+	}
+	bm, ok := g.batchMV(m, ntok, bs.tok)
+	if !ok || bm.act == nil || m.k != bs.p.NEmbd {
+		return nil, nil
+	}
+	kind := "rmsf16t"
+	if add {
+		kind = "addrmsf16t"
+	}
+	p := &bs.p
+	k := g.fusedKern(ragKey{kind: kind, q: bm.q, k: p.NEmbd, rows: bs.rows}, func() (*ir.Kernel, error) {
+		return kernels.RMSNormF16TRows(p.NEmbd, bs.rows, float32(p.RMSEps), false, add, bm.q, g.warpNorm())
+	})
+	if k == nil {
+		return nil, nil
+	}
+	return k, bm.act
+}
+
+// actF16For is the gated activation that writes m's binary16 operand
+// (kernels.ActMulF16T), the conversion it stands in for, and its thread
+// count; nil as rmsF16For.
+func (g *devTier) actF16For(bs *blockScratch, m mv, ntok int) (act, conv backend.Kernel, threads int) {
+	if g.NoOperandFuse || m.kern == nil {
+		return nil, nil, 0
+	}
+	bm, ok := g.batchMV(m, ntok, bs.tok)
+	if !ok || bm.act == nil {
+		return nil, nil, 0
+	}
+	// ntok only clamps the last thread (RULE 13). Where a token's words are
+	// whole workgroups the launch has no surplus thread at any ntok, so one
+	// kernel at the scratch's width serves every chunk and is compiled once,
+	// ahead of the first prompt (prewarmPrompt); elsewhere it is per ntok.
+	kn := ntok
+	if (m.k/2)%128 == 0 && ntok <= bs.rows {
+		kn = bs.rows
+	}
+	k := g.fusedKern(ragKey{kind: "actmulf16t", q: bm.q, k: m.k, ntok: kn, act: bs.p.Act}, func() (*ir.Kernel, error) {
+		return kernels.ActMulF16T(bm.q, kn, m.k, bs.p.Act)
+	})
+	if k == nil {
+		return nil, nil, 0
+	}
+	return k, bm.act, kernels.ActMulF16TThreads(ntok, m.k)
+}
+
+// prewarmPrompt compiles, ahead of the first prompt, the fused binary16
+// operand kernels of every placed block at the reserved prompt width, which a
+// submission would otherwise compile on first use (the head's two prompt
+// kernels are prewarmHeadKernels'). A kernel a block turns out not to launch
+// is a compile spent at load, never a wrong answer. Callers hold g.mu.
+func (g *devTier) prewarmPrompt() {
+	if g.bs == nil || g.promptW <= 0 || g.bbs[g.promptW] == nil {
+		return
+	}
+	if g.NoPromptPrewarm {
+		return
+	}
+	g.prewarmFused(g.bbs[g.promptW])
+}
+
+// prewarmFused compiles bs's fused operand kernels for every placed block:
+// prewarmPrompt's at the reserved width, prewarmPromptWidths' at each exact
+// prompt width. Callers hold g.mu.
+func (g *devTier) prewarmFused(bs *blockScratch) {
+	R := bs.rows
+	// The staged attention's span variants (prefillVariantAt), every span a
+	// chunk can reach at this scratch's capacity: a chunk compiles the one
+	// its history needs otherwise.
+	if pg := bs.pkv; pg != nil && pg.pf != nil && pg.pf.flash == nil {
+		hi, _ := g.prefillPass()
+		if m := bs.p.MaxSeq; m > 0 && m < hi {
+			hi = m
+		}
+		for c := 64; ; c *= 2 {
+			if _, err := g.prefillVariantAt(bs, pg.pf, c, 0); err != nil || c >= hi {
+				break
+			}
+		}
+	}
+	for _, l := range g.layers {
+		if l == nil || !l.ok {
+			continue
+		}
+		g.rmsF16For(bs, l.mvq, R, false)
+		first := l.mvg
+		if first.kern == nil {
+			first = l.mvu
+		}
+		g.rmsF16For(bs, first, R, true)
+		g.actF16For(bs, l.mvd, R)
+	}
+}
+
+// int8GemmOn reports whether the device lowers GemmInt8, probed once by a
+// compile (the int8 m16n8k32 instruction is sm_80's). Callers hold g.mu.
+func (g *devTier) int8GemmOn() bool {
+	if g.i8Gemm == 0 {
+		g.i8Gemm = -1
+		if g.dev.API() == "ptx" {
+			ker, err := kernels.GemmInt8(kernels.MatVecShape{Center: g.center, T: kernels.Q8_0, K: 32, Rows: 32, NTok: 32},
+				kernels.Int8Tile{MT: 1, NT: 2, WM: 2, WN: 2})
+			if err == nil {
+				if c, err := g.dev.Compile(ker); err == nil {
+					c.Close()
+					g.i8Gemm = 1
+				}
+			}
+		}
+	}
+	return g.i8Gemm > 0
+}
+
+// int8Gemm is m's batched twin as kernels.GemmInt8: MatVecMMA's int8
+// arithmetic and its quantized activations, staged through shared memory as
+// GemmVolta stages, so a workgroup decodes a trip of its rows once for all
+// its tokens. Its blockings are f16Tiles' (the same 16-row m-tiles and 8-token
+// n-tiles), chosen by the same fill. False where the device lacks the
+// instruction, the format has no int8 decode, or no tile divides the shape.
+// Only Config.PreferGemmInt8 asks for it; NoMMA refuses it.
+func (g *devTier) int8Gemm(m mv, ntok int) (mv, bool) {
+	// A build reached from inside a submission takes g.mu (subLock).
+	defer g.subUnlock(g.subLock())
+	if !g.PreferGemmInt8 || g.NoMMA || m.slots > 0 || !kernels.Int8OK(m.q) || !g.int8GemmOn() {
+		return mv{}, false
+	}
+	fill := g.dev.Slots() / 16
+	first := fillTile(f16Tiles, 16, m.rows, ntok, fill)
+	for i := -1; i < len(f16Tiles); i++ {
+		if i < 0 && first < 0 || i >= 0 && i == first {
+			continue
+		}
+		idx := i
+		if i < 0 {
+			idx = first
+		}
+		vt := f16Tiles[idx]
+		tl := kernels.Int8Tile{MT: vt.MT, NT: vt.NT, WM: vt.WM, WN: vt.WN}
+		if m.rows%tl.Rows() != 0 || ntok%tl.Toks() != 0 {
+			continue
+		}
+		trips := m.k / 32
+		split := fillSplit(trips, (m.rows/tl.Rows())*(ntok/tl.Toks())*tl.Threads(), fill)
+		if f := g.kb.batch.Split; f >= 1 {
+			split = f
+		}
+		var c backend.Kernel
+		for ; split >= 1; split /= 2 {
+			s := kernels.MatVecShape{Center: g.center, T: m.q, K: m.k, Rows: m.rows, NTok: ntok, Split: split, Bias: m.bias != nil}
+			key := ragKey{kind: "gemmint8", q: m.q, k: m.k, rows: m.rows, ntok: ntok,
+				tile: [5]int{tl.MT, tl.NT, tl.WM, tl.WN}, split: split, bias: s.Bias}
+			k, ok := g.ragK[key]
+			if !ok {
+				ker, err := kernels.GemmInt8(s, tl)
+				if err == nil {
+					k, err = g.dev.Compile(ker)
+				}
+				if err != nil {
+					k = nil
+				}
+				if g.ragK == nil {
+					g.ragK = map[ragKey]backend.Kernel{}
+				}
+				g.ragK[key] = k
+			}
+			if c = k; c != nil {
+				break
+			}
+		}
+		if c == nil {
+			continue
+		}
+		s := kernels.MatVecShape{Rows: m.rows, NTok: ntok, Split: split}
+		out := mv{kern: c, rows: m.rows, split: split, bias: m.bias, q: m.q, k: m.k,
+			threads: kernels.GemmInt8Groups(s, tl) * tl.Threads(), redN: m.rows * ntok}
+		if split > 1 {
+			if out.red = g.reduceKernel(m.rows*ntok, split); out.red == nil ||
+				!g.sizePart(m.rows*ntok*split) {
+				return mv{}, false
+			}
+		}
+		g.GemmInt8++
+		return out, true
+	}
+	return mv{}, false
+}
+
+// fillTile is the tile stagedGemm tries first, on instruction f16k, for a grid of at least fill
+// threads: the first of tiles (widest first) that divides the shape and
+// reaches it, else the dividing tile with the most workgroups, whose grid a
+// k-split (fillSplit) then widens. -1 where none divides.
+func fillTile(tiles []kernels.VoltaTile, f16k, rows, ntok, fill int) int {
+	best, most := -1, 0
+	for i, tl := range tiles {
+		tl.F16K = f16k // an m-tile's rows depend on it
+		if rows%tl.Rows() != 0 || ntok%tl.Toks() != 0 {
+			continue
+		}
+		groups := (rows / tl.Rows()) * (ntok / tl.Toks())
+		if groups*tl.Threads() >= fill {
+			return i
+		}
+		if groups > most {
+			best, most = i, groups
+		}
+	}
+	return best
+}
+
+// fillSplit is the k-split that brings threads up to fill: doubled while the
+// grid is short of it and the halves still divide the trips, at most 8.
+func fillSplit(trips, threads, fill int) int {
+	split := 1
+	for threads*split < fill && trips%(2*split) == 0 && split < 8 {
+		split *= 2
+	}
+	return split
+}
+
+// stagedGemm builds m's GemmVolta twin from the first of tiles that divides
+// the shape and compiles, with instruction f16k (VoltaTile.F16K). With fill
+// > 0 the tile and split are chosen for a grid of at least fill threads
+// (fillTile, fillSplit) and the others are the fallbacks; with 0, tiles'
+// order and kb0Split decide. Callers hold g.mu.
+func (g *devTier) stagedGemm(m mv, ntok int, tiles []kernels.VoltaTile, f16k, fill int) (mv, bool) {
 	sub, _, _, _ := kernels.Layout(m.q)
 	kbN := max(32/sub, 1)
-	for _, tl := range voltaTiles {
-		tl.KB = kbN
+	first := -1
+	if fill > 0 {
+		first = fillTile(tiles, f16k, m.rows, ntok, fill)
+	}
+	// i = -1 is the fill's tile, then the list in order without it.
+	for i := -1; i < len(tiles); i++ {
+		if i < 0 && first < 0 || i >= 0 && i == first {
+			continue
+		}
+		idx := i
+		if i < 0 {
+			idx = first
+		}
+		tl := tiles[idx]
+		tl.KB, tl.F16K = kbN, f16k
 		s := kernels.MatVecShape{Center: g.center, T: m.q, K: m.k, Rows: m.rows, NTok: ntok, Bias: m.bias != nil}
 		if m.rows%tl.Rows() != 0 || ntok%tl.Toks() != 0 {
 			continue
 		}
-		split := kb0Split(m.k/sub/kbN, (m.rows/tl.Rows())*(ntok/tl.Toks()))
+		groups := (m.rows / tl.Rows()) * (ntok / tl.Toks())
+		split := kb0Split(m.k/sub/kbN, groups)
+		if fill > 0 {
+			split = fillSplit(m.k/sub/kbN, groups*tl.Threads(), fill)
+		}
 		if f := g.kb.batch.Split; f >= 1 {
 			split = f
 		}
@@ -1015,7 +1358,7 @@ func (g *devTier) voltaGemm(m mv, ntok int) (mv, bool) {
 		for ; split >= 1; split /= 2 {
 			s.Split = split
 			key := ragKey{kind: "gemmvolta", q: m.q, k: m.k, rows: m.rows, ntok: ntok,
-				tile: [5]int{tl.MT, tl.NT, tl.WM, tl.WN, tl.KB}, split: split, bias: s.Bias}
+				tile: [5]int{tl.MT, tl.NT, tl.WM, tl.WN, tl.KB}, split: split, bias: s.Bias, r: f16k}
 			k, ok := g.ragK[key]
 			if !ok {
 				ker, err := kernels.GemmVolta(s, tl)
@@ -1059,6 +1402,10 @@ func (g *devTier) voltaGemm(m mv, ntok int) (mv, bool) {
 				!g.sizePart(m.rows*ntok*split) {
 				return mv{}, false
 			}
+		}
+		if f16k != 0 {
+			g.GemmF16++
+			return out, true
 		}
 		g.VoltaMV++
 		g.VoltaGemm++

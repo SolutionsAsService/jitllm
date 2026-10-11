@@ -177,6 +177,7 @@ Settings can start the server at login. With Homebrew:
 
 ```sh
 brew tap jitllm/jitllm
+brew trust jitllm/jitllm
 brew install --cask jitllm   # the app, with jitllm and jitllmd on PATH
 brew install jitllm          # jitllm and jitllmd only
 ```
@@ -341,11 +342,17 @@ Each is one static binary that finds CUDA, Vulkan or Metal at run time.
 - **For an agent using jitllm:** the OpenAI- and Anthropic-compatible APIs work
   with the SDKs and agent frameworks as they are; tool calls are read in each
   model's own format and `tool_choice` is enforced by constrained decoding, so a
-  forced call is a call. [`llms.txt`](llms.txt) is a short index of what jitllm
-  is and where its documentation lives.
+  forced call is a call. `jitllm capabilities` and `GET /v1/capabilities` say
+  what this build runs (architectures, quant types, backends, API fields and
+  their refusals), generated from the code; `jitllm doctor -json` reports the
+  host, devices and a model's compatibility, each problem with a next action;
+  [tested recipes](docs/recipes/README.md) go from install to a running server,
+  a connected client, tools, conversion, placement and diagnosis; and
+  [`llms.txt`](llms.txt) indexes the documentation.
 - **For an agent changing jitllm:** [`AGENTS.md`](AGENTS.md) is the one file
   that holds the project's binding rules, with a table that routes each
   subsystem to its evidence; the [model list](docs/models.md) is generated from
-  the converter and CI fails when it drifts; and the model-free suite
+  the converter and CI fails when it drifts; `go run ./scripts/checks` maps
+  changed paths to the gates that cover them; and the model-free suite
   (`go run ./scripts/modelfree`) runs every check that needs no model or GPU,
   reporting a missing model or device as a skip, never as a pass.

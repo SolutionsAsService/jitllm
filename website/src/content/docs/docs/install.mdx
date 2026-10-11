@@ -21,11 +21,13 @@ The same signed app also comes zipped, without the disk image: `jitllm_<version>
 
 The app carries the CLI and the server inside it. On first launch it offers to link `jitllm` and `jitllmd` into `/usr/local/bin` (asking for your password if that folder needs it, or using `~/.local/bin` if you decline). **Settings > Command line** links or unlinks them later, and **Start the server at login** runs `jitllmd` in the background on `127.0.0.1:8080` through a launchd agent, until you turn it off.
 
-With Homebrew, once the tap is published:
+With Homebrew:
 
 ```sh
-brew install --cask jitllm/tap/jitllm   # the app, with jitllm and jitllmd on PATH
-brew install jitllm/tap/jitllm          # the CLI and the server only
+brew tap jitllm/jitllm
+brew trust jitllm/jitllm
+brew install --cask jitllm   # the app, with jitllm and jitllmd on PATH
+brew install jitllm          # the CLI and the server only
 ```
 
 The formula's server also runs as a Homebrew service: `brew services start jitllm`.
@@ -38,8 +40,6 @@ Run `jitllm-setup_<version>_windows_amd64.exe` (or `_arm64.exe` on Arm) from the
 - **jitllm** in the Start menu;
 - optionally, **Start the server at login**: `jitllmd` on `127.0.0.1:8080`, with no console window;
 - an entry under **Settings > Apps** whose uninstaller removes all of it. Your models and chats are kept.
-
-With winget, once published: `winget install jitllm.jitllm`.
 
 ### The portable desktop app
 

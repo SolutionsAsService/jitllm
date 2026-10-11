@@ -552,3 +552,16 @@ const cudaErrorOutOfMemory CUresult = 2
 // ErrOutOfMemory is what a driver call wraps when the device refused memory:
 // the card is full, which a caller treats differently from a failure.
 var ErrOutOfMemory = errors.New("device out of memory")
+
+// DriverVersion is cuDriverGetVersion's answer (1000*major + 10*minor), false
+// when there is no driver to ask.
+func DriverVersion() (int, bool) {
+	if err := loadCUDA(); err != nil {
+		return 0, false
+	}
+	var v int32
+	if call(cuDriverGetVersion(&v), "cuDriverGetVersion") != nil {
+		return 0, false
+	}
+	return int(v), true
+}

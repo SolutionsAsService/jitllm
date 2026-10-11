@@ -27,9 +27,15 @@ type modelOpts struct {
 	// noShOverlap runs a mixture's shared expert after its routed read
 	// rather than behind it; see WithSharedOverlap.
 	noShOverlap bool
+	// linRowByRow runs a prompt's linear blocks one matvec per row
+	// (WithLinearRowByRow).
+	linRowByRow bool
 	// noStreamTrial keeps an auto-streamed placement without measuring it
 	// against the host; see WithStreamTrial.
 	noStreamTrial bool
+	// noKVPrewarm leaves a device's KV pools at their first frame after
+	// placement (WithKVPrewarm).
+	noKVPrewarm bool
 	// experts is WithExperts' choice.
 	experts string
 	// trialAA makes the stream trial an A/A self-control (WithStreamTrialAA).
@@ -107,6 +113,13 @@ func defaultOpts() modelOpts {
 // (TestSharedOverlapIsTheSameSum); off is the other arm.
 func WithSharedOverlap(on bool) Option { return func(l *loadOpts) { l.opt.noShOverlap = !on } }
 
+// WithLinearRowByRow runs a prompt chunk's recurrent blocks (the gated delta
+// rule, KDA, Mamba-1 and -2, the short convolution) one row at a time through
+// every projection, as decode does, instead of running the projections as
+// GEMMs over the chunk around the per-row recurrence (linrows.go). Off by
+// default; on is the reference arm the batched form is held to.
+func WithLinearRowByRow(on bool) Option { return func(l *loadOpts) { l.opt.linRowByRow = on } }
+
 // WithExperts places the routed experts of every mixture block a device
 // takes: "host" (hybrid), "card" (sheets streamed every token), or "" (the
 // engine decides; the default). A -placement entry's %host or %card wins for
@@ -122,6 +135,12 @@ func WithStreamTrialAA(on bool) Option { return func(l *loadOpts) { l.opt.trialA
 // card could hold resident is measured against running them on the host
 // (State.initStreamTrial) and the faster kept. On by default.
 func WithStreamTrial(on bool) Option { return func(l *loadOpts) { l.opt.noStreamTrial = !on } }
+
+// WithKVPrewarm sets whether a State that places blocks on a device grows the
+// device's KV pools ahead, by one prompt chunk, into the room placement left
+// (nn.KVPrewarmer), so its first prompt does not grow them inside its own
+// time. On by default; off is the A/B arm.
+func WithKVPrewarm(on bool) Option { return func(l *loadOpts) { l.opt.noKVPrewarm = !on } }
 
 // WithProfile arms the per-op nanosecond counters OpProfile reports.
 func WithProfile(on bool) Option { return func(l *loadOpts) { l.opt.profile = on } }

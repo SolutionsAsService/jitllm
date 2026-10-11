@@ -12,6 +12,29 @@
 > findings, current instructions and withdrawn conclusions all speaking in the
 > same imperative voice.
 
+## The prompt rows and their boundaries
+
+`scripts/vs-llamacpp.sh` takes three prompt rows, and each engine's clock
+starts and stops where its own output says, never at a guessed point:
+
+| row | jitllm | llama.cpp |
+|---|---|---|
+| warm prefill, ppN, no prefix reuse (`JITLLM_MODE=prefill`, the default prompt row) | `jitllm speed -p N -n 0 -r 1`: one untimed warm-up prompt, then the timed one on a fresh State; `warmHonest` refuses a sample that restored a position, ran fewer than N rows or did not read the last row's logits back | `llama-bench -p N -n 0 -r 1`, which runs its own warm-up |
+| load (`JITLLM_MODE=load`) | `speed -ttft`'s `load`: container open + device init and kernel compile + attach (placement, upload, the split tuner, the KV pool and the first prompt's kernels) | `llama-completion`'s own `load time` |
+| ttft, model loaded (`JITLLM_MODE=ttft`) | `speed -ttft`'s `ttft-loaded`: ready to the first token of the process's first prompt, tokenizing excluded; refused if a kernel compiled or a tuner trial ran after ready (`readyHonest`) | `llama-completion --no-warmup`'s `prompt eval time`, its first decode after load |
+
+llama.cpp compiles nothing at run time; jitllm compiles only before ready, and
+`model.TestFirstPromptDoesNotGrowTheKVPool` holds the first prompt to zero
+compiles (six without the prewarm on Llama-3.2-1B on an sm_86 card: the
+embedding gather, the folded head's row copy and the fused binary16 operand
+kernels). The model file is in the page cache after the harness's token-count
+probe; that serves llama.cpp's mmap, while jitllm reads the container with
+O_DIRECT and gets nothing from it. The split tuner's answers persist
+(`tier.WithTuneCache`, keyed by device UUID, driver version and executable),
+so a second process on the same card times nothing; on the RTX 3050 Ti
+(Llama-3.2-1B, pp415, CUDA) that took attach from 1289 ms to 313 ms and
+`speed -ttft`'s open-to-first-token from 2152 ms to 941-1115 ms.
+
 ## ★ THE FINAL BOARD: THREE HOSTS, FIVE ENGINES, ONE PASS PER HOST
 
 Every number names its host and backend. Ratios are jitllm / llama.cpp from

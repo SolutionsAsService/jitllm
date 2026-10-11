@@ -88,6 +88,7 @@ type waveCounts struct {
 // half of 128 words and half of 512; admitAll is the violation.
 func sixtyFour(t *testing.T, waves int, admitAll bool, level ...int) []waveCounts {
 	const name = "Llama-3.2-1B-Instruct-Q4_K_M.jlm"
+	requireDevice(t, "gpu:0")
 	path := modelPath(t, name)
 	cfg := Config{Probe: oneCardProbe, Version: "test", DefaultMaxSeq: 1024, MaxBatchRows: 64}
 	if len(level) > 0 {

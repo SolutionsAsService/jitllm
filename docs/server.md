@@ -22,7 +22,9 @@ with no `max_tokens` runs until the model ends its reply or fills the context;
 either way a reply that reaches the end of the context finishes as `length`. Generates of one model placed wholly on one device, or wholly on the host,
 decode together as rows of one step (`-max-batch`). A model's queue holds
 `-max-queue` requests (64 by default) before it answers 429 with a
-`Retry-After`. Under a model's KV budget (`Engine.SetKVBudget`, an embedding
+`Retry-After`. `-fairness 0-100` (100 by default) sets how they share the
+steps: 0 serves them first come first served, each to its end; higher
+time-slices running rows for waiting ones. Under a model's KV budget (`Engine.SetKVBudget`, an embedding
 API with no flag yet) a generate parks idle sessions of the model, lowest
 priority then least recently stepped, into its memory cache, and a parked
 session resumes byte for byte at its next generate.
@@ -81,6 +83,65 @@ prefills alone (not through the step loop or the session's prompt store), a
 `continue_session` generate decodes plainly, and a session whose speculative
 reply was cut by a stop string inside a round refuses `continue_session`.
 
+Pictures: on a model whose container carries a vision tower, a chat request
+may carry pictures -- OpenAI `image_url` content parts on
+`/v1/chat/completions`, Anthropic `image` blocks on `/v1/messages`. PNG, JPEG,
+WebP and GIF (its first frame) are decoded, inline as a `data:` URL
+(`data:image/png;base64,...`) or an Anthropic `base64` source whose
+`media_type` must match the bytes. The pictures keep the order the client sent
+them and go where the model's own chat template puts its image markers (a
+turn's pictures before its text); each is a span of the prompt, named by its
+`ImageKey`, so the prefix cache names the rows after it as it names text. A picture is preprocessed and encoded by the model's tower exactly
+as `jitllm run -image` does it.
+
+| Limit | Default | `jitllmd serve` flag |
+|---|---|---|
+| encoded bytes per picture | 20 MiB | `-image-max` |
+| pixels (width x height) per picture, read from the header before decoding | 4096 x 4096 | `-image-max-pixels` |
+| pictures per request | 8 | `-image-max-count` |
+| encoded bytes of all of a request's pictures | 64 MiB | `-image-max-request` |
+| decoding one picture | 5 s | `-image-decode-timeout` |
+| remote `http(s)` URLs | not fetched | `-image-fetch-allow host1,host2` |
+
+Inline pictures -- `data:` URLs, Anthropic `base64` sources and Connect
+bytes -- are always taken, under the limits above and nothing else. Remote
+fetching is off unless the operator lists the hosts it may reach, because a
+server that fetches what a request names is a proxy into its own network.
+With `-image-fetch-allow` (`Config.Images.FetchAllow`) an `http(s)` image URL
+or Anthropic `url` source is fetched only when:
+
+- its host, lower-cased, in IDNA ASCII form and without a trailing dot, is
+  on the list exactly, or under an entry `*.example.com` by exactly one label
+  (nothing matches by suffix); the first URL and every redirect are checked;
+- it is https (`-image-fetch-http` allows plain http), on port 443 or 80
+  (`-image-fetch-ports`), with no userinfo and no IPv6 zone, and no redirect
+  goes from https to http; at most three redirects are followed, through no
+  proxy;
+- the address each connection is about to be made to -- after resolution, so
+  a name cannot pass a check with one address and connect to another -- is in
+  none of the special-use ranges of the IANA IPv4 and IPv6 special-purpose
+  registries: this network, private, shared, loopback, link-local, the IETF
+  protocol blocks (Teredo), documentation, 6to4, benchmarking, multicast,
+  reserved, broadcast, unspecified, IPv4-mapped, both NAT64 prefixes,
+  discard-only and unique-local;
+- fewer than `-image-fetch-concurrency` (4) fetches are running across the
+  server, and it finishes within `-image-fetch-timeout` (10 s) with at most
+  64 KiB of headers and the byte limits above.
+
+Every refusal is a
+400 naming the part (`messages[0].content[1].image_url ...`): a picture sent
+to a model with no tower ("model X does not accept images"), an unsupported
+or mismatched type, a picture over a limit, undecodable bytes, a remote URL
+with fetching off (the message says how to turn it on), and an audio or file
+part. The Connect API takes pictures as `ChatMessage.images` (`ChatImage`:
+the bytes and an optional `media_type`) under the same limits;
+`ApplyChatTemplate` refuses one. Pictures combine with `tools` (the template
+renders the tool list, and a forced `tool_choice` runs under the tool
+grammar), with `n` (the prompt, picture included, is prefilled once and the
+other choices restore it), and with `continue_session` (the session's history
+already holds its earlier pictures; the new turn's follow). A request with
+pictures prefills alone rather than as a row of the step loop.
+
 With each other: `logprobs` on a constrained reply are the raw distribution's,
 before the grammar's mask, as vLLM's default does; `n` with a grammar
 constrains every choice; speculation with `logprobs` or with `n` is refused
@@ -92,7 +153,7 @@ prompt store a Speculator does not use).
 |---|---|
 | `serve` | run the daemon (`-addr`, `-models`, `-load`, `-id`, `-devices`, `-maxmem`, `-max-batch`, `-max-queue`, `-kv-cache`; `jitllmd serve -h` lists every flag) |
 | `run` | stream a generation from a running daemon |
-| `models` | list, describe, load and unload models |
+| `models` | list, describe, load and unload models (`-unload ID -force` closes sessions holding it instead of refusing) |
 | `devices` | the hardware and the memory that is actually spendable |
 | `sessions` | create, list, describe, reset and close sessions |
 | `place` | read and move the CPU/device seam and the pager budget |

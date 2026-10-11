@@ -22,7 +22,8 @@ func chatMessage(role, content string) model.ChatMessage {
 //	/v1/models              OpenAI-compatible
 //	/v1/embeddings          OpenAI-compatible
 //	/v1/messages            Anthropic-compatible
-//	/healthz, /health
+//	/healthz, /health, /metrics
+//	/v1/capabilities        the capability manifest
 //
 // connect-go mounts each service at /<package>.<Service>/, so the /v1 routes
 // cannot collide with it.
@@ -34,21 +35,17 @@ func (e *Engine) Handler() http.Handler {
 	mount(jitllmv1connect.NewDeviceServiceHandler(&DeviceService{E: e}))
 	mount(jitllmv1connect.NewPlacementServiceHandler(&PlacementService{E: e}))
 	mount(jitllmv1connect.NewSessionServiceHandler(&SessionService{E: e}))
-	mount(jitllmv1connect.NewInferenceServiceHandler(&InferenceService{B: e}))
+	mount(jitllmv1connect.NewInferenceServiceHandler(&InferenceService{B: e, Images: e.cfg.Images}))
 	mount(jitllmv1connect.NewTelemetryServiceHandler(&TelemetryService{E: e}))
 
-	mux.Handle("/", CompatHandler(e))
+	mux.Handle("/", CompatHandlerWith(e, e.cfg.Images))
 
-	mux.HandleFunc("/metrics", e.serveMetrics)
-
-	health := func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.Write([]byte("ok\n"))
+	// /metrics, /healthz, /health and /v1/capabilities: engineRoutes
+	// (capabilities.go), the table the manifest reads.
+	for _, r := range engineRoutes() {
+		h := r.handle
+		mux.HandleFunc(r.path, func(w http.ResponseWriter, q *http.Request) { h(e, w, q) })
 	}
-	mux.HandleFunc("/healthz", health)
-	// /health is the path vLLM and llama-server answer, and so the one their
-	// benchmark harnesses poll before sending load.
-	mux.HandleFunc("/health", health)
 
 	// h2c, because plain gRPC needs HTTP/2 and would otherwise fail over
 	// cleartext while Connect works. Behind TLS, ALPN takes over and this

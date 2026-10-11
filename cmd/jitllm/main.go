@@ -82,6 +82,11 @@ func numaNodes() []int {
 // (-ldflags "-X main.version=v0.1.0"; see .goreleaser.yaml).
 var version = "dev"
 
+// procStart is as near process start as Go code runs: package variables are
+// initialised before main. speed -ttft's load row counts from it, as
+// llama.cpp's log timestamps count from its logger's start.
+var procStart = time.Now()
+
 func main() {
 	alignGOMAXPROCS()
 	// Page frames and the dense region live off the Go heap (jlm.SetOffHeap).
@@ -94,9 +99,10 @@ func main() {
 	if os.Getenv("JITLLM_GCSTATS") == "1" {
 		defer gcSummary()
 	}
-	// hardware is the one subcommand that takes no model, because it describes
-	// the machine rather than a file.
-	if len(os.Args) < 2 || (len(os.Args) < 3 && os.Args[1] != "hardware" && os.Args[1] != "library" && os.Args[1] != "version") {
+	// These subcommands take no model: they describe the machine, the build
+	// or the catalogue rather than a file (doctor's container is optional).
+	if len(os.Args) < 2 || (len(os.Args) < 3 && os.Args[1] != "hardware" && os.Args[1] != "library" && os.Args[1] != "version" &&
+		os.Args[1] != "capabilities" && os.Args[1] != "doctor") {
 		usage()
 	}
 	var err error
@@ -105,6 +111,10 @@ func main() {
 		fmt.Println(version)
 	case "hardware":
 		err = hardware()
+	case "capabilities":
+		err = capabilitiesCmd(os.Args[2:], os.Stdout)
+	case "doctor":
+		os.Exit(doctorCmd(os.Args[2:]))
 	case "info":
 		err = info(os.Args[2], len(os.Args) > 3 && os.Args[3] == "-kv")
 	case "asm":
@@ -142,6 +152,8 @@ func usage() {
 	fmt.Fprintln(os.Stderr, `usage:
   jitllm version
   jitllm hardware
+  jitllm capabilities [-json]   what this build converts, runs and serves (docs/capabilities.json)
+  jitllm doctor [-json] [model.jlm]   can this machine and build run; exit 0 ok, 2 missing, 1 error
   jitllm info <model.gguf>
   jitllm tokenize [-tokenizer FILE] <model.jlm> <text...>
   jitllm run [flags] <model.jlm> <prompt...>
