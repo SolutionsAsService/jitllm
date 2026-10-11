@@ -220,10 +220,16 @@ func (p ImagePolicy) decodeImage(b []byte, mt string) (image.Image, error) {
 		img, _, err := image.Decode(bytes.NewReader(b))
 		done <- result{img, err}
 	}()
+	start := time.Now()
 	t := time.NewTimer(p.DecodeTimeout)
 	defer t.Stop()
 	select {
 	case r := <-done:
+		// A coarse timer (Windows ticks in milliseconds) can lose the race to
+		// a decode that already ran past the deadline; the clock decides.
+		if time.Since(start) > p.DecodeTimeout {
+			return nil, fmt.Errorf("did not decode within %s", p.DecodeTimeout)
+		}
 		if r.err != nil {
 			return nil, fmt.Errorf("does not decode: %v", r.err)
 		}
