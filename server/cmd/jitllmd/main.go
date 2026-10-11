@@ -317,7 +317,7 @@ func serve(args []string) {
 		MaxQueue:      *maxQueue,
 		RetryAfter:    *retry,
 		WarmLoads:     *warm,
-		Images: images,
+		Images:        images,
 	})
 	defer e.Close()
 
