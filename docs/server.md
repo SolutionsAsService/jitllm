@@ -81,6 +81,65 @@ prefills alone (not through the step loop or the session's prompt store), a
 `continue_session` generate decodes plainly, and a session whose speculative
 reply was cut by a stop string inside a round refuses `continue_session`.
 
+Pictures: on a model whose container carries a vision tower, a chat request
+may carry pictures -- OpenAI `image_url` content parts on
+`/v1/chat/completions`, Anthropic `image` blocks on `/v1/messages`. PNG, JPEG,
+WebP and GIF (its first frame) are decoded, inline as a `data:` URL
+(`data:image/png;base64,...`) or an Anthropic `base64` source whose
+`media_type` must match the bytes. The pictures keep the order the client sent
+them and go where the model's own chat template puts its image markers (a
+turn's pictures before its text); each is a span of the prompt, named by its
+`ImageKey`, so the prefix cache names the rows after it as it names text. A picture is preprocessed and encoded by the model's tower exactly
+as `jitllm run -image` does it.
+
+| Limit | Default | `jitllmd serve` flag |
+|---|---|---|
+| encoded bytes per picture | 20 MiB | `-image-max` |
+| pixels (width x height) per picture, read from the header before decoding | 4096 x 4096 | `-image-max-pixels` |
+| pictures per request | 8 | `-image-max-count` |
+| encoded bytes of all of a request's pictures | 64 MiB | `-image-max-request` |
+| decoding one picture | 5 s | `-image-decode-timeout` |
+| remote `http(s)` URLs | not fetched | `-image-fetch-allow host1,host2` |
+
+Inline pictures -- `data:` URLs, Anthropic `base64` sources and Connect
+bytes -- are always taken, under the limits above and nothing else. Remote
+fetching is off unless the operator lists the hosts it may reach, because a
+server that fetches what a request names is a proxy into its own network.
+With `-image-fetch-allow` (`Config.Images.FetchAllow`) an `http(s)` image URL
+or Anthropic `url` source is fetched only when:
+
+- its host, lower-cased, in IDNA ASCII form and without a trailing dot, is
+  on the list exactly, or under an entry `*.example.com` by exactly one label
+  (nothing matches by suffix); the first URL and every redirect are checked;
+- it is https (`-image-fetch-http` allows plain http), on port 443 or 80
+  (`-image-fetch-ports`), with no userinfo and no IPv6 zone, and no redirect
+  goes from https to http; at most three redirects are followed, through no
+  proxy;
+- the address each connection is about to be made to -- after resolution, so
+  a name cannot pass a check with one address and connect to another -- is in
+  none of the special-use ranges of the IANA IPv4 and IPv6 special-purpose
+  registries: this network, private, shared, loopback, link-local, the IETF
+  protocol blocks (Teredo), documentation, 6to4, benchmarking, multicast,
+  reserved, broadcast, unspecified, IPv4-mapped, both NAT64 prefixes,
+  discard-only and unique-local;
+- fewer than `-image-fetch-concurrency` (4) fetches are running across the
+  server, and it finishes within `-image-fetch-timeout` (10 s) with at most
+  64 KiB of headers and the byte limits above.
+
+Every refusal is a
+400 naming the part (`messages[0].content[1].image_url ...`): a picture sent
+to a model with no tower ("model X does not accept images"), an unsupported
+or mismatched type, a picture over a limit, undecodable bytes, a remote URL
+with fetching off (the message says how to turn it on), and an audio or file
+part. The Connect API takes pictures as `ChatMessage.images` (`ChatImage`:
+the bytes and an optional `media_type`) under the same limits;
+`ApplyChatTemplate` refuses one. Pictures combine with `tools` (the template
+renders the tool list, and a forced `tool_choice` runs under the tool
+grammar), with `n` (the prompt, picture included, is prefilled once and the
+other choices restore it), and with `continue_session` (the session's history
+already holds its earlier pictures; the new turn's follow). A request with
+pictures prefills alone rather than as a row of the step loop.
+
 With each other: `logprobs` on a constrained reply are the raw distribution's,
 before the grammar's mask, as vLLM's default does; `n` with a grammar
 constrains every choice; speculation with `logprobs` or with `n` is refused
