@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/samyfodil/jitllm/engine/nn"
-	"github.com/samyfodil/jitllm/internal/testmodels"
+	"github.com/jitllm/jitllm/engine/nn"
+	"github.com/jitllm/jitllm/internal/testmodels"
 )
 
 // A recurrent block's projections as GEMMs over a prompt chunk (linrows.go)
