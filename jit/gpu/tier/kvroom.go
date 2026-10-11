@@ -48,6 +48,18 @@ func (g *devTier) kvRoom() (positions, page int) {
 	if lim, used := g.limit, g.used+g.reserved(); used < lim {
 		grow = lim - used
 	}
+	if g.kvTight {
+		// A recorded ceiling goes stale as the card's other tenants and this
+		// device's own scratch come and go, and a stale low one admitted one
+		// row at a time for a whole wave; the driver's figure does not.
+		free, _, err := g.dev.Mem()
+		switch {
+		case err != nil || free <= kvTightMargin:
+			grow = 0
+		default:
+			grow = min(grow, free-kvTightMargin)
+		}
+	}
 	if g.pool != nil && g.pool.limit > 0 {
 		g.pool.mu.Lock()
 		if g.pool.used < g.pool.limit {
@@ -61,6 +73,10 @@ func (g *devTier) kvRoom() (positions, page int) {
 	pages := max(free-1, 0) + int(grow/max(per, 1))
 	return pages * kp.p, kp.p
 }
+
+// kvTightMargin is what KVRoom leaves of the driver's free figure on a tight
+// card: the driver's own allocations and a growth's rounding.
+const kvTightMargin = 64 << 20
 
 // PromiseKV tells the devices that a scheduler has admitted rows whose
 // histories will grow by positions more, page-rounded per row, and that the

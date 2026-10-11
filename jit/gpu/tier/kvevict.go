@@ -163,12 +163,12 @@ func (g *devTier) evictPage(kp *kvPool, s seqID) error {
 			continue
 		}
 		kw, vw := l.geom.kWords(kp.p), l.geom.vWords(kp.p)
-		page, err := g.readPages(l.k, []uint32{id}, kw)
+		page, err := g.readPages(l, l.k, []uint32{id}, kw)
 		if err != nil {
 			return fmt.Errorf("evicting block %d's page %d: %w", li, j, err)
 		}
 		if vw > 0 {
-			vp, err := g.readPages(l.v, []uint32{id}, vw)
+			vp, err := g.readPages(l, l.v, []uint32{id}, vw)
 			if err != nil {
 				return fmt.Errorf("evicting block %d's page %d: %w", li, j, err)
 			}

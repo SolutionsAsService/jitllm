@@ -113,6 +113,9 @@ type stepLoop struct {
 	// prompt is in.
 	parkDropsLogits bool
 	onStarted       func(*row)
+	// parkFault makes every park of a time slice fail, as a device that
+	// cannot take a session's history home does.
+	parkFault error
 
 	// fair is the fairness level, 0 to 100 (batchfair.go); rr turns the
 	// even split of the prompt budget so its remainder rotates.
@@ -146,6 +149,9 @@ type batchCounters struct {
 	// shortResumes counts resumes the card took back only in part, parked
 	// again to wait.
 	shortResumes atomic.Int64
+	// parkRefusals counts time-slice parks the session refused: the row
+	// kept its place and its request ran on.
+	parkRefusals atomic.Int64
 	// promptRowsFed counts, per step, the prompting rows it fed: a gate reads
 	// it against the prompting rows the step had.
 	promptRowsFed, promptRowsHad atomic.Int64
@@ -461,10 +467,14 @@ func (lp *stepLoop) admit() {
 				// A time slice: rows past their quantum make way (batchfair.go).
 				vs := lp.victims(r, need, room, page)
 				for _, v := range vs {
-					if err := lp.parkRow(v); err != nil {
-						lp.mu.Unlock()
-						lp.finish(v, FinishError, "", err)
-						lp.mu.Lock()
+					if lp.parkRow(v) != nil {
+						// The session kept its history where it was, so the
+						// row keeps its place and runs another slice before
+						// it is asked again; the request waits. A park is a
+						// courtesy to the queue, never a reason to fail the
+						// request it would have preempted.
+						v.slice = 0
+						lp.stats.parkRefusals.Add(1)
 					}
 				}
 				if len(vs) > 0 {
@@ -494,16 +504,14 @@ func (lp *stepLoop) admit() {
 					// token, and holds none of the card's room, so more would
 					// be admitted behind it. It parks again and waits for
 					// rows to retire; alone on the card it runs split.
-					if err := lp.e.parkLocked(r.s); err != nil {
-						lp.mu.Unlock()
-						lp.finish(r, FinishError, "", err)
-						lp.mu.Lock()
-						continue
+					if lp.e.parkLocked(r.s) == nil {
+						r.parked = true
+						lp.stats.shortResumes.Add(1)
+						lp.waiting = append([]*row{r}, lp.waiting...)
+						break
 					}
-					r.parked = true
-					lp.stats.shortResumes.Add(1)
-					lp.waiting = append([]*row{r}, lp.waiting...)
-					break
+					// Refused, it runs split rather than fail.
+					lp.stats.parkRefusals.Add(1)
 				}
 			} else {
 				r.waited = time.Since(r.enqueued)
