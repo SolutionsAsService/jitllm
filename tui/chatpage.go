@@ -48,8 +48,8 @@ func newChatPage(env *env) *chatPage {
 			Think:  bind("ctrl+t", "thinking"),
 			Copy:   bind("ctrl+y", "copy reply"),
 			New:    bind("ctrl+n", "new chat"),
-			Prev:   bind("ctrl+↑", "prev chat", "ctrl+up", "alt+up"),
-			Next:   bind("ctrl+↓", "next chat", "ctrl+down", "alt+down"),
+			Prev:   bind("ctrl/⌥+↑", "prev chat", "ctrl+up", "alt+up"),
+			Next:   bind("ctrl/⌥+↓", "next chat", "ctrl+down", "alt+down"),
 			Scroll: bind("pgup/pgdn", "scroll", "pgup", "pgdown", "ctrl+u", "ctrl+d"),
 		},
 		tr:     newTranscript(env),
@@ -61,7 +61,7 @@ func newChatPage(env *env) *chatPage {
 }
 
 func (c *chatPage) Help() []key.Binding {
-	return []key.Binding{c.prompt.keys.Send, c.keys.Stop, c.prompt.keys.Older, c.keys.Copy, c.keys.New, c.keys.Prev, c.keys.Think, c.keys.Scroll}
+	return []key.Binding{c.prompt.keys.Send, c.keys.Stop, c.prompt.keys.Older, c.keys.Copy, c.keys.New, c.keys.Prev, c.keys.Next, c.keys.Think, c.keys.Scroll}
 }
 
 func (c *chatPage) Focus() tea.Cmd  { return c.prompt.Focus() }
