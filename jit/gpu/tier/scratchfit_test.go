@@ -12,12 +12,13 @@ import (
 // is unknown (sched.MemBudget is 0), and a unified device's share fell back to
 // a 2 GiB default -- which, once the prompt's scratch was charged, no longer
 // held a small model's blocks and head. The device's own figure for
-// what the GPU may hold stands in for the host's, quartered as a known host is.
+// what the GPU may hold stands in for the host's, less the headroom a known
+// host keeps (hostShare).
 func TestAnUnknownHostTakesTheUnifiedDevicesOwnFigure(t *testing.T) {
 	igpu := &fakeDev{unified: true, total: 16 << 30, free: 12 << 30}
 	slots := planSlots([]backend.Device{igpu}, nil, openOpts{host: 0, hostSet: true})
-	if got := slots[0].Pool.Limit(); got != 4<<30 {
-		t.Fatalf("an unknown host with a 16 GiB unified device: pool %d, want a quarter of 16 GiB", got)
+	if got := slots[0].Pool.Limit(); got != 15<<30 {
+		t.Fatalf("an unknown host with a 16 GiB unified device: pool %d, want 16 GiB less 1 GiB of headroom", got)
 	}
 	// A device that says nothing leaves the default.
 	mute := &fakeDev{unified: true}
