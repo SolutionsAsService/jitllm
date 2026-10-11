@@ -135,6 +135,11 @@ func gpuOptions() []tier.Option {
 	if str("JITLLM_METAL_FASTMATH") == "1" {
 		o = append(o, tier.WithMetalFastMath(true))
 	}
+	// JITLLM_METAL_CONCURRENT=1 opens Metal's compute encoders concurrent,
+	// with barriers where dispatches depend: the A/B arm.
+	if str("JITLLM_METAL_CONCURRENT") == "1" {
+		o = append(o, tier.WithMetalConcurrent(true))
+	}
 	if str("JITLLM_CUDA_INLINE") == "0" {
 		o = append(o, tier.WithCUDAInline(false))
 	}
