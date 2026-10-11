@@ -156,7 +156,8 @@ func TestGemmTileSpeed(t *testing.T) {
 			if n, err := fmt.Sscanf(strings.Replace(f, ":", " ", 1), "%s %dx%d", &name, &sh.rows, &sh.k); n != 3 {
 				t.Fatalf("shape %q: %v", f, err)
 			}
-			for q := kernels.Quant(0); q < 64; q++ {
+			for _, q := range []kernels.Quant{kernels.Q4_K, kernels.Q6_K, kernels.Q8_0, kernels.Q5_K,
+				kernels.Q4_0, kernels.Q5_0, kernels.Q3_K, kernels.Q5_1} {
 				if q.String() == name {
 					sh.q = q
 				}
