@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -38,7 +39,7 @@ func TestGemmTileMatchesTheReference(t *testing.T) {
 	if len(devs) == 0 {
 		t.Skip("no GPU backend on this host")
 	}
-	ran := 0
+	ran, split := 0, 0
 	for _, d := range devs {
 		defer d.Close()
 		for _, q := range []kernels.Quant{kernels.Q4_K, kernels.Q6_K, kernels.Q8_0, kernels.Q5_K,
@@ -61,6 +62,9 @@ func TestGemmTileMatchesTheReference(t *testing.T) {
 					break
 				}
 				ran++
+				if strings.Contains(kk.Name, "_p") {
+					split++
+				}
 				mma70Case(t, d, kern, s, fmt.Sprintf("gemmtile %+v", tl),
 					kernels.GemmTileGroups(s, tl), tl.Threads(), true)
 				kern.Close()
@@ -69,6 +73,11 @@ func TestGemmTileMatchesTheReference(t *testing.T) {
 	}
 	if ran == 0 {
 		t.Skip("no backend lowers the collective tile GEMM here")
+	}
+	// The split staging (a sub-block across threads) must have been among
+	// the kernels checked, or this gate says nothing about it.
+	if split == 0 {
+		t.Fatal("no case built the split staging")
 	}
 }
 
@@ -126,12 +135,42 @@ func TestGemmTileGroupedMatchesPerExpert(t *testing.T) {
 	}
 }
 
-// TestGemmTileSpeed times GemmTile's blockings against the dp4a batched twin on
-// Llama-3.2-1B's projection shapes (JITLLM_GEMMTILE_BENCH=1). A probe, not a
-// gate.
+// TestGemmTileSpeed times GemmTile's blockings, split and unsplit staging,
+// against the dp4a batched twin (JITLLM_GEMMTILE_BENCH=1). A probe, not a
+// gate. JITLLM_GEMMTILE_SHAPES names the shapes as fmt:rowsxk,... (default
+// Llama-3.2-1B's Q4_K projections) and JITLLM_GEMMTILE_NTOK the tokens (512).
 func TestGemmTileSpeed(t *testing.T) {
 	if os.Getenv("JITLLM_GEMMTILE_BENCH") == "" {
 		t.Skip("set JITLLM_GEMMTILE_BENCH=1")
+	}
+	type shape struct {
+		q       kernels.Quant
+		rows, k int
+	}
+	shapes := []shape{{kernels.Q4_K, 8192, 2048}, {kernels.Q4_K, 2048, 8192}, {kernels.Q4_K, 2048, 2048}, {kernels.Q4_K, 512, 2048}}
+	if v := os.Getenv("JITLLM_GEMMTILE_SHAPES"); v != "" {
+		shapes = nil
+		for _, f := range strings.Split(v, ",") {
+			var name string
+			var sh shape
+			if n, err := fmt.Sscanf(strings.Replace(f, ":", " ", 1), "%s %dx%d", &name, &sh.rows, &sh.k); n != 3 {
+				t.Fatalf("shape %q: %v", f, err)
+			}
+			for _, q := range []kernels.Quant{kernels.Q4_K, kernels.Q6_K, kernels.Q8_0, kernels.Q5_K,
+				kernels.Q4_0, kernels.Q5_0, kernels.Q3_K, kernels.Q5_1} {
+				if q.String() == name {
+					sh.q = q
+				}
+			}
+			if sh.q.String() != name {
+				t.Fatalf("shape %q: no format %q", f, name)
+			}
+			shapes = append(shapes, sh)
+		}
+	}
+	ntok := 512
+	if v := os.Getenv("JITLLM_GEMMTILE_NTOK"); v != "" {
+		fmt.Sscan(v, &ntok)
 	}
 	gpuLock(t)
 	for _, d := range backend.Open() {
@@ -139,16 +178,14 @@ func TestGemmTileSpeed(t *testing.T) {
 		if d.API() != "msl" {
 			continue
 		}
-		for _, sh := range [][3]int{{8192, 2048, 512}, {2048, 8192, 512}, {2048, 2048, 512}, {512, 2048, 512}} {
-			rows, k, ntok := sh[0], sh[1], sh[2]
+		for _, sh := range shapes {
+			q, rows, k := sh.q, sh.rows, sh.k
 			rng := rand.New(rand.NewSource(1))
 			g := newGPU(t, d)
-			qs, dw, scw, _ := kernels.PackWeights(kernels.Q4_K, rawWeights(kernels.Q4_K, rows, k, rng), rows, k)
+			qs, dw, scw, _ := kernels.PackWeights(q, rawWeights(q, rows, k, rng), rows, k)
 			bQS, bD, bSC := g.up(u32bytes(qs)), g.up(u32bytes(dw)), g.up(u32bytes(scw))
 			out := g.up(make([]byte, rows*ntok*4))
 			bB := g.up(make([]byte, ntok*k*2))
-			bA := g.up(make([]byte, ntok*k))
-			bAX := g.up(make([]byte, ntok*k/32*8))
 			sync := func() { out.Read(make([]byte, 4)) }
 			time1 := func(name string, f func() error) {
 				if err := f(); err != nil {
@@ -156,41 +193,42 @@ func TestGemmTileSpeed(t *testing.T) {
 					return
 				}
 				sync()
-				const n = 10
+				const n = 20
 				t0 := time.Now()
 				for i := 0; i < n; i++ {
 					f()
 				}
 				sync()
 				el := time.Since(t0) / n
-				t.Logf("%5dx%-5d t%d %-30s %8.1f us  %.2f TFLOP/s", rows, k, ntok, name, float64(el.Microseconds()),
+				t.Logf("%v %5dx%-5d t%d %-34s %8.1f us  %.2f TFLOP/s", q, rows, k, ntok, name, float64(el.Microseconds()),
 					2*float64(rows)*float64(k)*float64(ntok)/el.Seconds()/1e12)
 			}
-			if kk, err := kernels.MatVec(kernels.MatVecShape{T: kernels.Q4_K, K: k, Rows: rows, NTok: ntok, Tok: 8, Rowt: 4}); err == nil {
-				if kern, err := d.Compile(kk); err == nil {
-					th := rows / 4 * ntok / 8
-					time1("dp4a tok8 rowt4", func() error { return kern.Launch((th+127)/128, 128, bQS, bD, bSC, bA, bAX, out) })
-				}
-			}
+			sub, _, _, _ := kernels.Layout(q)
 			for _, tl := range []kernels.TileGemm{
-				{MT: 4, NT: 2, WM: 2, WN: 2, KB: 2}, {MT: 4, NT: 4, WM: 2, WN: 2, KB: 1},
-				{MT: 2, NT: 4, WM: 2, WN: 2, KB: 2}, {MT: 4, NT: 2, WM: 2, WN: 2, KB: 1},
-				{MT: 4, NT: 4, WM: 4, WN: 1, KB: 1}, {MT: 2, NT: 2, WM: 2, WN: 2, KB: 2},
+				{MT: 4, NT: 2, WM: 2, WN: 2, KB: 1}, {MT: 4, NT: 2, WM: 2, WN: 2, KB: 2},
+				{MT: 4, NT: 4, WM: 2, WN: 2, KB: 1}, {MT: 4, NT: 4, WM: 2, WN: 2, KB: 2},
+				{MT: 2, NT: 4, WM: 2, WN: 2, KB: 1}, {MT: 4, NT: 4, WM: 4, WN: 1, KB: 1},
 			} {
-				s := kernels.MatVecShape{T: kernels.Q4_K, K: k, Rows: rows, NTok: ntok}
-				kk, err := kernels.GemmTile(s, tl)
-				if err != nil {
-					t.Logf("%+v: %v", tl, err)
-					continue
+				tl.KB = max(tl.KB*32/sub, 1)
+				for _, ns := range []bool{true, false} {
+					tl.NoSplit = ns
+					s := kernels.MatVecShape{T: q, K: k, Rows: rows, NTok: ntok}
+					kk, err := kernels.GemmTile(s, tl)
+					if err != nil {
+						continue
+					}
+					if !ns && !strings.Contains(kk.Name, "_p") {
+						continue // no split for this blocking: the same kernel
+					}
+					kern, err := d.Compile(kk)
+					if err != nil {
+						t.Fatalf("%+v: %v", tl, err)
+					}
+					time1(fmt.Sprintf("tile m%dn%d w%dx%d k%d split %v", tl.MT, tl.NT, tl.WM, tl.WN, tl.KB, !ns), func() error {
+						return kern.Launch(kernels.GemmTileGroups(s, tl), tl.Threads(), bQS, bD, bSC, bB, out)
+					})
+					kern.Close()
 				}
-				kern, err := d.Compile(kk)
-				if err != nil {
-					t.Fatalf("%+v: %v", tl, err)
-				}
-				time1(fmt.Sprintf("tile m%dn%d w%dx%d k%d", tl.MT, tl.NT, tl.WM, tl.WN, tl.KB), func() error {
-					return kern.Launch(kernels.GemmTileGroups(s, tl), tl.Threads(), bQS, bD, bSC, bB, out)
-				})
-				kern.Close()
 			}
 			g.free()
 		}

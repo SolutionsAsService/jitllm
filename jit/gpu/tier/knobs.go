@@ -127,6 +127,11 @@ func WithMetalFastMath(on bool) Option { return func(o *openOpts) { o.metal.Fast
 // blocks. Negative blocks at once; zero takes the default.
 func WithMetalSpin(d time.Duration) Option { return func(o *openOpts) { o.metal.Spin = d } }
 
+// WithMetalConcurrent opens this tier's Metal compute encoders concurrent,
+// with a buffer barrier where one dispatch depends on another, rather than
+// serial (metal.Opts.Concurrent).
+func WithMetalConcurrent(on bool) Option { return func(o *openOpts) { o.metal.Concurrent = on } }
+
 // WithSplit pins the matvec column split. Summing S partial results is a
 // different order from summing the blocks in sequence and float addition is
 // not associative, so pinning it to 1 attributes a token divergence to the

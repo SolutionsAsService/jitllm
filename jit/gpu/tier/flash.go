@@ -102,7 +102,7 @@ func (g *devTier) initFlash(bs *blockScratch) (err error) {
 		if e != nil {
 			return nil, e
 		}
-		return g.dev.Compile(k)
+		return g.compileShared(k)
 	}
 	if top := splits[len(splits)-1]; top > 1 {
 		shape.Splits = top
@@ -147,7 +147,7 @@ func freeFlash(bs *blockScratch) {
 	for _, v := range bs.flashV {
 		for _, k := range []backend.Kernel{v.k, v.kW, v.merge} {
 			if k != nil {
-				k.Close()
+				closeKern(k)
 			}
 		}
 	}

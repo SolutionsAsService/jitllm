@@ -2646,6 +2646,26 @@ Scope records the iGPU making a placement slower. Whether the card should
 fill before the iGPU takes anything is a placement-policy change with a
 paired measurement owed (RULE 2), and open.
 
+**The quarter itself was the ceiling's bug, not only its charge.** Once the
+host lost only what the device held, the pool's limit (`hostShare`) stayed a
+quarter of the host budget, and on the M4 that kept the default `jitllm run`
+off the GPU: with sched.MemBudget at 7.68 GiB the Metal budget was 1.92 GiB,
+and Ministral-3-3B Q4_K_M (2.26 GiB with the head) ran 21 of 26 blocks on
+Metal, the rest and the head on the host. `hostShare` is now the host budget
+less budgetFor's headroom (an eighth, 256 MiB to 1 GiB), which the host keeps
+for its pager and scratch when the device is full
+(`TestUnifiedDeviceGetsTheSharedPool`; the quarter fails it). M4, Metal,
+decode 128 tokens, 10 interleaved runs each, tok/s median (min-max):
+
+    -maxmem 7680M  quarter    39.88 (35.92-40.25)   21/26 blocks on Metal
+                   shared     45.86 (42.07-46.04)   26/26 + the head
+    default        quarter    45.84 (44.77-46.17)   MemBudget 11.26 GiB that
+                   shared     45.87 (40.44-46.07)   run: the quarter fit too
+    Mistral-7B Q4_K_M, default: quarter 22/32 blocks, 12.46 tok/s;
+                   shared 32/32, 23.80-23.86 tok/s
+    gpt-oss-20b under -maxmem 6G: 10 of 24 blocks on Metal, 14 paged on the
+                   host (12 page-ins a token), the same opening answer
+
 ## ★ 16b. THE SERVER SERIALISED DEVICES BY THE SPEC'S TEXT, SO `cuda` AND `cuda:1` RAN ON CARD 1 AT ONCE. ITS GATES ARE KEYED ON THE PHYSICAL DEVICE NOW.
 
 server/ holds one gate per device so two sessions never share a card's one

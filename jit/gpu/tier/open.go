@@ -816,12 +816,20 @@ func planSlots(devs []backend.Device, asks []uint64, o openOpts) []Slot {
 }
 
 // hostShare is how much of the host's weight budget devices whose memory is the
-// host's may hold between them. A quarter is a default, not a measurement: an
-// integrated GPU adds no memory, and the bytes it takes the host cannot hold.
-// A per-device budget in the spec (`vulkan:1=8G`) overrides it.
+// host's may hold between them: all of it, less the headroom budgetFor leaves
+// on a card (an eighth, at least 256 MiB, at most 1 GiB and at most half). The
+// device and the host are one pool, so a model that fits the host budget
+// belongs on the device. Nothing is counted twice: the host loses what the
+// device actually holds (HostReserved), never this ceiling. The headroom is
+// what the host side keeps when the device is full -- the pager's frames for
+// the blocks the device declined, and its own scratch.
 //
-// An explicit -vram (WithBudget) is taken at face value for the pool too, and
-// unified devices share that number rather than each getting it.
+// A quarter of the host budget stood here; on a 16 GiB M4 it was 1.92 GiB and
+// put the last block and the head of a 2.26 GiB model on the CPU by default.
+//
+// A per-device budget in the spec (`vulkan:1=8G`) overrides it. An explicit
+// -vram (WithBudget) is taken at face value for the pool too, and unified
+// devices share that number rather than each getting it.
 func hostShare(host, budget uint64) uint64 {
 	if budget > 0 {
 		return budget
@@ -831,7 +839,7 @@ func hostShare(host, budget uint64) uint64 {
 		// is "unknown" and not "unlimited".
 		return defaultBudget
 	}
-	return host / 4
+	return host - min(max(host/8, 256<<20), maxHeadroom, host/2)
 }
 
 // unifiedTotal is the memory the first unified device says the GPU may hold,
@@ -855,7 +863,7 @@ func whyShare(o openOpts) string {
 	if o.budget > 0 {
 		return "-vram, shared by every device on the host's memory"
 	}
-	return "a quarter of the host budget, shared by every device on the host's memory"
+	return "the host budget less its headroom, shared by every device on the host's memory"
 }
 
 // budgetFor is what one device may spend on resident weights, and why: free

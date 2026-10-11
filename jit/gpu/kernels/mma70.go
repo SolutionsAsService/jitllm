@@ -515,7 +515,14 @@ func (v *voltaDeq) scNext(x, w1, cur ir.Value, kb int) ir.Value {
 // pw, then the secondary's hw. idx is the sub-block's word base plus the row;
 // im is a constant row offset on top of it.
 func (v *voltaDeq) words(idx ir.Value, im int64) []ir.Value {
-	out := make([]ir.Value, v.pw+v.hw)
+	return v.wordsN(idx, im, v.pw)
+}
+
+// wordsN is words for the first n primary words of a sub-block (and every
+// secondary word), so a thread can stage a part of a sub-block. idx may
+// already be offset to the part's first word.
+func (v *voltaDeq) wordsN(idx ir.Value, im int64, n int) []ir.Value {
+	out := make([]ir.Value, n+v.hw)
 	idx = v.plus(idx, v.qBase)
 	for w := range out {
 		out[w] = v.b.Load(ir.U32, v.pQS, idx, im+int64(w)*int64(v.rows))
@@ -640,7 +647,17 @@ func (v *voltaDeq) scalesOfX(w []ir.Value, x, subIdx, row ir.Value) (s2, m2 ir.V
 // less 1024 it is q, exactly; one fused f16 multiply-add applies the scale and
 // minimum.
 func (v *voltaDeq) frags(raw []ir.Value, s2, m2 ir.Value) [][]ir.Value {
+	return v.fragsN(raw, s2, m2, v.pw)
+}
+
+// fragsN is frags over n primary words: a part of a sub-block, which on a
+// format with no secondary plane decodes exactly as the sub-block's first n
+// words do (the scale is the sub-block's, the position does not enter).
+func (v *voltaDeq) fragsN(raw []ir.Value, s2, m2 ir.Value, n int) [][]ir.Value {
 	b, qi := v.b, v.qi
+	if n != v.pw && v.hw > 0 {
+		panic("kernels: voltaDeq.fragsN: a part of a sub-block with a secondary plane")
+	}
 	c := func(x int64) ir.Value { return b.Const(ir.U32, x) }
 	hm := int64(1)<<uint(qi.hi) - 1
 	// pair is two exact integer weights q as f16: the nibble pair at bit sh
@@ -664,7 +681,7 @@ func (v *voltaDeq) frags(raw []ir.Value, s2, m2 ir.Value) [][]ir.Value {
 		return b.SubF16x2(b.Xor(ir.U32, p, v.magic), v.off2)
 	}
 	deq := func(p ir.Value) ir.Value { return b.FmaF16x2(p, s2, m2) }
-	out := make([][]ir.Value, v.steps)
+	out := make([][]ir.Value, v.steps*n/v.pw)
 	if qi.e8m0 {
 		// An e2m1 code at bits 9-11 of a binary16, sign at 15, is its value
 		// times 2^-14. 2^15 makes it the doubled value mxfp4Codes holds
@@ -682,7 +699,7 @@ func (v *voltaDeq) frags(raw []ir.Value, s2, m2 ir.Value) [][]ir.Value {
 				b.Shl(ir.U32, b.And(ir.U32, p, c(0x00080008)), c(12)))
 			return deq(b.FmaF16x2(h, k15, zero2))
 		}
-		for w := 0; w < v.pw; w++ {
+		for w := 0; w < n; w++ {
 			for half := 0; half < 2; half++ {
 				out[2*w+half] = []ir.Value{e2m1(raw[w], 4*half), e2m1(raw[w], 4*half+8)}
 			}
@@ -690,7 +707,7 @@ func (v *voltaDeq) frags(raw []ir.Value, s2, m2 ir.Value) [][]ir.Value {
 		return out
 	}
 	if qi.bits == 8 {
-		for w := 0; w < v.pw; w++ {
+		for w := 0; w < n; w++ {
 			x := b.Xor(ir.U32, raw[w], c(0x80808080))
 			out[w] = []ir.Value{deq(pair(x, 0, 0, 0)), deq(pair(x, 8, 0, 0))}
 		}
@@ -700,9 +717,9 @@ func (v *voltaDeq) frags(raw []ir.Value, s2, m2 ir.Value) [][]ir.Value {
 	if qi.hi > 0 {
 		lanes = 8 / qi.hi
 	}
-	sec := raw[v.pw:]
+	sec := raw[n:]
 	h := qi.sub / 2
-	for w := 0; w < v.pw; w++ {
+	for w := 0; w < n; w++ {
 		wd := raw[w]
 		for half := 0; half < 2; half++ {
 			var sw ir.Value

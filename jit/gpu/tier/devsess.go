@@ -141,9 +141,12 @@ type lane struct {
 	// geoSets is the scratch sets of the geometries not in use and geoCur the
 	// one in use (gemma4.go). promptW is the prompt width reserved at
 	// placement, 0 where none is; stepW the ragged step's.
-	geoSets         map[geoKey]geomSet
-	geoCur          geoKey
-	promptW, stepW  int
+	geoSets        map[geoKey]geomSet
+	geoCur         geoKey
+	promptW, stepW int
+	// exactW is the prompt chunk width built for one chunk (layersFor), 0 for
+	// none; one lives at a time.
+	exactW          int
 	partBuf, f16Buf backend.Buf
 	partCap, f16Cap int
 	// argmaxOut is the device argmax's one word (PrepHead).
