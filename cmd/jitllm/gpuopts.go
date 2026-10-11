@@ -34,7 +34,9 @@ func gpuOptions() []tier.Option {
 	// The tuners' answers persist under the user cache directory, keyed by
 	// device UUID, driver and executable (tier.WithTuneCache).
 	if d, err := os.UserCacheDir(); err == nil {
-		o = append(o, tier.WithTuneCache(filepath.Join(d, "jitllm")))
+		// A shape not in it runs the table's split while the tuner measures
+		// it in the background (tier.WithLazyTune).
+		o = append(o, tier.WithTuneCache(filepath.Join(d, "jitllm")), tier.WithLazyTune(true))
 	}
 	if v := str("JITLLM_GPU_API"); v != "" {
 		o = append(o, tier.WithAPI(v))

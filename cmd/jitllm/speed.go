@@ -473,8 +473,9 @@ func ttftRun(m *model.Model, attach func(int) (*model.State, error), p, reps int
 	if err := readyHonest(compiled, tuned); err != nil {
 		return err
 	}
-	fmt.Printf("load %.1f ms (open %.0f + devices %.0f + attach %.0f)   ttft-loaded %.1f ms (ready to the first token; %d compiles, %d tuner trials after ready)\n",
-		ms(tOpen+tDev+tAttach), ms(tOpen), ms(tDev), ms(tAttach), ms(el-tAttach), compiled, tuned)
+	tStart := t00.Sub(procStart)
+	fmt.Printf("load %.1f ms (start %.0f + open %.0f + devices %.0f + attach %.0f)   ttft-loaded %.1f ms (ready to the first token; %d compiles, %d tuner trials after ready; %d background tuner trials so far)\n",
+		ms(tStart+tOpen+tDev+tAttach), ms(tStart), ms(tOpen), ms(tDev), ms(tAttach), ms(el-tAttach), compiled, tuned, tier.BackgroundTuneTrials())
 	var warm []float64
 	ntok := 0
 	for r := 0; r < reps; r++ {

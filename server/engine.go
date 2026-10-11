@@ -510,6 +510,7 @@ func (e *Engine) LoadModel(o LoadOptions) (*LoadedModel, error) {
 				tier.WithDevices(spec),
 				tier.WithROCm(e.cfg.ROCm),
 				tier.WithTuneCache(e.cfg.TuneCache),
+				tier.WithLazyTune(e.cfg.TuneCache != ""),
 				tier.WithHostBudget(hostBudget),
 				tier.WithConfig(func(c *tier.Config) {
 					c.Sessions = o.Sessions

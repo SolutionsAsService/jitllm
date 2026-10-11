@@ -114,3 +114,87 @@ func TestSplitTunerPersistsPerDeviceDriverAndRevision(t *testing.T) {
 		t.Errorf("a device with no UUID wrote a cache entry (stat: %v)", err)
 	}
 }
+
+// TestLazyTunerRunsOffThePlacementPath: with WithLazyTune a shape the cache
+// does not hold gets the table's split at once with no timed trial on the
+// placement path; the background tuner times it, adopts the winner and writes
+// it to the cache, which the next tier reads with no trial at all. TuneOff
+// queues nothing. The control arm, lazy off, times on the placement path.
+func TestLazyTunerRunsOffThePlacementPath(t *testing.T) {
+	const rows, k = 4096, 4096
+	table := chooseSplit(rows, k/32, 0)
+	win := 8
+	if table == win {
+		win = 16
+	}
+	hot, bg := 0, 0
+	oldTrial, oldBG, oldID := splitTrial, bgTrial, binaryID
+	t.Cleanup(func() { splitTrial, bgTrial, binaryID = oldTrial, oldBG, oldID })
+	splitTrial = func(_ *devTier, _, _ backend.Kernel, _ *resident, _, _ backend.Buf, _, split int, grp bool) (float64, bool) {
+		hot++
+		if split == win && !grp {
+			return 2, true
+		}
+		return 1, true
+	}
+	bgTrial = func(_ *devTier, _, _ backend.Kernel, _ *resident, _, _, _ backend.Buf, _, split int, grp bool) (float64, bool) {
+		bg++
+		if split == win && !grp {
+			return 2, true
+		}
+		return 1, true
+	}
+	binaryID = func() string { return "revA" }
+	dir := t.TempDir()
+	open := func(opts ...Option) (*GPU, *devTier) {
+		g, err := New([]Slot{{Dev: idDev{&fakeDev{name: "card"}, "aa", "cuda12040"}, Bytes: 1 << 30}},
+			append([]Option{WithTuneCache(dir)}, opts...)...)
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		return g, g.devs[0]
+	}
+	key := splitKey{kernels.Q4_0, rows, k}
+
+	g, d := open(WithLazyTune(true))
+	d.mu.Lock()
+	d.sizePart(rows * win)
+	s := d.tuneSplit(kernels.Q4_0, rows, k, &resident{ok: true})
+	d.mu.Unlock()
+	if s != table || hot != 0 {
+		t.Fatalf("lazy: split %d after %d placement-path trials, want the table's %d and none", s, hot, table)
+	}
+	d.tuneWG.Wait()
+	d.mu.Lock()
+	adopted := d.splits[key]
+	d.mu.Unlock()
+	g.Close()
+	if bg == 0 || adopted != win {
+		t.Fatalf("background tuner: %d trials, adopted split %d, want %d", bg, adopted, win)
+	}
+
+	g, d = open()
+	if s := d.tuneSplit(kernels.Q4_0, rows, k, &resident{ok: true}); s != win || hot != 0 {
+		t.Fatalf("next tier: split %d after %d trials, want the background's %d from the cache", s, hot, win)
+	}
+	g.Close()
+
+	bg = 0
+	g, d = open(WithLazyTune(true), WithDeviceTune(TuneOff))
+	if s := d.tuneSplit(kernels.Q4_0, rows, k, &resident{ok: true}); s != table {
+		t.Fatalf("TuneOff: split %d, want the table's %d", s, table)
+	}
+	d.tuneWG.Wait()
+	g.Close()
+	if bg != 0 {
+		t.Fatalf("TuneOff queued %d background trials", bg)
+	}
+
+	dir = t.TempDir()
+	g, d = open()
+	d.tuneSplit(kernels.Q4_0, rows, k, &resident{ok: true})
+	g.Close()
+	if hot == 0 {
+		t.Fatalf("control: lazy off timed nothing on the placement path; the gate cannot tell the arms apart")
+	}
+}

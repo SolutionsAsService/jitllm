@@ -1521,12 +1521,21 @@ type devShared struct {
 	xfBuf               backend.Buf // a float weight's activation
 	xfCap               int
 	reduce              map[[2]int]backend.Kernel
-	retunedAt           int                           // len(layers) at the last retuneDecode
-	restrides           map[[4]int]backend.Kernel     // kernels.Restride by shape; see copyKVAcrossStride
-	segKerns            map[string]backend.Kernel     // kernels.MatVecSegments by shapes; see fuseQKV
-	ragKerns            map[moeKernKey]backend.Kernel // a batched mixture's grouped matvecs (moegroup.go)
-	moeVolta            map[moeVoltaKey]moeVoltaMV    // their tensor-core twins; see voltaGroupedMV
-	ragK                map[ragKey]backend.Kernel     // a ragged step's matvecs; see ragMV
+	retunedAt           int // len(layers) at the last retuneDecode
+	// The background split tuner (WithLazyTune): its queue, whether its
+	// goroutine runs, Close's stop, and the goroutine to wait for.
+	tuneQ       []tuneJob
+	tuneRunning bool
+	tuneStop    bool
+	tuneWG      sync.WaitGroup
+	// lastSub is when the device last started or finished a submission
+	// (unix ns): the background tuner waits for tuneQuiet past it.
+	lastSub   atomic.Int64
+	restrides map[[4]int]backend.Kernel     // kernels.Restride by shape; see copyKVAcrossStride
+	segKerns  map[string]backend.Kernel     // kernels.MatVecSegments by shapes; see fuseQKV
+	ragKerns  map[moeKernKey]backend.Kernel // a batched mixture's grouped matvecs (moegroup.go)
+	moeVolta  map[moeVoltaKey]moeVoltaMV    // their tensor-core twins; see voltaGroupedMV
+	ragK      map[ragKey]backend.Kernel     // a ragged step's matvecs; see ragMV
 	// convK, conv and convN are the convolutional blocks' kernels, their
 	// shared scratch and how many hold it (conv.go).
 	convK   map[convKey]backend.Kernel
@@ -2151,7 +2160,8 @@ func (g *devTier) Close() {
 	// decline tombstones, freeStale) rather than a second copy of that walk.
 	// A driver that reclaims the context on close would hide a leak here, but
 	// a unified-memory device would not. It takes g.mu, hence before the lock
-	// below.
+	// below. The background tuner stops first: it times resident weights.
+	g.stopTune()
 	g.releaseEveryLayer()
 
 	g.mu.Lock()

@@ -317,7 +317,13 @@ jitllm_pp_warm() { ${PIN[@]+"${PIN[@]}"} "$JITLLM" speed -devices "$JITLLM_DEV" 
 # JITLLM_MODE=load: process start to model ready. jitllm: `speed -ttft`'s
 #   "load" (open + device init and kernel compile + attach: placement, upload,
 #   the tuners, the KV pool and the first prompt's kernels), its breakdown
-#   printed in the header. llama.cpp: llama-completion's own "load time".
+#   printed in the header; "start" is process start (Go's package
+#   initialisation) to the command's own first line. llama.cpp: the
+#   --log-timestamps stamp of llama-completion's "generate:" line, the last it
+#   logs before the prompt's first decode, counted like jitllm's from its
+#   logger's start at process start; its breakdown (backend init, model and
+#   context loaded, ready) is printed in the header too. Not its "load time",
+#   which leaves out the backend's initialisation.
 # JITLLM_MODE=ttft: model ready to the first token of the process's first
 #   prompt, tokenizing excluded. jitllm: `speed -ttft`'s "ttft-loaded", which
 #   refuses the run if any kernel compiled or any tuner trial ran after ready
@@ -330,7 +336,19 @@ jitllm_pp_warm() { ${PIN[@]+"${PIN[@]}"} "$JITLLM" speed -devices "$JITLLM_DEV" 
 # jitllm reads the container with O_DIRECT and gets no help from it. jitllm's
 # tuning cache is whatever this host holds (tier.WithTuneCache); the header
 # says how many tuner trials the probe run timed.
-lcpp_comp() { ${PIN[@]+"${PIN[@]}"} "$LCPP/llama-completion" -m "$MODEL" "${LCPP_ARGS[@]}" -n 1 -no-cnv --no-warmup -p "$PP" </dev/null 2>&1; }
+lcpp_comp() { ${PIN[@]+"${PIN[@]}"} "$LCPP/llama-completion" -m "$MODEL" "${LCPP_ARGS[@]}" -n 1 -no-cnv --no-warmup --log-timestamps --log-prefix -p "$PP" </dev/null 2>&1; }
+# lcpp_stamp PATTERN: seconds of the first log line matching PATTERN; llama.cpp
+# stamps lines M.SS.mmm.uuu from its logger's start.
+lcpp_stamp() { python3 -c '
+import re, sys
+pat = re.compile(sys.argv[1])
+for l in sys.stdin:
+    m = re.match(r"(\d+)\.(\d+)\.(\d+)\.(\d+) ", l)
+    if m and pat.search(l):
+        a, b, c, d = map(int, m.groups())
+        print("%.1f" % ((a * 60 + b) * 1e3 + c + d / 1e3))
+        break
+' "$1"; }
 jitllm_cold() { ${PIN[@]+"${PIN[@]}"} "$JITLLM" speed -devices "$JITLLM_DEV" ${JITLLM_EXTRA[@]+"${JITLLM_EXTRA[@]}"} -ttft -p "$PPTOK" -r 1 "$JITLLM_PATH" 2>&1; }
 per_s() { python3 -c 'import sys; v=sys.stdin.read().split(); print("%.3f" % (float(sys.argv[1])*1e3/float(v[0]))) if v else None' "$1"; }
 
@@ -342,11 +360,13 @@ if [ "$MODE" = load ] || [ "$MODE" = ttft ]; then
   probe="$(jitllm_cold)"
   echo "$probe" | grep -q '^load ' || { echo "jitllm speed -ttft gave no load line:" >&2; echo "$probe" >&2; exit 1; }
   echo "  jitllm probe: $(echo "$probe" | grep '^load ')"
+  lprobe="$(lcpp_comp)"
+  echo "  llama.cpp probe: backend init $(echo "$lprobe" | lcpp_stamp 'llama backend init') ms, model and context loaded $(echo "$lprobe" | lcpp_stamp 'threadpool init') ms, ready $(echo "$lprobe" | lcpp_stamp ' generate: ') ms (from its logger's start)"
   echo "  caches: model file in the page cache (llama.cpp mmaps it; jitllm reads O_DIRECT), jitllm tuning cache as found on this host"
   if [ "$MODE" = load ]; then
-    echo "  load: process start to model ready, as loads/s (jitllm speed -ttft 'load' vs llama-completion 'load time')"
+    echo "  load: process start to model ready, as loads/s (jitllm speed -ttft 'load' vs llama-completion's 'generate:' log stamp)"
     jitllm_run() { jitllm_cold | sed -n 's|^load \([0-9.]*\) ms.*|\1|p' | per_s 1; }
-    lcpp_run() { lcpp_comp | sed -n 's|.*load time = *\([0-9.]*\) ms.*|\1|p' | per_s 1; }
+    lcpp_run() { lcpp_comp | lcpp_stamp ' generate: ' | per_s 1; }
   else
     echo "  ttft (model loaded), pp$PPTOK: ready to the first token of a fresh process's first prompt, as prompt tok/s (jitllm speed -ttft 'ttft-loaded' vs llama-completion --no-warmup 'prompt eval time')"
     jitllm_run() { jitllm_cold | sed -n 's|.*ttft-loaded \([0-9.]*\) ms.*|\1|p' | per_s "$PPTOK"; }

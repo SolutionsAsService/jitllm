@@ -52,10 +52,18 @@ func (g *devTier) tuneSplit(q kernels.Quant, rows, k int, r *resident) int {
 	if v, ok := lookupCache(g.kb.cacheDir, "gpusplit1", ck); ok && g.kb.tune != TuneForce {
 		var s, gi int
 		if n, err := fmt.Sscanf(v, "%d %d", &s, &gi); n == 2 && err == nil && s >= 1 && nb32ok(k, s) &&
-			(gi == 0 || gi == 1 && !g.NoGroupSplit && kernels.GroupSplitOK(rows, s)) {
+			(gi == 0 || gi == 1 && !g.NoGroupSplit && kernels.GroupSplitOK(rows, s)) &&
+			// A partial-writing split needs its partial plane, which the
+			// measurement below would have grown.
+			(s == 1 || gi == 1 || g.sizePart(rows*s)) {
 			g.splits[key], g.groupSplit[key] = s, gi == 1
 			return s
 		}
+	}
+
+	if g.kb.lazyTune && ck != "" && r != nil {
+		g.queueTune(tuneJob{key: key, ck: ck, r: r, cands: g.splitCands(q, rows, k)})
+		return fallback
 	}
 
 	nb := k / 32
@@ -135,7 +143,192 @@ func (g *devTier) tuneSplit(q kernels.Quant, rows, k int, r *resident) int {
 	return best
 }
 
-var tuneTrials atomic.Int64
+var tuneTrials, bgTuneTrials atomic.Int64
+
+// BackgroundTuneTrials counts the trials WithLazyTune's background tuner has
+// timed in this process, which TuneTrials does not: they run beside the
+// device's work, not on its path.
+func BackgroundTuneTrials() int64 { return bgTuneTrials.Load() }
+
+// bgTrial is one background candidate; a gate swaps it.
+var bgTrial = (*devTier).timeSplitOn
+
+// tuneJob is one shape the background tuner measures.
+type tuneJob struct {
+	key   splitKey
+	ck    string
+	r     *resident
+	cands []splitCand
+}
+
+// splitCands compiles the candidates tuneSplit times for one shape: here, at
+// placement, so the background tuner compiles nothing. Callers hold g.mu.
+func (g *devTier) splitCands(q kernels.Quant, rows, k int) []splitCand {
+	var cs []splitCand
+	for _, split := range splitCands(k/32, 32) {
+		if rows*split > 1<<22 {
+			continue
+		}
+		for _, grp := range []bool{false, true} {
+			if grp && (g.NoGroupSplit || !kernels.GroupSplitOK(rows, split)) {
+				continue
+			}
+			c := splitCand{split: split, grp: grp}
+			if c.kern = g.kernelMode(q, k, rows, split, 1, false, grp); c.kern == nil {
+				continue
+			}
+			if split > 1 && !grp {
+				if c.red = g.reduceKernel(rows, split); c.red == nil {
+					continue
+				}
+			}
+			cs = append(cs, c)
+		}
+	}
+	return cs
+}
+
+// queueTune hands a shape to the background tuner, starting it if it is not
+// running. Callers hold g.mu.
+func (g *devTier) queueTune(j tuneJob) {
+	if len(j.cands) < 2 || g.tuneStop {
+		return
+	}
+	g.tuneQ = append(g.tuneQ, j)
+	g.lastSub.Store(time.Now().UnixNano()) // placement is work too: wait past it
+	if !g.tuneRunning {
+		g.tuneRunning = true
+		g.tuneWG.Add(1)
+		go g.tuneWorker()
+	}
+}
+
+// tuneWorker drains the queue. Each trial runs under g.mu, so it never meets
+// a weight being freed, a scratch being rebuilt or Close; between trials the
+// lock is free and the device's own work goes first.
+func (g *devTier) tuneWorker() {
+	defer g.tuneWG.Done()
+	for {
+		g.mu.Lock()
+		if g.tuneStop || len(g.tuneQ) == 0 {
+			g.tuneRunning = false
+			g.mu.Unlock()
+			return
+		}
+		j := g.tuneQ[0]
+		g.tuneQ = g.tuneQ[1:]
+		g.mu.Unlock()
+		g.runTuneJob(j)
+	}
+}
+
+// runTuneJob times one shape's candidates into buffers of its own (the
+// partial sums of a running submission are g.partBuf) and adopts the winner.
+func (g *devTier) runTuneJob(j tuneJob) {
+	rows, k := j.key.rows, j.key.k
+	maxSplit := 1
+	for _, c := range j.cands {
+		maxSplit = max(maxSplit, c.split)
+	}
+	var bufs []backend.Buf
+	defer func() {
+		for _, b := range bufs {
+			b.Free()
+		}
+	}()
+	alloc := func(n int) backend.Buf {
+		b, err := g.dev.Alloc(n)
+		if err != nil {
+			return nil
+		}
+		bufs = append(bufs, b)
+		return b
+	}
+	out, part := alloc(rows*4), alloc(rows*maxSplit*4)
+	if out == nil || part == nil {
+		return
+	}
+	var xf backend.Buf
+	if kernels.IsFloat(j.key.q) {
+		if xf = alloc(k * 4); xf == nil || xf.Write(make([]byte, k*4)) != nil {
+			return
+		}
+	}
+	best, bestRate, bestGroup := 0, 0.0, false
+	for _, c := range j.cands {
+		if !g.waitQuiet() {
+			return
+		}
+		g.mu.Lock()
+		if g.tuneStop || g.closed || !j.r.ok {
+			g.mu.Unlock()
+			return
+		}
+		d := j.r.d
+		if xf != nil {
+			d = xf
+		}
+		bgTuneTrials.Add(1)
+		rate, ok := bgTrial(g, c.kern, c.red, j.r, d, out, part, rows, c.split, c.grp)
+		g.mu.Unlock()
+		if ok && rate > bestRate {
+			best, bestRate, bestGroup = c.split, rate, c.grp
+		}
+	}
+	if best == 0 {
+		return
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.tuneStop {
+		return
+	}
+	// Adopted here only where the partial plane already holds it: growing it
+	// would reallocate a buffer a submission may be writing. The cache takes
+	// it either way, and the next placement sizes the plane for it.
+	if best == 1 || bestGroup || rows*best <= g.partCap {
+		g.splits[j.key], g.groupSplit[j.key] = best, bestGroup
+	}
+	gi := 0
+	if bestGroup {
+		gi = 1
+	}
+	saveCache(g.kb.cacheDir, "gpusplit1", j.ck, fmt.Sprintf("%d %d", best, gi))
+}
+
+// tuneQuiet is how long the device must have run no submission before the
+// background tuner times a trial: a prompt's submissions come closer together
+// than this, so a trial lands between requests, not inside one. A trial holds
+// g.mu for its ten timed rounds, which a request arriving meanwhile waits for.
+const tuneQuiet = 50 * time.Millisecond
+
+// waitQuiet blocks until the device has been quiet for tuneQuiet, and reports
+// false when the tuner is being stopped.
+func (g *devTier) waitQuiet() bool {
+	for {
+		g.mu.Lock()
+		stop := g.tuneStop
+		g.mu.Unlock()
+		if stop {
+			return false
+		}
+		idle := time.Since(time.Unix(0, g.lastSub.Load()))
+		if idle >= tuneQuiet {
+			return true
+		}
+		time.Sleep(tuneQuiet - idle)
+	}
+}
+
+// stopTune stops the background tuner and waits for it. Callers do not hold
+// g.mu.
+func (g *devTier) stopTune() {
+	g.mu.Lock()
+	g.tuneStop = true
+	g.tuneQ = nil
+	g.mu.Unlock()
+	g.tuneWG.Wait()
+}
 
 // TuneTrials counts the timed trials the device tuners have run in this
 // process (the split tuner, the sequence retunes, the backend probe): what a
@@ -163,6 +356,14 @@ func (g *devTier) tuneKey(shape string) string {
 
 func (g *devTier) timeSplitMode(kern, red backend.Kernel, r *resident, d, out backend.Buf, rows, split int, grp bool) (float64, bool) {
 	tuneTrials.Add(1)
+	return g.timeSplitOn(kern, red, r, d, out, g.partBuf, rows, split, grp)
+}
+
+// timeSplitOn is one timed candidate writing its partial sums to part.
+func (g *devTier) timeSplitOn(kern, red backend.Kernel, r *resident, d, out, part backend.Buf, rows, split int, grp bool) (float64, bool) {
+	if g.bs == nil {
+		return 0, false // no activation to read: a scratch rebuilt or closed
+	}
 	const rounds, iters = 9, 4
 	rates := make([]float64, 0, rounds)
 	for round := 0; round < rounds+1; round++ {
@@ -172,14 +373,14 @@ func (g *devTier) timeSplitMode(kern, red backend.Kernel, r *resident, d, out ba
 			for i := 0; i < iters; i++ {
 				dst := out
 				if split > 1 && !grp {
-					dst = g.partBuf
+					dst = part
 				}
 				if err = s.Launch(kern, groupsOf(rows*split, split, grp), widthOf(split, grp),
 					r.qs, d, r.sc, g.bs.a, g.bs.ax, dst); err != nil {
 					return
 				}
 				if split > 1 && !grp {
-					if err = s.Launch(red, (rows+127)/128, 128, g.partBuf, out); err != nil {
+					if err = s.Launch(red, (rows+127)/128, 128, part, out); err != nil {
 						return
 					}
 				}
