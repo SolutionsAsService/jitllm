@@ -5634,7 +5634,9 @@ run ahead of the tiles, which are reached where those decline, or ahead of them
 with Config.PreferTiles (JITLLM_GPU_PREFER_TILES) -- the arm
 TestTilePrefillMatchesTheHost pins and the A/B uses. On a T4, before the m16n8
 GEMMs landed, the tile GEMM against MatVecMMA read 0.989 (IQR 0.090, A/A
-1.0136 at IQR 0.083): parity, within a noisy box.
+1.0136 at IQR 0.083): parity, within a noisy box. Against the m16n8 GEMMs
+(the default now) PreferTiles read 1.16 for the default, rejected at IQR
+0.116: the default stays first.
 
 The subgroup collectives (`ir/subgroup.go`: reduce add/max/min, broadcast from
 a uniform lane, shuffle from a per-lane lane & 31, lane id, width) lower to a
@@ -5646,3 +5648,52 @@ on CUDA, Vulkan and Metal; a butterfly missing its last step, a reduction
 lowered as the wrong op and a shuffle clamped to 16 lanes each fail it. The
 lane mask is not observable on NVIDIA (CUDA and Vulkan wrap a source past 31
 themselves); it is the IR's definition for the targets that do not.
+
+## Fusing a decode block's launches buys little: the launch is not the cost
+
+The decode token on the V100 (Llama-3.2-1B Q4_K_M, sm_70, kernel timing by
+event nodes, which add ~3.9 us each) issues 234 launches: 14.5 a block plus
+the head. The block's small kernels are norm+quantize twice, quantize twice,
+q rotation, k rotation into its page, v copy into its page, flash decode and
+its merge.
+
+`kernels.RoPEQKVPaged` is the three position writers as one launch, built
+from the same emitted bodies (`ropeBody`, `pagedRopeBody`, `pagedCopyBody`),
+so it is bit-identical to them: TestRoPEQKVPagedMatchesItsParts compares every
+word of q and both NaN-poisoned pools, and TestFusedDecodeMatchesPerOp holds a
+whole decode, every block placed and a partial seam, fused against
+Config.NoFuse to the same logits bit for bit and both to the host (V100, the
+3050 Ti, a T4; Llama-3.2-1B, Qwen2-1.5B, gemma-2b). One pair dropped from the
+k part fails the kernel gate; v's source swapped for k's in the tier fails the
+model gate at step 0.
+
+It removes 32 of 234 launches a token, and measured (verify -ab fuse,
+in-process, n=24, 64 tokens a round):
+
+    V100 (CUDA graph)    A/A 0.9956 (IQR 2.5%)   fused 1.0071, 1.0062 (IQR 3.9%, 4.5%)
+    M4 (Metal)           A/A 0.9893 (IQR 5.6%)   fused 0.9922 (IQR 4.5%), a second pass unstable
+
+and on a T4 through vs-llamacpp.sh with JITLLM_GPU_NO_FUSE as the other arm
+(processes interleaved ABBA, decode 128, one pass): 1.0184, IQR 0.018. That
+row and the V100's fall on the same side and inside two percent.
+
+Sub-noise on both, so not a claim. 32 launches for ~0.7% is ~0.6 us a launch
+inside a CUDA graph: the graph already removed the issue cost, and what a fused
+launch could still remove is the drain between dependent kernels, which these
+tiny kernels barely have. A per-block megakernel would fight the same small
+term at the price of a grid-wide barrier the IR does not have, so it is not
+the decode lever on this card; the matvecs at 60-90% of the read wall and the
+latency-bound norm (~6 us of a 2048-wide row on one 1024-thread group) are.
+The same decode against llama.cpp's CUDA build, vs-llamacpp.sh, decode 128:
+V100 1.0190 (IQR 0.034; A/A 0.9965, IQR 0.049), T4 1.1890 (IQR 0.030).
+
+Bridging consecutive resident blocks into one submission is what `layersFor`
+already does: one call runs the device range [lo, hi) as one captured graph
+keyed by its launch sequence (graphKey: the range, the session, the paged
+variant, the parities...), and a relocation, eviction or seam move changes the
+range and so the key -- the run is re-captured, not patched.
+
+`JITLLM_CUDA_KERNEL_TIMING` had been silent for every decode that runs on a
+queue: the event nodes were armed only on the legacy stream's capture, and the
+settle only on its replay. Both now run on a queue's capture too.
+

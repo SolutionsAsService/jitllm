@@ -34,7 +34,7 @@ func verifyCmd(args []string) error {
 	// 0 asks the device, like run's.
 	vram := bytesFlag(fs, "vram", 0, "device weight budget, bytes or 3G/512M; 0 asks the device")
 	maxmem := bytesFlag(fs, "maxmem", 0, "host weight residency budget, bytes or 3G/512M; 0 works it out")
-	ab := fs.String("ab", "", "instead of verifying, run a paired A/B: split, submit, head, graph, softmax, ropetab, attnchunk or attnpair")
+	ab := fs.String("ab", "", "instead of verifying, run a paired A/B: split, submit, head, graph, softmax, fuse, ropetab, attnchunk or attnpair")
 	rounds := fs.Int("rounds", 21, "A/B rounds")
 	verify := fs.Bool("verify", false, "recompute every served matvec on the host and report disagreements")
 	prefill := fs.Int("prefill", 0, "gate the BATCHED device prefill: prefill this many tokens on both tiers and diff")
@@ -737,6 +737,21 @@ func abRun(m *model.Model, g *tier.GPU, which string, n, rounds, depth int) {
 		}
 		a = bench.Case{Name: "1 thread per head", Fn: func(it int) { g.ScalarSoftmax = true; step(it) }}
 		b = bench.Case{Name: "32 lanes per head", Fn: func(it int) { g.ScalarSoftmax = false; step(it) }}
+	case "fuse":
+		// Both arms' kernels are built (the fused ones beside their parts)
+		// and each arm's graph is captured once, so the rounds compare the
+		// launch sequences and nothing else.
+		g.NoFuse = false
+		step(2)
+		if g.Stats().FusedLaunches == 0 {
+			panic(fmt.Errorf("this device fused nothing; there is nothing to compare"))
+		}
+		a = bench.Case{Name: "per-op launches", Fn: func(it int) { g.NoFuse = true; step(it) }}
+		b = bench.Case{Name: "fused kernels", Fn: func(it int) { g.NoFuse = false; step(it) }}
+		if os.Getenv("JITLLM_AB_AA") == "1" {
+			// The A/A self-control on this harness: both arms per-op.
+			b = bench.Case{Name: "per-op launches (A/A)", Fn: func(it int) { g.NoFuse = true; step(it) }}
+		}
 	case "ropetab":
 		// Refuse rather than compare a knob that reached nothing: a device
 		// with no rotary-table kernel uploads on both arms.
@@ -747,7 +762,7 @@ func abRun(m *model.Model, g *tier.GPU, which string, n, rounds, depth int) {
 		a = bench.Case{Name: "table uploaded from the host", Fn: func(it int) { g.RopeTableHost = true; step(it) }}
 		b = bench.Case{Name: "table built on the device", Fn: func(it int) { g.RopeTableHost = false; step(it) }}
 	default:
-		panic(fmt.Errorf("jitllm: -ab takes split, submit, head, graph, softmax or ropetab, not %q", which))
+		panic(fmt.Errorf("jitllm: -ab takes split, submit, head, graph, softmax, fuse or ropetab, not %q", which))
 	}
 	r := bench.AB(a, b, rounds, n)
 	fmt.Printf("\n%d blocks on device\n%s\n", s.GPULayers(), r)

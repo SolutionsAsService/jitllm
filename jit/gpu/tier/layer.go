@@ -6056,6 +6056,9 @@ type graphKey struct {
 	// speculator's trunk and draft, two requests stepped one after another --
 	// each keep replaying instead of recording again at every turn.
 	sid uint64
+	// noFuse is Config.NoFuse: the fused kernels and their parts are two
+	// launch sequences, and verify -ab fuse flips it every round.
+	noFuse bool
 }
 
 // canRecord reports whether this device's sessions can capture a launch
@@ -6523,7 +6526,7 @@ func (g *devTier) layersOnce(sid uint64, bs *blockScratch, lo, hi, pos int, x, c
 		ragHead = head.WantedRows(nrow)
 	}
 	key := graphKey{lo, hi, nCap, R, head != nil, g.TableSplit, g.ScalarSoftmax, g.flashOn(), g.KVF16,
-		ropeDev, argmax, sampleK, samplePen, pick, ragN, ragRuns, par, pagedVar, ragHead, hNormID, sid}
+		ropeDev, argmax, sampleK, samplePen, pick, ragN, ragRuns, par, pagedVar, ragHead, hNormID, sid, g.NoFuse}
 	if _, live := g.recs[key]; !live {
 		for k, r := range g.recs {
 			older := k
@@ -7341,6 +7344,7 @@ func (g *devTier) layersSession(s backend.Session) {
 						}
 						kSrc, kHeads = pk.msa.kAll, kHeads+1
 					}
+					fusedKV := false
 					if !skip["rope"] {
 						// An unrotated layer still needs K and V in the cache: q is read where
 						// it is (qAtt below) and k is copied where RoPERowsT would have
@@ -7365,8 +7369,20 @@ func (g *devTier) layersSession(s backend.Session) {
 							if copyK != nil && partialRotary(p) && !shared {
 								laKV(copyK, R*kvDim, kSrc, kDst, kOff)
 							}
-							lc.la(bs.ropeQ, R*p.NHead*p.NRot/2, qSrc, rcs, qOff, bs.qr)
-							if !shared && p.RopeSplit {
+							if pk != nil && pk.ropeQKV != nil && !shared && bs.copyQ == nil && kHeads == p.NKVHead &&
+								!g.NoFuse && !skip["fuse"] {
+								// q's rotation, k's into its page and v's copy
+								// in one launch (kernels.RoPEQKVPaged), the
+								// three kernels below being its parts.
+								lc.la(pk.ropeQKV, kernels.RoPEQKVPagedThreads(p.NHead, p.NKVHead, p.HeadDim, p.NRot, R, g.KVF16),
+									qSrc, rcs, qOff, bs.qr, kSrc, kDst, vSrc, vDst, pgTab, pk.pRow)
+								g.FusedLaunches++
+								fusedKV = true
+							} else {
+								lc.la(bs.ropeQ, R*p.NHead*p.NRot/2, qSrc, rcs, qOff, bs.qr)
+							}
+							if fusedKV {
+							} else if !shared && p.RopeSplit {
 								// XD-RoPE: k turns row-major, is normed after
 								// the rotary (the rotation does not keep a head's
 								// RMS), and is copied into the cache.
@@ -7384,7 +7400,7 @@ func (g *devTier) layersSession(s backend.Session) {
 								laKV(ropeK, R*kHeads*p.NRot/2, kSrc, rcs, kOff, kDst)
 							}
 						}
-						if !shared {
+						if !shared && !fusedKV {
 							laKV(copyV, vThreads, vSrc, vDst, vOff)
 						}
 					}

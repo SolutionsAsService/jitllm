@@ -160,6 +160,10 @@ type Config struct {
 	NoTail bool
 	// NoKT refuses the transposed device K cache, leaving [position][head][dim].
 	NoKT bool
+	// NoFuse issues each fused kernel's parts one launch at a time
+	// (kernels.RoPEQKVPaged's three writers): the per-op reference path, the
+	// A/B arm and the bisection switch for a fused kernel.
+	NoFuse bool
 	// NoMMA refuses the warp matrix instruction, leaving the dp4a tile. It is
 	// the bisection switch for a wrong answer that only the matrix path shows.
 	NoMMA bool
@@ -809,6 +813,10 @@ type Stats struct {
 	AttnMMA bool
 	// FlashLaunches counts encoded fused-attention launches (not graph replays).
 	FlashLaunches int
+	// FusedLaunches counts encoded launches of a kernel that stands for
+	// several (kernels.RoPEQKVPaged), not graph replays: the selection check
+	// that the fused form ran rather than its parts.
+	FusedLaunches int
 	// PagedLaunches counts encoded paged-attention launches: the check that a
 	// paged run read its history through the pool.
 	PagedLaunches int
@@ -1142,6 +1150,7 @@ func (s *Stats) add(o Stats) {
 	s.Captures += o.Captures
 	s.AttnMMA = s.AttnMMA || o.AttnMMA
 	s.FlashLaunches += o.FlashLaunches
+	s.FusedLaunches += o.FusedLaunches
 	s.PagedLaunches += o.PagedLaunches
 	s.PagedPrefillLaunches += o.PagedPrefillLaunches
 	s.PagedStagedLaunches += o.PagedStagedLaunches

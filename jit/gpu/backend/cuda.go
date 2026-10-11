@@ -416,6 +416,7 @@ func (s *cudaSession) BeginRecord() error {
 		}
 		s.qcap = true
 		s.stream = s.q.st.Handle()
+		s.armMarks()
 		return nil
 	}
 	if s.c.cap == nil {
@@ -433,6 +434,13 @@ func (s *cudaSession) BeginRecord() error {
 		return err
 	}
 	s.stream = s.c.cap.Handle()
+	s.armMarks()
+	return nil
+}
+
+// armMarks starts a capture's kernel-timing event nodes when
+// SetCUDAKernelTiming is on, on whichever stream the capture runs.
+func (s *cudaSession) armMarks() {
 	s.recMarks = nil
 	if cudaKernTiming.Load() && cuda.EventsAvailable() {
 		if e, err := cuda.NewEvent(); err == nil && e.RecordNode(s.stream) == nil {
@@ -440,7 +448,6 @@ func (s *cudaSession) BeginRecord() error {
 			s.marks = &s.recMarks
 		}
 	}
-	return nil
 }
 
 // EndRecord closes the capture BeginRecord opened and returns its graph.
@@ -466,13 +473,16 @@ func (s *cudaSession) EndRecord() (Recording, error) {
 
 func (s *cudaSession) Replay(r Recording) error {
 	cg := r.(*cudaGraph)
-	if s.q != nil {
-		return cg.g.Launch(s.q.st)
-	}
 	if len(cg.marks) > 0 {
-		// The previous timed replay is done: decode read its token back.
+		// The previous timed replay is done: decode read its token back. A
+		// session on a queue is no different here, and settling only on the
+		// legacy stream left JITLLM_CUDA_KERNEL_TIMING silent for every
+		// decode that runs on a queue.
 		settleMarks(s.c.lastMarks)
 		s.c.lastMarks = cg.marks
+	}
+	if s.q != nil {
+		return cg.g.Launch(s.q.st)
 	}
 	if !cudaTiming.Load() || !cuda.EventsAvailable() {
 		return cg.g.Launch(s.c.cap)
