@@ -180,6 +180,14 @@ Windows (PowerShell):
 irm https://jitllm.org/install.ps1 | iex
 ```
 
+macOS with Homebrew:
+
+```sh
+brew tap jitllm/jitllm
+brew install --cask jitllm   # jitllm.app, with jitllm and jitllmd on your PATH
+brew install jitllm          # or the command-line programs only
+```
+
 This installs the CLI, `jitllm`, and the server, `jitllmd`, from the latest
 release, after checking each archive against the release's checksums: into
 `~/.local/bin` (`/usr/local/bin` as root), or on Windows into
