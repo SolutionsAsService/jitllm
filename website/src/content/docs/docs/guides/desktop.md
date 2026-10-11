@@ -7,7 +7,7 @@ The desktop app is a window on the same engine as `jitllm` and `jitllmd`. It run
 
 ## Install and run
 
-On macOS it is `jitllm.app` in the release's `.dmg`, and on Windows the setup installs it ([Install](/docs/install/)). Elsewhere, install it with the [install script](/docs/install/#from-a-script):
+On macOS it is `jitllm.app` in the release's `.dmg`, and on Windows the setup installs it ([Install](/docs/install/)). The [install script](/docs/install/#from-a-script) installs it too: on macOS it puts `jitllm.app` in `/Applications` (or `~/Applications`), elsewhere the `jitllm-desktop` binary:
 
 ```sh
 curl -fsSL https://jitllm.org/install.sh | sh -s -- desktop
