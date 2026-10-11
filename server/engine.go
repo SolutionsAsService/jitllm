@@ -15,6 +15,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"image"
 	"os"
 	"path/filepath"
 	"sort"
@@ -95,6 +96,10 @@ type Config struct {
 	// prompt prefixes; nil refuses such a session. jitllmd's -kv-cache is a
 	// model.FileStore.
 	PromptStore model.KVStore
+
+	// Images bounds the pictures the HTTP shims accept in a chat request, and
+	// says whether a picture named by a remote URL is fetched (images.go).
+	Images ImagePolicy
 
 	// Version is reported by GetServerInfo.
 	Version string
@@ -206,6 +211,8 @@ type Engine struct {
 // or LoadModel does.
 func New(cfg Config) *Engine {
 	cfg.withDefaults()
+	// One fetch bound for the whole server, shared by every surface.
+	cfg.Images = cfg.Images.ready()
 	return &Engine{
 		cfg:      cfg,
 		started:  time.Now(),
@@ -820,7 +827,9 @@ type Session struct {
 
 // SessionOptions is CreateSession's input.
 type SessionOptions struct {
-	ModelID         string
+	ModelID string
+	// modelName is GenerateOptions.ModelName, for a request's own session.
+	modelName       string
 	SessionID       string
 	MaxSeq          int
 	DeviceIDs       []string
@@ -901,7 +910,7 @@ func (e *Engine) CreateSession(o SessionOptions) (*Session, error) {
 	}
 	if lm.m.IsEncoder() {
 		return nil, fmt.Errorf("%w: model %q is an encoder (%s): it has no decoder session to generate "+
-			"from; embed with it instead", ErrInvalid, lm.id, lm.m.Cfg.Arch)
+			"from; embed with it instead", ErrInvalid, lm.called(o.modelName), lm.m.Cfg.Arch)
 	}
 	maxSeq := o.MaxSeq
 	if maxSeq <= 0 {
@@ -983,7 +992,7 @@ func (e *Engine) CreateSession(o SessionOptions) (*Session, error) {
 	if e.models[lm.id] != lm {
 		e.mu.Unlock()
 		st.Close()
-		return nil, fmt.Errorf("%w: model %q was unloaded", ErrNotFound, lm.id)
+		return nil, fmt.Errorf("%w: model %q was unloaded", ErrNotFound, lm.called(o.modelName))
 	}
 	if _, ok := e.sessions[id]; ok {
 		e.mu.Unlock()
@@ -1137,6 +1146,11 @@ type ChatInput struct {
 	HasSystem           bool
 	AddGenerationPrompt bool
 	TemplateName        string
+	// Images is the conversation's pictures in the order the client sent
+	// them; Messages[i].Images says how many are message i's. The engine lays
+	// them out where the model's chat template puts its image markers
+	// (Engine.pictureSpans), so a chat with pictures runs as PromptSpans.
+	Images []image.Image
 	// Tools is the tool list the template renders, a JSON array in the
 	// OpenAI shape ([{"type": "function", "function": {...}}]); nil for none.
 	Tools []byte
@@ -1147,7 +1161,9 @@ type ChatInput struct {
 	ToolChoice model.ToolChoice
 }
 
-// Prompt is what a generate runs: the member Kind names is the one read.
+// Prompt is what a generate runs: the member Kind names is the one read. A
+// chat with pictures, laid out as PromptSpans, keeps its Chat beside the
+// spans for its tools.
 type Prompt struct {
 	Kind  PromptKind
 	Text  string
@@ -1161,6 +1177,10 @@ type Prompt struct {
 type GenerateOptions struct {
 	SessionID string
 	ModelID   string
+	// ModelName is the name the caller addressed the model by (BindTarget
+	// sets it), which errors repeat: a client that sent a file name cannot
+	// act on an id it never saw. Empty names the model by ModelID.
+	ModelName string
 
 	Prompt       Prompt
 	MaxTokens    int
@@ -1414,18 +1434,24 @@ func (e *Engine) Generate(ctx context.Context, o GenerateOptions, emit func(Even
 
 	lm := s.lm
 	if lm.m.Vocab == nil {
-		return fmt.Errorf("server: model %q has no tokenizer: %v", lm.id, lm.m.TokErr)
+		return fmt.Errorf("server: model %q has no tokenizer: %v", lm.called(o.ModelName), lm.m.TokErr)
 	}
 
-	if o.Prompt.Kind == PromptSpans {
-		if o.Continue {
-			return fmt.Errorf("%w: a span prompt starts its sequence; it cannot continue one", ErrInvalid)
+	if o.Prompt.Kind == PromptChat && o.Prompt.Chat != nil && len(o.Prompt.Chat.Images) > 0 {
+		sp, err := pictureSpans(s, o)
+		if err != nil {
+			return err
 		}
+		// Chat stays beside the spans: its tools are what a forced call's
+		// grammar and the reply's call parsing read.
+		o.Prompt = Prompt{Kind: PromptSpans, Spans: sp, Chat: o.Prompt.Chat}
+	}
+	if o.Prompt.Kind == PromptSpans {
 		if len(o.Prompt.Spans) == 0 {
 			return fmt.Errorf("%w: the prompt is empty", ErrInvalid)
 		}
 	}
-	ids, err := e.encode(lm, o.Prompt)
+	ids, err := e.encode(lm, o.Prompt, o.ModelName)
 	if err != nil {
 		return err
 	}
@@ -1446,7 +1472,17 @@ func (e *Engine) Generate(ctx context.Context, o GenerateOptions, emit func(Even
 	// Room for this generate's history, parking idle sessions of the model
 	// if its KV budget is short (preempt.go), and this session back if it
 	// was the one parked.
-	if err := e.admitKV(s, len(ids)+tokenLimit(o.MaxTokens, s.st.MaxSeq()-s.st.Pos()-len(ids))); err != nil {
+	// tail is the prompt's last token ids, which a forced tool call's grammar
+	// reads; npos is the positions the prompt takes, a picture's rows included.
+	tail, npos := ids, len(ids)
+	if spans {
+		npos = model.SpanPositions(o.Prompt.Spans, lm.m.Cfg.NEmbd)
+		tail = nil
+		for i := len(o.Prompt.Spans) - 1; i >= 0 && tail == nil; i-- {
+			tail = o.Prompt.Spans[i].Tokens
+		}
+	}
+	if err := e.admitKV(s, npos+tokenLimit(o.MaxTokens, s.st.MaxSeq()-s.st.Pos()-npos)); err != nil {
 		return err
 	}
 	spec := s.spec
@@ -1459,7 +1495,7 @@ func (e *Engine) Generate(ctx context.Context, o GenerateOptions, emit func(Even
 			"from one verification and reads back no distribution for each", ErrInvalid)
 	}
 	var con *constraint
-	if tc, err := lm.toolConstraint(o, ids); err != nil {
+	if tc, err := lm.toolConstraint(o, tail); err != nil {
 		return err
 	} else if tc != nil {
 		if o.IgnoreEOS {
@@ -1543,7 +1579,13 @@ func (e *Engine) Generate(ctx context.Context, o GenerateOptions, emit func(Even
 		first, err = sp.Start(ids, &sampler)
 	case spans:
 		prompted = model.SpanPositions(o.Prompt.Spans, lm.m.Cfg.NEmbd)
-		logits, err = s.st.PrefillCachedMixed(o.Prompt.Spans...)
+		if o.Continue {
+			// A continued session's history holds its earlier pictures as
+			// rows already; the new spans follow them.
+			logits, err = s.st.PrefillMixed(o.Prompt.Spans...)
+		} else {
+			logits, err = s.st.PrefillCachedMixed(o.Prompt.Spans...)
+		}
 		restored = s.st.KVRestored()
 	case (s.cached || store) && !o.Continue:
 		logits, err = s.st.PrefillCached(ids)
@@ -1742,9 +1784,6 @@ func (e *Engine) generateN(ctx context.Context, o GenerateOptions, emit func(Eve
 		return fmt.Errorf("%w: several choices run on fresh sessions of a model; "+
 			"a named session or continue_session takes one", ErrInvalid)
 	}
-	if o.Prompt.Kind == PromptSpans {
-		return fmt.Errorf("%w: several choices of a span prompt are not built", ErrInvalid)
-	}
 	if o.Speculation != nil && o.Speculation.Enabled {
 		return fmt.Errorf("%w: speculation with several choices is not built: the choices prefill "+
 			"through a shared prompt store, which a Speculator does not use", ErrInvalid)
@@ -1811,7 +1850,7 @@ func (e *Engine) resolveSession(o GenerateOptions) (*Session, bool, error) {
 	if o.ModelID == "" {
 		return nil, false, fmt.Errorf("%w: one of session_id or model_id is required", ErrInvalid)
 	}
-	s, err := e.CreateSession(SessionOptions{ModelID: o.ModelID, pooled: true})
+	s, err := e.CreateSession(SessionOptions{ModelID: o.ModelID, modelName: o.ModelName, pooled: true})
 	if err != nil {
 		return nil, false, err
 	}
@@ -1822,7 +1861,7 @@ func (e *Engine) resolveSession(o GenerateOptions) (*Session, bool, error) {
 // complete prompt and must be encoded without added specials, or the first
 // turn gets a doubled BOS; model.ChatIDs owns that pairing, so chat goes
 // through it rather than ChatPrompt-then-Encode.
-func (e *Engine) encode(lm *LoadedModel, p Prompt) ([]int32, error) {
+func (e *Engine) encode(lm *LoadedModel, p Prompt, name string) ([]int32, error) {
 	switch p.Kind {
 	case PromptIDs:
 		return p.IDs, nil
@@ -1835,7 +1874,7 @@ func (e *Engine) encode(lm *LoadedModel, p Prompt) ([]int32, error) {
 		if !lm.m.ChatCapable() {
 			return nil, fmt.Errorf("%w: model %q carries no chat template, so a chat request "+
 				"would run as a RAW COMPLETION -- which produces fluent output and no signal at all; "+
-				"send a text prompt instead", ErrInvalid, lm.id)
+				"send a text prompt instead", ErrInvalid, lm.called(name))
 		}
 		msgs := p.Chat.Messages
 		if p.Chat.HasSystem {
@@ -1848,6 +1887,48 @@ func (e *Engine) encode(lm *LoadedModel, p Prompt) ([]int32, error) {
 		return nil, nil
 	}
 	return nil, fmt.Errorf("%w: unknown prompt kind %d", ErrInvalid, p.Kind)
+}
+
+// acceptsImages refuses a picture for a model with no vision tower by name.
+func acceptsImages(lm *LoadedModel) error {
+	if lm.m.Tower() == nil {
+		return fmt.Errorf("%w: model %q does not accept images: its container carries no vision tower",
+			ErrInvalid, lm.id)
+	}
+	return nil
+}
+
+// pictureSpans lays a chat with pictures out as spans on s's State: the
+// template's text, and each picture where the template puts its image markers.
+// A model with no vision tower is refused by name, never run with the picture
+// left out. Such a prompt runs alone rather than as a row of the step loop,
+// as every span prompt does.
+func pictureSpans(s *Session, o GenerateOptions) ([]model.Span, error) {
+	lm, chat := s.lm, o.Prompt.Chat
+	if err := acceptsImages(lm); err != nil {
+		return nil, err
+	}
+	if !lm.m.ChatCapable() {
+		return nil, fmt.Errorf("%w: model %q carries no chat template, which is where a picture's "+
+			"markers go", ErrInvalid, lm.id)
+	}
+	n := 0
+	for _, m := range chat.Messages {
+		n += m.Images
+	}
+	if n != len(chat.Images) {
+		return nil, fmt.Errorf("%w: the messages count %d picture(s) and the request carries %d",
+			ErrInvalid, n, len(chat.Images))
+	}
+	msgs := chat.Messages
+	if chat.HasSystem {
+		msgs = append([]model.ChatMessage{{Role: "system", Content: chat.System}}, msgs...)
+	}
+	sp, err := s.st.ChatPictureSpans(msgs, chat.Images, chat.Tools, chat.ToolChoice, chat.AddGenerationPrompt)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalid, err)
+	}
+	return sp, nil
 }
 
 // ---------------------------------------------------------------- streaming text
@@ -2008,6 +2089,15 @@ func (e *Engine) ScanModels(dir string) ([]ModelFileInfo, string, error) {
 
 // ID is the stable id this model was loaded under.
 func (lm *LoadedModel) ID() string { return lm.id }
+
+// called is how an error names lm: as the request addressed it (name, its id
+// or its file name), or by its id when the request named none.
+func (lm *LoadedModel) called(name string) string {
+	if name != "" {
+		return name
+	}
+	return lm.id
+}
 
 // Name is the container's file name without its extension. The container
 // carries no model name, so this is not an identity.

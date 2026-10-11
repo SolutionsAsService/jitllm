@@ -135,6 +135,11 @@ func gpuOptions() []tier.Option {
 	if str("JITLLM_METAL_FASTMATH") == "1" {
 		o = append(o, tier.WithMetalFastMath(true))
 	}
+	// JITLLM_METAL_CONCURRENT=1 opens Metal's compute encoders concurrent,
+	// with barriers where dispatches depend: the A/B arm.
+	if str("JITLLM_METAL_CONCURRENT") == "1" {
+		o = append(o, tier.WithMetalConcurrent(true))
+	}
 	if str("JITLLM_CUDA_INLINE") == "0" {
 		o = append(o, tier.WithCUDAInline(false))
 	}
@@ -186,6 +191,9 @@ func gpuOptions() []tier.Option {
 		{"JITLLM_GPU_NO_KT", set("JITLLM_GPU_NO_KT"), func(c *tier.Config) { c.NoKT = true }},
 		{"JITLLM_NO_GPU_MMA", set("JITLLM_NO_GPU_MMA"), func(c *tier.Config) { c.NoMMA = true }},
 		{"JITLLM_GPU_NO_VOLTA", set("JITLLM_GPU_NO_VOLTA"), func(c *tier.Config) { c.NoVolta = true }},
+		{"JITLLM_GPU_NO_FLASH_PREFILL", set("JITLLM_GPU_NO_FLASH_PREFILL"), func(c *tier.Config) { c.NoFlashPrefill = true }},
+		{"JITLLM_GPU_NO_TILE_TAIL", set("JITLLM_GPU_NO_TILE_TAIL"), func(c *tier.Config) { c.NoTileTail = true }},
+		{"JITLLM_GPU_NO_EXACT_PROMPT", set("JITLLM_GPU_NO_EXACT_PROMPT"), func(c *tier.Config) { c.NoExactPrompt = true }},
 		{"JITLLM_GPU_NO_VOLTA_MOE", set("JITLLM_GPU_NO_VOLTA_MOE"), func(c *tier.Config) { c.NoVoltaMoE = true }},
 		{"JITLLM_GPU_NO_RAG_GROUP", set("JITLLM_GPU_NO_RAG_GROUP"), func(c *tier.Config) { c.NoRagGroup = true }},
 		{"JITLLM_GPU_NO_RAG_FUSE", set("JITLLM_GPU_NO_RAG_FUSE"), func(c *tier.Config) { c.NoRagFuse = true }},

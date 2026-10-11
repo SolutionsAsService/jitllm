@@ -35,10 +35,10 @@ func (e *Engine) Handler() http.Handler {
 	mount(jitllmv1connect.NewDeviceServiceHandler(&DeviceService{E: e}))
 	mount(jitllmv1connect.NewPlacementServiceHandler(&PlacementService{E: e}))
 	mount(jitllmv1connect.NewSessionServiceHandler(&SessionService{E: e}))
-	mount(jitllmv1connect.NewInferenceServiceHandler(&InferenceService{B: e}))
+	mount(jitllmv1connect.NewInferenceServiceHandler(&InferenceService{B: e, Images: e.cfg.Images}))
 	mount(jitllmv1connect.NewTelemetryServiceHandler(&TelemetryService{E: e}))
 
-	mux.Handle("/", CompatHandler(e))
+	mux.Handle("/", CompatHandlerWith(e, e.cfg.Images))
 
 	// /metrics, /healthz, /health and /v1/capabilities: engineRoutes
 	// (capabilities.go), the table the manifest reads.

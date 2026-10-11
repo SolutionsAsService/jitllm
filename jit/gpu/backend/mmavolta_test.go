@@ -140,7 +140,11 @@ var ggufOf = func() map[kernels.Quant]quant.Type {
 // mma70Case runs kern -- an sm_70 tensor-core matvec reading ActF16's
 // activations, launched as groups workgroups of width -- against the float64
 // reference and the dp4a kernel on the same inputs.
-func mma70Case(t *testing.T, d backend.Device, kern backend.Kernel, s kernels.MatVecShape, what string, groups, width int, tokMajor bool) {
+//
+// extra launches run after kern on the same parameters: a tail launch that
+// covers the tokens kern's block does not.
+func mma70Case(t *testing.T, d backend.Device, kern backend.Kernel, s kernels.MatVecShape, what string, groups, width int, tokMajor bool,
+	extra ...func(args ...backend.Buf) error) {
 	t.Helper()
 	rng := rand.New(rand.NewSource(int64(s.Rows*7 + s.K + s.NTok)))
 	g := newGPU(t, d)
@@ -261,6 +265,11 @@ func mma70Case(t *testing.T, d backend.Device, kern backend.Kernel, s kernels.Ma
 	}
 	if err := kern.Launch(groups, width, args...); err != nil {
 		t.Fatal(err)
+	}
+	for _, f := range extra {
+		if err := f(args...); err != nil {
+			t.Fatal(err)
+		}
 	}
 	nmDp, nmMM := nmseOf(dp, "dp4a", 1), nmseOf(got, what, split)
 	name := fmt.Sprintf("%s %s %v %dx%d ntok %d mt %d nt %d split %d bias %v", d.API(), what, s.T, s.Rows, s.K,

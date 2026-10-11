@@ -3,7 +3,9 @@
   "type": "module",
   "private": true,
   "scripts": {
+    "predev": "node scripts/recipes.mjs",
     "dev": "astro dev",
+    "prebuild": "node scripts/recipes.mjs",
     "build": "astro build",
     "preview": "astro preview",
     "astro": "astro"
@@ -13,5 +15,8 @@
     "@astrojs/starlight": "^0.42.4",
     "astro": "^7.2.10",
     "sharp": "^0.35.3"
+  },
+  "overrides": {
+    "postcss-selector-parser": "^7.1.6"
   }
 }

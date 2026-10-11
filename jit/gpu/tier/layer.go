@@ -1022,8 +1022,17 @@ func (g *devTier) streamStage(m, pl, n int) []byte {
 // same matvec at the split the fitted table would have picked, kept so
 // tuneSplit's answer can be checked in a paired A/B. Codegen is microseconds, so
 // a second kernel is free.
+// mvTail is a batched twin's second launch (mv.tail).
+type mvTail struct {
+	kern    backend.Kernel
+	threads int
+}
+
 type mv struct {
 	kern backend.Kernel
+	// tail is a second launch of the batched twin over the tokens the first
+	// one's block does not divide (tileMV); it takes the same parameters.
+	tail *mvTail
 	red  backend.Kernel
 	rows int
 	// slots is 0 for an ordinary matvec and NExpertUsed for an indexed one, in
@@ -3604,7 +3613,7 @@ func (g *devTier) initRopeTable(bs *blockScratch, p *nn.LayerPlan, rows int) err
 	if err != nil {
 		return why("%v", err)
 	}
-	c, err := g.dev.Compile(k)
+	c, err := g.compileShared(k)
 	if err != nil {
 		return why("%s declined the rotary table: %v", g.dev.API(), err)
 	}
@@ -3619,24 +3628,24 @@ func (g *devTier) initRopeTable(bs *blockScratch, p *nn.LayerPlan, rows int) err
 		return b.Write(f32b(v))
 	}
 	if err := up(&bs.ropeTab, p.RopeTab); err != nil {
-		c.Close()
+		closeKern(c)
 		return err
 	}
 	if p.SWAPeriod > 0 {
 		if err := up(&bs.ropeTabSWA, p.RopeTabSWA); err != nil {
-			c.Close()
+			closeKern(c)
 			return err
 		}
 	}
 	if err := up(&bs.ropeConst, kernels.RopeTabConsts()); err != nil {
-		c.Close()
+		closeKern(c)
 		return err
 	}
 	// (rows+1) words, the first being the valid row count as in bs.n, so a
 	// ragged chunk's per-token staging is one small write (see kernels.RopeTable).
 	b, err := g.dev.Alloc((rows + 1) * 4)
 	if err != nil {
-		c.Close()
+		closeKern(c)
 		return err
 	}
 	// The table is zeroed once: the kernel writes only valid rows, so the padded
@@ -3649,7 +3658,7 @@ func (g *devTier) initRopeTable(bs *blockScratch, p *nn.LayerPlan, rows int) err
 			continue
 		}
 		if err := t.Write(z); err != nil {
-			c.Close()
+			closeKern(c)
 			b.Free()
 			return err
 		}
@@ -5087,7 +5096,7 @@ func (g *devTier) initScratch(p *nn.LayerPlan, rows int) (out *blockScratch) {
 		if k == nil {
 			continue // an optional kernel this architecture does not need
 		}
-		c, e := g.dev.Compile(k)
+		c, e := g.compileShared(k)
 		if e != nil {
 			g.LastErr = e.Error()
 			return nil
@@ -5192,7 +5201,7 @@ func (g *devTier) pickSoftmax(bs *blockScratch) bool {
 			g.LastErr = err.Error()
 			return nil
 		}
-		c, err := g.dev.Compile(k)
+		c, err := g.compileShared(k)
 		if err != nil {
 			g.LastErr = err.Error()
 			return nil
@@ -5237,9 +5246,9 @@ func (g *devTier) pickSoftmax(bs *blockScratch) bool {
 			bs.smAltGroups, bs.smAltWidth = scalarGroups, scalarWidth
 			return true
 		}
-		c.Close()
+		closeKern(c)
 	} else if c != nil {
-		c.Close()
+		closeKern(c)
 	}
 	c := build(1)
 	if c == nil {
@@ -5564,7 +5573,7 @@ func (g *devTier) PrepHead(h *nn.Head) bool {
 		}
 		b, e := g.dev.Alloc(h.W.Rows * 4)
 		if e != nil {
-			c.Close()
+			closeKern(c)
 			return false
 		}
 		bs.headCap, bs.logitsCap = c, b
@@ -5579,12 +5588,13 @@ func (g *devTier) PrepHead(h *nn.Head) bool {
 				if b, e := g.dev.Alloc(4); e == nil {
 					g.argmaxK, g.argmaxOut = c, b
 				} else {
-					c.Close()
+					closeKern(c)
 				}
 				w.close()
 			}
 		}
 	}
+	g.prewarmHeadKernels()
 	return true
 }
 
@@ -5714,7 +5724,34 @@ func (g *devTier) layersCall(sid uint64, lo, hi, pos, n int, x, cs, csSWA []floa
 		// The chunk's own width, or the width reserved at placement when the
 		// narrow one does not fit (scratch.go); with no reservation, the full
 		// width.
-		ww := g.batchFor(w)
+		// The chunk's own grain width first: batchFor rounds a width it has
+		// not built to a power of two, which is right for a step loop whose
+		// row count moves every step but ran a 415-token prompt over 512
+		// rows, a quarter of its arithmetic on padding. prepBatch refuses a
+		// width the budget has no room for, and the chunk then pads as before.
+		//
+		// One exact width lives at a time: each is budgeted beside the
+		// reservation, so a second one is what a full card refuses. The last
+		// is dropped (after every submission that may read it) before the
+		// next is built; its kernels stay in the caches.
+		ww := 0
+		if !g.NoExactPrompt && w != bw {
+			if g.bbs[w] == nil && g.exactW != 0 && g.exactW != w && g.exactW != g.promptW && g.exactW != g.stepW {
+				g.quiesce()
+				g.dropBatch(g.exactW)
+				g.exactW = 0
+			}
+			if g.bbs[w] != nil || g.prepBatch(w) {
+				ww = w
+				g.ExactPrompts++
+				if w != g.promptW && w != g.stepW {
+					g.exactW = w
+				}
+			}
+		}
+		if ww == 0 {
+			ww = g.batchFor(w)
+		}
 		if ww == 0 && w != bw && g.prepBatch(bw) {
 			ww = bw
 		}
@@ -6122,24 +6159,8 @@ func (g *devTier) layersOnce(sid uint64, bs *blockScratch, lo, hi, pos int, x, c
 		case kernels.IsFloat(hb.head.t) || hb.p.NEmbd != bs.p.NEmbd:
 			return refuse("a batched submission of %d rows with a %v head", bs.rows, hb.head.t)
 		}
-		if hb.spanK == nil {
-			kk, e := kernels.CopySpan(bs.p.NEmbd)
-			var k backend.Kernel
-			if e == nil {
-				k, e = g.dev.Compile(kk)
-			}
-			var ob backend.Buf
-			if e == nil {
-				w := g.scratchWin() // the scratch's own word (scratch.go)
-				if ob, e = g.dev.Alloc(4); e != nil {
-					k.Close()
-				}
-				w.close()
-			}
-			if e != nil {
-				return refuse("the folded head's row copy: %v", e)
-			}
-			hb.spanK, hb.spanOff = k, ob
+		if e := g.spanKernel(hb); e != nil {
+			return refuse("the folded head's row copy: %v", e)
 		}
 	}
 	if head != nil && (hb == nil || hb.head == nil || !hb.head.ok) {
@@ -6721,6 +6742,13 @@ func (g *devTier) layersSession(s backend.Session) {
 				lc.la(bm.kern, bm.threads, r.qs, d, r.sc, g.f16Buf, out, bm.bias)
 			} else {
 				lc.la(bm.kern, bm.threads, r.qs, d, r.sc, g.f16Buf, out)
+			}
+			if t := bm.tail; t != nil {
+				if bm.bias != nil {
+					lc.la(t.kern, t.threads, r.qs, d, r.sc, g.f16Buf, out, bm.bias)
+				} else {
+					lc.la(t.kern, t.threads, r.qs, d, r.sc, g.f16Buf, out)
+				}
 			}
 			if bm.split > 1 {
 				lc.la(bm.red, bm.redN, g.partBuf, dst)
@@ -7389,6 +7417,9 @@ func (g *devTier) layersSession(s backend.Session) {
 						if err == nil {
 							err = pk.pf.prefillAttn(s, lc, qAtt, kDst, vDst, bs.n, bs.xb, pgTab, win, sk)
 							g.PagedPrefillLaunches++
+							if pk.pf.flash != nil {
+								g.FlashPrefills++ // the paged one-kernel form, on any backend
+							}
 							g.PagedPrefillPasses += pk.pf.passes(win)
 							if pk.pf.on70() {
 								g.PagedPrefill70++
@@ -10622,7 +10653,7 @@ func (g *devTier) volta70Attn(bs *blockScratch, kvDim, gqa int, scale float32) b
 	if sk == nil || ak == nil || (p.SWAWindow > 0 && sw == nil) {
 		for _, k := range []backend.Kernel{sk, ak, sw} {
 			if k != nil {
-				k.Close()
+				closeKern(k)
 			}
 		}
 		return false
@@ -10641,7 +10672,7 @@ func (g *devTier) volta70Attn(bs *blockScratch, kvDim, gqa int, scale float32) b
 		if fk != nil && p.SWAWindow > 0 {
 			fs.Window = p.SWAWindow
 			if fw = comp(kernels.FlashPrefill70(fs)); fw == nil {
-				fk.Close()
+				closeKern(fk)
 				fk = nil
 			}
 		}
@@ -10721,9 +10752,35 @@ func (g *devTier) flashTileAttn(bs *blockScratch, kvDim, gqa int, scale float32)
 	if fk != nil && p.SWAWindow > 0 {
 		fs.Window = p.SWAWindow
 		if fw = comp(kernels.FlashPrefillTile(fs, t)); fw == nil {
-			fk.Close()
+			closeKern(fk)
 			fk = nil
 		}
 	}
 	bs.fpT, bs.fpTW, bs.fpTile = fk, fw, t
+}
+
+// spanKernel builds the decode scratch's row copy the folded head reads (a
+// chunk's last row into the decode scratch) if it has none. Callers hold g.mu.
+func (g *devTier) spanKernel(hb *blockScratch) error {
+	if hb.spanK != nil {
+		return nil
+	}
+	kk, e := kernels.CopySpan(hb.p.NEmbd)
+	var k backend.Kernel
+	if e == nil {
+		k, e = g.dev.Compile(kk)
+	}
+	var ob backend.Buf
+	if e == nil {
+		w := g.scratchWin() // the scratch's own word (scratch.go)
+		if ob, e = g.dev.Alloc(4); e != nil {
+			closeKern(k)
+		}
+		w.close()
+	}
+	if e != nil {
+		return e
+	}
+	hb.spanK, hb.spanOff = k, ob
+	return nil
 }

@@ -1188,28 +1188,45 @@ func (s *State) hostRows(li, slot, base, p0, n, chunkRows int, bidir bool) error
 		}
 	}
 	s.tock(opRMSNorm, tn)
-	// The linear layer is a per-row loop: each row's recurrent state
-	// depends on the row before it, and a batched form would be a
-	// different algorithm (a chunked scan). Row order keeps Prefill
-	// and Forward bit-identical.
+	// The linear layer's recurrence is a per-row loop: each row's state
+	// depends on the row before it, and a batched recurrence would be a
+	// different algorithm (a chunked scan). Its projections are not
+	// sequential and run as GEMMs over the chunk (linrows.go).
 	// A block that attends as well (Falcon-H1) leaves its mixer's rows in bhf
 	// and runs attention from the same bh.
 	kind := c.LayerKind(li)
 	if kind.Recurrent() {
+		// The projections as GEMMs over the chunk around the row loop
+		// (linrows.go); the rows overwrite bh, so the output projection
+		// waits for the loop to finish.
+		outRows := s.bh
+		if kind.Attends() {
+			outRows = s.bhf
+		}
+		batched := s.linearBatched()
+		if batched {
+			if err := s.linearPre(l, s.bh, n); err != nil {
+				return err
+			}
+		}
 		ta := s.tick()
 		for r := 0; r < n; r++ {
 			h := s.bh[r*c.NEmbd : (r+1)*c.NEmbd]
-			out := h
-			if kind.Attends() {
-				out = s.bhf[r*c.NEmbd : (r+1)*c.NEmbd]
-			}
+			out := outRows[r*c.NEmbd : (r+1)*c.NEmbd]
+			s.lin.r = r
 			s.jit.NewInput()
 			if err := s.linearAttn(li, l, slot, h, out); err != nil {
+				s.lin.on = false
 				return err
 			}
 			s.rows.snapRow(s, li, slot, base+r)
 		}
 		s.tock(opAttn, ta)
+		if batched {
+			if err := s.linearPost(li, l, outRows, n); err != nil {
+				return err
+			}
+		}
 	}
 	if !kind.Attends() {
 	} else if c.MLA() {

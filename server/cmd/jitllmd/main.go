@@ -28,6 +28,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -192,6 +193,19 @@ func serve(args []string) {
 	kvCache := fs.String("kv-cache", "",
 		"a directory sessions created with prompt_cache keep their prompt prefixes in; empty refuses such a session")
 	kvCacheMax := fs.String("kv-cache-max", "8G", "what -kv-cache may occupy before its least recently used pages go; 0 is unbounded")
+	imageAllow := fs.String("image-fetch-allow", "",
+		"comma-separated hosts a picture named by an http(s) URL may be fetched from (exact names, or *.example.com "+
+			"for one label under it); empty fetches nothing. Inline base64 pictures are always taken")
+	imageHTTP := fs.Bool("image-fetch-http", false, "let -image-fetch-allow fetch over plain http (default https only)")
+	imagePorts := fs.String("image-fetch-ports", "443,80", "comma-separated ports a fetch may connect to")
+	imageFetches := fs.Int("image-fetch-concurrency", server.DefaultImageFetchConcurrency,
+		"remote picture fetches running at once across the server")
+	imageMax := fs.String("image-max", "20M", "the most encoded bytes one picture in a request may be")
+	imageReqMax := fs.String("image-max-request", "64M", "the most encoded bytes all of a request's pictures may be")
+	imageDecode := fs.Duration("image-decode-timeout", server.DefaultImageDecodeTimeout, "how long decoding one picture may take")
+	imagePixels := fs.Int64("image-max-pixels", server.DefaultImageMaxPixels, "the most pixels (width x height) one picture may be")
+	imageCount := fs.Int("image-max-count", server.DefaultImageMaxImages, "the most pictures one request may carry")
+	imageTimeout := fs.Duration("image-fetch-timeout", server.DefaultImageFetchTimeout, "how long one remote picture fetch may take")
 	version := fs.String("version", version, "version string reported by GetServerInfo")
 	if err := fs.Parse(args); err != nil {
 		os.Exit(2)
@@ -223,6 +237,30 @@ func serve(args []string) {
 			fatal("-mem-cache-max: %v", err)
 		}
 		storeBytes = b
+	}
+
+	imageBytes, err := tier.ParseBytes(*imageMax)
+	if err != nil {
+		fatal("-image-max: %v", err)
+	}
+	imageReqBytes, err := tier.ParseBytes(*imageReqMax)
+	if err != nil {
+		fatal("-image-max-request: %v", err)
+	}
+	var ports []int
+	for _, f := range strings.Split(*imagePorts, ",") {
+		n, err := strconv.Atoi(strings.TrimSpace(f))
+		if err != nil {
+			fatal("-image-fetch-ports: %q is not a port", f)
+		}
+		ports = append(ports, n)
+	}
+	images, err := server.ImagePolicy{FetchAllow: strings.Split(*imageAllow, ","), FetchHTTP: *imageHTTP,
+		FetchPorts: ports, FetchConcurrency: *imageFetches, FetchTimeout: *imageTimeout,
+		DecodeTimeout: *imageDecode, MaxBytes: int64(imageBytes), MaxRequestBytes: int64(imageReqBytes),
+		MaxPixels: *imagePixels, MaxImages: *imageCount}.Validate()
+	if err != nil {
+		fatal("-image-fetch-allow: %v", err)
 	}
 
 	var hostBytes uint64
@@ -279,6 +317,7 @@ func serve(args []string) {
 		MaxQueue:      *maxQueue,
 		RetryAfter:    *retry,
 		WarmLoads:     *warm,
+		Images:        images,
 	})
 	defer e.Close()
 

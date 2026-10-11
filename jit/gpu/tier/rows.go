@@ -320,7 +320,7 @@ func (g *devTier) prepRowsHead(bs *blockScratch, rowsHead *nn.Head, n int) bool 
 		if bs.ragCap == nil {
 			b, err := g.dev.Alloc(R * head.nrows * 4)
 			if err != nil {
-				k.Close()
+				closeKern(k)
 				return fail(err)
 			}
 			bs.ragCap = b
@@ -448,6 +448,7 @@ type ragKey struct {
 	kind                               string
 	q                                  kernels.Quant
 	k, rows, ntok, r, tok, rowt, split int
+	off                                int // a tail launch's first token
 	tile                               [5]int
 	grp, bias                          bool
 	// epi and act are a few-sequence matvec's epilogue (groupKern).
@@ -887,13 +888,9 @@ func (g *devTier) tileMV(m mv, ntok int) (mv, bool) {
 		return mv{}, false
 	}
 	sub, _, _, _ := kernels.Layout(m.q)
-	for _, tl := range tileGemms {
-		tl.KB = max(32/sub, 1)
-		if m.rows%tl.Rows() != 0 || ntok%tl.Toks() != 0 {
-			continue
-		}
-		s := kernels.MatVecShape{Center: g.center, T: m.q, K: m.k, Rows: m.rows, NTok: ntok, Bias: m.bias != nil}
-		key := ragKey{kind: "gemmtile", q: m.q, k: m.k, rows: m.rows, ntok: ntok,
+	build := func(tl kernels.TileGemm, n int) (backend.Kernel, kernels.MatVecShape, bool) {
+		s := kernels.MatVecShape{Center: g.center, T: m.q, K: m.k, Rows: m.rows, NTok: n, Bias: m.bias != nil}
+		key := ragKey{kind: "gemmtile", q: m.q, k: m.k, rows: m.rows, ntok: n, off: tl.TokOff,
 			tile: [5]int{tl.MT, tl.NT, tl.WM, tl.WN, tl.KB}, bias: s.Bias}
 		c, ok := g.ragK[key]
 		if !ok {
@@ -903,13 +900,16 @@ func (g *devTier) tileMV(m mv, ntok int) (mv, bool) {
 			}
 			if err != nil {
 				g.tileOff, g.TileWhy = true, err.Error()
-				return mv{}, false
+				return nil, s, false
 			}
 			if g.ragK == nil {
 				g.ragK = map[ragKey]backend.Kernel{}
 			}
 			g.ragK[key] = c
 		}
+		return c, s, true
+	}
+	act := func() (backend.Kernel, bool) {
 		akey := ragKey{kind: "actf16t", q: m.q, ntok: ntok, k: m.k}
 		a, ok := g.ragK[akey]
 		if !ok {
@@ -920,14 +920,60 @@ func (g *devTier) tileMV(m mv, ntok int) (mv, bool) {
 			if err != nil {
 				a = nil
 			}
+			if g.ragK == nil {
+				g.ragK = map[ragKey]backend.Kernel{}
+			}
 			g.ragK[akey] = a
 		}
-		if a == nil || !g.sizeF16(ntok*m.k*2) {
+		return a, a != nil && g.sizeF16(ntok*m.k*2)
+	}
+	for wi, tl := range tileGemms {
+		tl.KB = max(32/sub, 1)
+		if m.rows%tl.Rows() != 0 {
+			continue
+		}
+		// The widest block over the leading tokens and the first narrower
+		// one that divides the rest over the tail, rather than the narrower
+		// block over the whole prompt (416 tokens: 384 at 64 wide, 32 at 32).
+		lead, rest := ntok, 0
+		if ntok%tl.Toks() != 0 {
+			if g.NoTileTail || ntok < tl.Toks() {
+				continue
+			}
+			lead, rest = ntok-ntok%tl.Toks(), ntok%tl.Toks()
+		}
+		var tail *mvTail
+		if rest > 0 {
+			for _, tt := range tileGemms[wi+1:] {
+				tt.KB, tt.TokOff = tl.KB, lead
+				if m.rows%tt.Rows() != 0 || rest%tt.Toks() != 0 {
+					continue
+				}
+				tk, ts, ok := build(tt, rest)
+				if !ok {
+					return mv{}, false
+				}
+				tail = &mvTail{kern: tk, threads: kernels.GemmTileGroups(ts, tt) * tt.Threads()}
+				break
+			}
+			if tail == nil {
+				continue
+			}
+		}
+		c, s, ok := build(tl, lead)
+		if !ok {
+			return mv{}, false
+		}
+		a, ok := act()
+		if !ok {
 			return mv{}, false
 		}
 		g.TileMV++
+		if tail != nil {
+			g.TileTail++
+		}
 		return mv{kern: c, act: a, actN: ntok * m.k / sub, rows: m.rows, split: 1, bias: m.bias,
-			q: m.q, k: m.k, threads: kernels.GemmTileGroups(s, tl) * tl.Threads(), redN: m.rows * ntok}, true
+			q: m.q, k: m.k, threads: kernels.GemmTileGroups(s, tl) * tl.Threads(), redN: m.rows * ntok, tail: tail}, true
 	}
 	return mv{}, false
 }
@@ -1098,7 +1144,7 @@ func (g *devTier) prepRagLinear(bs *blockScratch, n int) bool {
 		if err != nil {
 			for _, c := range []backend.Kernel{rk.conv, rk.shift, rk.delta} {
 				if c != nil {
-					c.Close()
+					closeKern(c)
 				}
 			}
 			return fail(err)

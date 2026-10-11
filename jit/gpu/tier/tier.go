@@ -172,6 +172,18 @@ type Config struct {
 	// device to the int8 path's precision (model's hybrid batch gate) asks for
 	// that with this one knob on every backend.
 	NoVolta bool
+	// NoTileTail keeps GemmTile to one blocking that divides the whole prompt
+	// rather than the widest block plus a tail launch (tileMV): the A/B arm
+	// and the bisection switch.
+	NoTileTail bool
+	// NoExactPrompt runs a prompt chunk in the batched scratch batchFor picks
+	// (a power of two) rather than one built at the chunk's own grain width:
+	// the A/B arm and the bisection switch.
+	NoExactPrompt bool
+	// NoPromptPrewarm leaves the exact prompt widths' kernels to the first
+	// prompt of each width (prewarmPromptWidths): the violation arm of the
+	// gate that a placed model's prompts compile nothing.
+	NoPromptPrewarm bool
 	// NoVoltaMoE keeps a batched mixture's expert matvecs on the dp4a grouped
 	// kernel where sm_70's grouped GemmVolta -- or Metal's grouped GemmTile --
 	// would run them (moegroup.go): the A/B arm for that, and its bisection
@@ -769,6 +781,9 @@ type Stats struct {
 	PagedPrefillLaunches int
 	// KVEvictions counts pages sent home (kvevict.go), one per layer-page.
 	KVEvictions int
+	// KVStageReads counts page reads the card refused a buffer for, which
+	// came home through the pool's reserve (readStaged).
+	KVStageReads int
 	// KVWindowReleased counts a windowed layer's pages released behind its
 	// window (devTier.windowPages), one per layer-page.
 	KVWindowReleased int
@@ -841,7 +856,8 @@ type Stats struct {
 	// HeadFolds counts batched chunks that ran the output projection on
 	// their last row inside their own submission.
 	HeadFolds int
-	// FlashPrefills counts batched attention launches of kernels.FlashPrefill70.
+	// FlashPrefills counts batched attention launches of a one-kernel form
+	// (kernels.FlashPrefill70, FlashPrefillTile), paged or not.
 	FlashPrefills int
 	// VisionAttnChunks counts the query chunks vision blocks ran their
 	// attention in (visionattn.go) -- the selection check that a large image's
@@ -854,6 +870,15 @@ type Stats struct {
 	// refused them.
 	TileMV  int
 	TileWhy string
+	// TileTail counts the GemmTile matvecs built as a wide block plus a tail
+	// launch at a token offset.
+	TileTail int
+	// ExactPrompts counts prompt chunks run in a scratch of their own grain
+	// width rather than a wider one they pad.
+	ExactPrompts int
+	// PromptWidthsWarmed counts the prompt grain widths whose kernels were
+	// built at the end of a placement (prewarmPromptWidths).
+	PromptWidthsWarmed int
 	// SoftmaxLanes is 32 when the device passed pickSoftmax's on-device check
 	// of the warp reduction, and 1 when it fell back to a thread per head. The
 	// two produce slightly different floats (a tree sum against a sequential
@@ -1071,6 +1096,7 @@ func (s *Stats) add(o Stats) {
 	s.PagedPrefillLaunches += o.PagedPrefillLaunches
 	s.PagedStagedLaunches += o.PagedStagedLaunches
 	s.KVEvictions += o.KVEvictions
+	s.KVStageReads += o.KVStageReads
 	s.KVWindowReleased += o.KVWindowReleased
 	s.KVStreamPasses += o.KVStreamPasses
 	s.StagedPasses += o.StagedPasses
@@ -1095,6 +1121,9 @@ func (s *Stats) add(o Stats) {
 		s.MMAWhy = o.MMAWhy
 	}
 	s.TileMV += o.TileMV
+	s.TileTail += o.TileTail
+	s.ExactPrompts += o.ExactPrompts
+	s.PromptWidthsWarmed += o.PromptWidthsWarmed
 	if o.TileWhy != "" {
 		s.TileWhy = o.TileWhy
 	}
@@ -1385,7 +1414,14 @@ type devShared struct {
 	// kvPromise is the positions of history a scheduler has admitted rows
 	// for and they have not yet taken (GPU.PromiseKV, kvroom.go).
 	kvPromise int
-	winDepth  int
+	// kvTight says the driver refused the KV pool a growth the budget
+	// allowed: the card holds less than the budget says (other processes on
+	// it, or a budget set past what was free), so KVRoom counts growth only
+	// up to what the driver reports free, asked each time, and a scheduler
+	// holds rows back rather than admitting history the card cannot take.
+	// A growth that succeeds, or a new budget, clears it.
+	kvTight  bool
+	winDepth int
 	// geoUsed says a split plan was ever placed here (gemma4.go).
 	geoUsed bool
 	// reserving is set while reserveScratch probes widths, so prepBatch's
@@ -1485,6 +1521,7 @@ type devShared struct {
 	ragKerns            map[moeKernKey]backend.Kernel // a batched mixture's grouped matvecs (moegroup.go)
 	moeVolta            map[moeVoltaKey]moeVoltaMV    // their tensor-core twins; see voltaGroupedMV
 	ragK                map[ragKey]backend.Kernel     // a ragged step's matvecs; see ragMV
+	kshared             map[string]backend.Kernel     // scratch kernels by content; see compileShared
 	// convK, conv and convN are the convolutional blocks' kernels, their
 	// shared scratch and how many hold it (conv.go).
 	convK   map[convKey]backend.Kernel
@@ -2003,7 +2040,7 @@ func freeScratch(bs *blockScratch) {
 	for n, rk := range bs.ragLin { // a map, which the walk does not follow either
 		for _, k := range []backend.Kernel{rk.conv, rk.shift, rk.delta} {
 			if k != nil {
-				k.Close()
+				closeKern(k)
 			}
 		}
 		delete(bs.ragLin, n)
@@ -2026,7 +2063,7 @@ func freeScratch(bs *blockScratch) {
 				Elem().Interface().(backend.Kernel)
 			if ok && k != nil && !seenK[k] {
 				seenK[k] = true
-				k.Close()
+				closeKern(k)
 			}
 			continue
 		}
@@ -2135,11 +2172,11 @@ func (g *devTier) Close() {
 	// on one would panic.
 	for _, k := range g.kerns {
 		if k != nil {
-			k.Close()
+			closeKern(k)
 		}
 	}
 	for _, k := range g.idKerns {
-		k.Close()
+		closeKern(k)
 	}
 	for _, r := range g.res {
 		if r.ok {
@@ -2152,11 +2189,11 @@ func (g *devTier) Close() {
 	}
 	for _, k := range g.reduce {
 		if k != nil {
-			k.Close()
+			closeKern(k)
 		}
 	}
 	for _, k := range g.restrides {
-		k.Close()
+		closeKern(k)
 	}
 	// Every layer left the pool with its block; what remains is the pool
 	// itself and its charge.
@@ -2171,7 +2208,7 @@ func (g *devTier) Close() {
 	g.closePick()
 	g.lane0.freePick()
 	for _, k := range g.recCopies {
-		k.Close()
+		closeKern(k)
 	}
 	g.freeAltNorms()
 	if g.recNext != nil {
@@ -2179,33 +2216,34 @@ func (g *devTier) Close() {
 	}
 	for _, k := range g.segKerns {
 		if k != nil {
-			k.Close()
+			closeKern(k)
 		}
 	}
 	for _, k := range g.ragKerns {
 		if k != nil {
-			k.Close()
+			closeKern(k)
 		}
 	}
 	for _, k := range g.ragK {
 		if k != nil {
-			k.Close()
+			closeKern(k)
 		}
 	}
 	for _, k := range g.convK {
 		if k != nil {
-			k.Close()
+			closeKern(k)
 		}
 	}
 	for _, k := range g.unks {
 		if k != nil {
-			k.Close()
+			closeKern(k)
 		}
 	}
 	g.dropGraph()
 	// The block scratches, which nothing else frees (see freeScratch), and
 	// the staging, refunded as they go.
 	g.dropAllScratch()
+	g.closeShared()
 	if g.rawBuf != nil {
 		g.rawBuf.Free()
 	}

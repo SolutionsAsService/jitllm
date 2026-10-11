@@ -117,7 +117,7 @@ func (g *devTier) initPagedPrefill(bs *blockScratch) error {
 		if err != nil {
 			return nil
 		}
-		c, err := g.dev.Compile(k)
+		c, err := g.compileShared(k)
 		if err != nil {
 			return nil
 		}
@@ -147,7 +147,7 @@ func (g *devTier) initPagedPrefill(bs *blockScratch) error {
 	if pf.flash != nil && p.AttnSinks {
 		ms := kernels.FlashShape{Heads: p.NHead, KVHeads: p.NKVHead, Dim: hd, Rows: rows, Splits: 1, Sink: true}
 		if pf.fmerge = comp(kernels.FlashAttentionMergeWide(ms)); pf.fmerge == nil {
-			pf.flash.Close()
+			closeKern(pf.flash)
 			pf.flash = nil
 		} else if err := g.prefillBuf(&pf.part, &pf.partFloats, kernels.FlashPartialFloats(ms)); err != nil {
 			pf.free()
@@ -334,7 +334,7 @@ func (g *devTier) prefillVariantAt(bs *blockScratch, pf *pagedPrefill, chunk, sp
 	v.softG, v.softW = kernels.PagedPrefillSoftmaxGroups(s, pf.lanes), kernels.PagedPrefillSoftmaxWidth(pf.lanes)
 	cs := []*backend.Kernel{&v.scores, &v.soft, &v.acc}
 	for i, k := range []*ir.Kernel{ks, kf, ka} {
-		c, err := g.dev.Compile(k)
+		c, err := g.compileShared(k)
 		if err != nil {
 			v.close()
 			return nil, fmt.Errorf("paged prefill at %d keys: %w", chunk*max(1, splits), err)
@@ -360,7 +360,7 @@ func (g *devTier) prefillVariantAt(bs *blockScratch, pf *pagedPrefill, chunk, sp
 func (v *prefillVariant) close() {
 	for _, k := range []backend.Kernel{v.scores, v.soft, v.acc} {
 		if k != nil {
-			k.Close()
+			closeKern(k)
 		}
 	}
 }
@@ -375,7 +375,7 @@ func (pf *pagedPrefill) free() {
 	}
 	for _, k := range []backend.Kernel{pf.flash, pf.fmerge, pf.mFirst, pf.mFold, pf.mFin} {
 		if k != nil {
-			k.Close()
+			closeKern(k)
 		}
 	}
 	bufs := []backend.Buf{pf.sc, pf.wt, pf.part, pf.run[0], pf.run[1], pf.buf[0], pf.buf[1]}
