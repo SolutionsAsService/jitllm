@@ -154,6 +154,9 @@ func (g *devTier) dropBatch(w int) {
 	if g.stepW == w {
 		g.stepW = 0
 	}
+	if g.exactW == w {
+		g.exactW = 0
+	}
 }
 
 // dropAllScratch frees every scratch and the staging: what a device holding
@@ -367,6 +370,12 @@ func (g *devTier) batchFor(w int) int {
 // switched off, has nothing to warm.
 func (g *GPU) prewarmPromptWidths() {
 	for _, d := range g.devs {
+		// The decode retune compiles its candidate splits; run at the first
+		// token it put those compiles, on a cold shader cache seconds of
+		// them, inside the decode. Placement is done, so it runs here.
+		if !d.NoPromptPrewarm {
+			d.retuneDecode()
+		}
 		d.mu.Lock()
 		d.prewarmPromptWidths()
 		d.mu.Unlock()

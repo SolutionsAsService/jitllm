@@ -1,6 +1,7 @@
 package model
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -18,7 +19,9 @@ import (
 // token.
 //
 // JITLLM_VIOLATE_PROMPT_PREWARM=1 switches the prewarm off (Config.
-// NoPromptPrewarm), which must fail.
+// NoPromptPrewarm), which must fail. Both tuning modes run: the shipping
+// default (TuneAuto) retunes the decode's splits, compiling candidates, and
+// that belongs to the placement too.
 func TestPlacedPromptsCompileNothing(t *testing.T) {
 	violate := os.Getenv("JITLLM_VIOLATE_PROMPT_PREWARM") != ""
 	ran := 0
@@ -30,68 +33,70 @@ func TestPlacedPromptsCompileNothing(t *testing.T) {
 				continue
 			}
 		}
-		t.Run(name, func(t *testing.T) {
-			g, err := tier.OpenWith(tier.WithDeviceTune(tier.TuneOff),
-				tier.WithConfig(func(c *tier.Config) { c.NoPromptPrewarm = violate }))
-			if err != nil || g == nil {
-				t.Skipf("no GPU device: %v", err)
-			}
-			defer g.Close()
-			m, err := Open(jlmOf(t, p), noTune)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer m.Close()
-			text := strings.Repeat("The river rose every spring until the bridges were islands, "+
-				"and the clerk counted barrels of salt on the upper floor. ", 40)
-			ids := m.Vocab.Encode(text, true)
-			chunks := []int{37, 200, 150} // grain widths 64, 224 and 160
-			total := 0
-			for _, n := range chunks {
-				total += n
-			}
-			if len(ids) < total {
-				t.Fatalf("%d prompt tokens, %d wanted", len(ids), total)
-			}
-			s := m.NewState(total + 8)
-			defer s.Close()
-			if err := s.SetDevice(g); err != nil {
-				t.Fatal(err)
-			}
-			if s.GPULayers() != m.Cfg.NLayer {
-				t.Fatalf("the device took %d of %d blocks: %s", s.GPULayers(), m.Cfg.NLayer, g.Err())
-			}
-			c0 := backend.Compiles()
-			backend.CompileLog = func(n string) { t.Logf("compiled after placement: %s", n) }
-			defer func() { backend.CompileLog = nil }()
-			off := 0
-			var l []float32
-			for _, n := range chunks {
-				if l, err = s.Prefill(ids[off : off+n]); err != nil {
+		for _, tune := range []tier.TuneMode{tier.TuneOff, tier.TuneAuto} {
+			t.Run(fmt.Sprintf("%s/tune%d", name, tune), func(t *testing.T) {
+				g, err := tier.OpenWith(tier.WithDeviceTune(tune),
+					tier.WithConfig(func(c *tier.Config) { c.NoPromptPrewarm = violate }))
+				if err != nil || g == nil {
+					t.Skipf("no GPU device: %v", err)
+				}
+				defer g.Close()
+				m, err := Open(jlmOf(t, p), noTune)
+				if err != nil {
 					t.Fatal(err)
 				}
-				off += n
-				t.Logf("after %d: exact %d, %d placed, demotions %d, err %q", off, g.Stats().ExactPrompts,
-					s.GPULayers(), s.DeviceDemotions(), g.Err())
-			}
-			for i := 0; i < 2; i++ {
-				if l, err = s.Forward(argmaxID(l)); err != nil {
+				defer m.Close()
+				text := strings.Repeat("The river rose every spring until the bridges were islands, "+
+					"and the clerk counted barrels of salt on the upper floor. ", 40)
+				ids := m.Vocab.Encode(text, true)
+				chunks := []int{37, 200, 150} // grain widths 64, 224 and 160
+				total := 0
+				for _, n := range chunks {
+					total += n
+				}
+				if len(ids) < total {
+					t.Fatalf("%d prompt tokens, %d wanted", len(ids), total)
+				}
+				s := m.NewState(total + 8)
+				defer s.Close()
+				if err := s.SetDevice(g); err != nil {
 					t.Fatal(err)
 				}
-			}
-			st := g.Stats()
-			got := backend.Compiles() - c0
-			t.Logf("%d compile(s) after placement; %d exact prompt chunk(s), %d width(s) warmed",
-				got, st.ExactPrompts, st.PromptWidthsWarmed)
-			if st.ExactPrompts < len(chunks) {
-				t.Fatalf("%d of %d chunks ran at their own width: the warmed widths were not the ones used",
-					st.ExactPrompts, len(chunks))
-			}
-			if got != 0 {
-				t.Fatalf("%d kernel(s) compiled after the blocks were placed", got)
-			}
-			ran++
-		})
+				if s.GPULayers() != m.Cfg.NLayer {
+					t.Fatalf("the device took %d of %d blocks: %s", s.GPULayers(), m.Cfg.NLayer, g.Err())
+				}
+				c0 := backend.Compiles()
+				backend.CompileLog = func(n string) { t.Logf("compiled after placement: %s", n) }
+				defer func() { backend.CompileLog = nil }()
+				off := 0
+				var l []float32
+				for _, n := range chunks {
+					if l, err = s.Prefill(ids[off : off+n]); err != nil {
+						t.Fatal(err)
+					}
+					off += n
+					t.Logf("after %d: exact %d, %d placed, demotions %d, err %q", off, g.Stats().ExactPrompts,
+						s.GPULayers(), s.DeviceDemotions(), g.Err())
+				}
+				for i := 0; i < 2; i++ {
+					if l, err = s.Forward(argmaxID(l)); err != nil {
+						t.Fatal(err)
+					}
+				}
+				st := g.Stats()
+				got := backend.Compiles() - c0
+				t.Logf("%d compile(s) after placement; %d exact prompt chunk(s), %d width(s) warmed",
+					got, st.ExactPrompts, st.PromptWidthsWarmed)
+				if st.ExactPrompts < len(chunks) {
+					t.Fatalf("%d of %d chunks ran at their own width: the warmed widths were not the ones used",
+						st.ExactPrompts, len(chunks))
+				}
+				if got != 0 {
+					t.Fatalf("%d kernel(s) compiled after the blocks were placed", got)
+				}
+				ran++
+			})
+		}
 	}
 	if ran == 0 {
 		testmodels.Missing(t, "no model ran: this gate proved nothing (set JITLLM_MODELS)")

@@ -5729,10 +5729,25 @@ func (g *devTier) layersCall(sid uint64, lo, hi, pos, n int, x, cs, csSWA []floa
 		// row count moves every step but ran a 415-token prompt over 512
 		// rows, a quarter of its arithmetic on padding. prepBatch refuses a
 		// width the budget has no room for, and the chunk then pads as before.
+		//
+		// One exact width lives at a time: each is budgeted beside the
+		// reservation, so a second one is what a full card refuses. The last
+		// is dropped (after every submission that may read it) before the
+		// next is built; its kernels stay in the caches.
 		ww := 0
-		if !g.NoExactPrompt && w != bw && (g.bbs[w] != nil || g.prepBatch(w)) {
-			ww = w
-			g.ExactPrompts++
+		if !g.NoExactPrompt && w != bw {
+			if g.bbs[w] == nil && g.exactW != 0 && g.exactW != w && g.exactW != g.promptW && g.exactW != g.stepW {
+				g.quiesce()
+				g.dropBatch(g.exactW)
+				g.exactW = 0
+			}
+			if g.bbs[w] != nil || g.prepBatch(w) {
+				ww = w
+				g.ExactPrompts++
+				if w != g.promptW && w != g.stepW {
+					g.exactW = w
+				}
+			}
 		}
 		if ww == 0 {
 			ww = g.batchFor(w)
