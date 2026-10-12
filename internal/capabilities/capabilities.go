@@ -54,6 +54,9 @@ type Manifest struct {
 	// docs/capabilities.json, which describes the source tree, and filled by
 	// Build().
 	Build *BuildInfo `json:"build,omitempty"`
+	// ServerAPI is the serving jitllmd's control-plane compatibility version
+	// (localserver.APIVersion), absent outside a running server.
+	ServerAPI int `json:"server_api,omitempty"`
 	// Container is the .jlm format version this build reads; it reads no
 	// other (there is no backward compatibility, on purpose).
 	Container          ContainerInfo `json:"container"`

@@ -31,8 +31,28 @@ type ServerInfo struct {
 	AvailableBackends []string `protobuf:"bytes,5,rep,name=available_backends,json=availableBackends,proto3" json:"available_backends,omitempty"`
 	LoadedModels      int32    `protobuf:"varint,6,opt,name=loaded_models,json=loadedModels,proto3" json:"loaded_models,omitempty"`
 	OpenSessions      int32    `protobuf:"varint,7,opt,name=open_sessions,json=openSessions,proto3" json:"open_sessions,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// The VCS revision the binary was built from ("unknown" when the toolchain
+	// embedded none), and whether the tree had local changes.
+	Revision string `protobuf:"bytes,8,opt,name=revision,proto3" json:"revision,omitempty"`
+	Modified bool   `protobuf:"varint,9,opt,name=modified,proto3" json:"modified,omitempty"`
+	// The control plane's compatibility version. It changes only when a field
+	// changes meaning or goes away -- adding one does not -- so a client built
+	// against a different number refuses rather than misreading the answers.
+	ApiVersion int32 `protobuf:"varint,10,opt,name=api_version,json=apiVersion,proto3" json:"api_version,omitempty"`
+	// GOOS and GOARCH of the serving process.
+	Os   string `protobuf:"bytes,11,opt,name=os,proto3" json:"os,omitempty"`
+	Arch string `protobuf:"bytes,12,opt,name=arch,proto3" json:"arch,omitempty"`
+	// Every device the server enumerated, with its spendable memory.
+	Devices []*Device `protobuf:"bytes,13,rep,name=devices,proto3" json:"devices,omitempty"`
+	// The capability manifest (GET /v1/capabilities) as JSON: architectures,
+	// projectors, quantizations, backends and the HTTP routes this build
+	// serves. It carries its own schema number.
+	CapabilitiesJson string `protobuf:"bytes,14,opt,name=capabilities_json,json=capabilitiesJson,proto3" json:"capabilities_json,omitempty"`
+	// Named features of this server a client switches its own on by, in
+	// addition to the manifest (for example "model_aliases").
+	Features      []string `protobuf:"bytes,15,rep,name=features,proto3" json:"features,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ServerInfo) Reset() {
@@ -112,6 +132,62 @@ func (x *ServerInfo) GetOpenSessions() int32 {
 		return x.OpenSessions
 	}
 	return 0
+}
+
+func (x *ServerInfo) GetRevision() string {
+	if x != nil {
+		return x.Revision
+	}
+	return ""
+}
+
+func (x *ServerInfo) GetModified() bool {
+	if x != nil {
+		return x.Modified
+	}
+	return false
+}
+
+func (x *ServerInfo) GetApiVersion() int32 {
+	if x != nil {
+		return x.ApiVersion
+	}
+	return 0
+}
+
+func (x *ServerInfo) GetOs() string {
+	if x != nil {
+		return x.Os
+	}
+	return ""
+}
+
+func (x *ServerInfo) GetArch() string {
+	if x != nil {
+		return x.Arch
+	}
+	return ""
+}
+
+func (x *ServerInfo) GetDevices() []*Device {
+	if x != nil {
+		return x.Devices
+	}
+	return nil
+}
+
+func (x *ServerInfo) GetCapabilitiesJson() string {
+	if x != nil {
+		return x.CapabilitiesJson
+	}
+	return ""
+}
+
+func (x *ServerInfo) GetFeatures() []string {
+	if x != nil {
+		return x.Features
+	}
+	return nil
 }
 
 type PoolStats struct {
@@ -1009,7 +1085,7 @@ var File_jitllm_v1_telemetry_proto protoreflect.FileDescriptor
 
 const file_jitllm_v1_telemetry_proto_rawDesc = "" +
 	"\n" +
-	"\x19jitllm/v1/telemetry.proto\x12\tjitllm.v1\x1a\x16jitllm/v1/device.proto\x1a\x19jitllm/v1/placement.proto\"\x9d\x02\n" +
+	"\x19jitllm/v1/telemetry.proto\x12\tjitllm.v1\x1a\x16jitllm/v1/device.proto\x1a\x19jitllm/v1/placement.proto\"\x90\x04\n" +
 	"\n" +
 	"ServerInfo\x12\x18\n" +
 	"\aversion\x18\x01 \x01(\tR\aversion\x12'\n" +
@@ -1018,7 +1094,17 @@ const file_jitllm_v1_telemetry_proto_rawDesc = "" +
 	"\ruptime_millis\x18\x04 \x01(\x03R\fuptimeMillis\x12-\n" +
 	"\x12available_backends\x18\x05 \x03(\tR\x11availableBackends\x12#\n" +
 	"\rloaded_models\x18\x06 \x01(\x05R\floadedModels\x12#\n" +
-	"\ropen_sessions\x18\a \x01(\x05R\fopenSessions\"w\n" +
+	"\ropen_sessions\x18\a \x01(\x05R\fopenSessions\x12\x1a\n" +
+	"\brevision\x18\b \x01(\tR\brevision\x12\x1a\n" +
+	"\bmodified\x18\t \x01(\bR\bmodified\x12\x1f\n" +
+	"\vapi_version\x18\n" +
+	" \x01(\x05R\n" +
+	"apiVersion\x12\x0e\n" +
+	"\x02os\x18\v \x01(\tR\x02os\x12\x12\n" +
+	"\x04arch\x18\f \x01(\tR\x04arch\x12+\n" +
+	"\adevices\x18\r \x03(\v2\x11.jitllm.v1.DeviceR\adevices\x12+\n" +
+	"\x11capabilities_json\x18\x0e \x01(\tR\x10capabilitiesJson\x12\x1a\n" +
+	"\bfeatures\x18\x0f \x03(\tR\bfeatures\"w\n" +
 	"\tPoolStats\x12)\n" +
 	"\x10parallel_regions\x18\x01 \x01(\x03R\x0fparallelRegions\x12%\n" +
 	"\x0einline_regions\x18\x02 \x01(\x03R\rinlineRegions\x12\x18\n" +
@@ -1134,32 +1220,33 @@ var file_jitllm_v1_telemetry_proto_goTypes = []any{
 	(*WatchStatsRequest)(nil),     // 9: jitllm.v1.WatchStatsRequest
 	(*GetServerInfoRequest)(nil),  // 10: jitllm.v1.GetServerInfoRequest
 	(*GetServerInfoResponse)(nil), // 11: jitllm.v1.GetServerInfoResponse
-	(*Residency)(nil),             // 12: jitllm.v1.Residency
-	(*Device)(nil),                // 13: jitllm.v1.Device
+	(*Device)(nil),                // 12: jitllm.v1.Device
+	(*Residency)(nil),             // 13: jitllm.v1.Residency
 	(*HostMemory)(nil),            // 14: jitllm.v1.HostMemory
 }
 var file_jitllm_v1_telemetry_proto_depIdxs = []int32{
-	12, // 0: jitllm.v1.ModelStats.residency:type_name -> jitllm.v1.Residency
-	4,  // 1: jitllm.v1.ModelStats.batch:type_name -> jitllm.v1.BatchStats
-	5,  // 2: jitllm.v1.BatchStats.choices:type_name -> jitllm.v1.JointChoice
-	1,  // 3: jitllm.v1.SessionStats.pool:type_name -> jitllm.v1.PoolStats
-	2,  // 4: jitllm.v1.SessionStats.mixture:type_name -> jitllm.v1.MixtureStats
-	3,  // 5: jitllm.v1.GetStatsResponse.models:type_name -> jitllm.v1.ModelStats
-	6,  // 6: jitllm.v1.GetStatsResponse.sessions:type_name -> jitllm.v1.SessionStats
-	13, // 7: jitllm.v1.GetStatsResponse.devices:type_name -> jitllm.v1.Device
-	14, // 8: jitllm.v1.GetStatsResponse.host:type_name -> jitllm.v1.HostMemory
-	0,  // 9: jitllm.v1.GetServerInfoResponse.info:type_name -> jitllm.v1.ServerInfo
-	7,  // 10: jitllm.v1.TelemetryService.GetStats:input_type -> jitllm.v1.GetStatsRequest
-	9,  // 11: jitllm.v1.TelemetryService.WatchStats:input_type -> jitllm.v1.WatchStatsRequest
-	10, // 12: jitllm.v1.TelemetryService.GetServerInfo:input_type -> jitllm.v1.GetServerInfoRequest
-	8,  // 13: jitllm.v1.TelemetryService.GetStats:output_type -> jitllm.v1.GetStatsResponse
-	8,  // 14: jitllm.v1.TelemetryService.WatchStats:output_type -> jitllm.v1.GetStatsResponse
-	11, // 15: jitllm.v1.TelemetryService.GetServerInfo:output_type -> jitllm.v1.GetServerInfoResponse
-	13, // [13:16] is the sub-list for method output_type
-	10, // [10:13] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	12, // 0: jitllm.v1.ServerInfo.devices:type_name -> jitllm.v1.Device
+	13, // 1: jitllm.v1.ModelStats.residency:type_name -> jitllm.v1.Residency
+	4,  // 2: jitllm.v1.ModelStats.batch:type_name -> jitllm.v1.BatchStats
+	5,  // 3: jitllm.v1.BatchStats.choices:type_name -> jitllm.v1.JointChoice
+	1,  // 4: jitllm.v1.SessionStats.pool:type_name -> jitllm.v1.PoolStats
+	2,  // 5: jitllm.v1.SessionStats.mixture:type_name -> jitllm.v1.MixtureStats
+	3,  // 6: jitllm.v1.GetStatsResponse.models:type_name -> jitllm.v1.ModelStats
+	6,  // 7: jitllm.v1.GetStatsResponse.sessions:type_name -> jitllm.v1.SessionStats
+	12, // 8: jitllm.v1.GetStatsResponse.devices:type_name -> jitllm.v1.Device
+	14, // 9: jitllm.v1.GetStatsResponse.host:type_name -> jitllm.v1.HostMemory
+	0,  // 10: jitllm.v1.GetServerInfoResponse.info:type_name -> jitllm.v1.ServerInfo
+	7,  // 11: jitllm.v1.TelemetryService.GetStats:input_type -> jitllm.v1.GetStatsRequest
+	9,  // 12: jitllm.v1.TelemetryService.WatchStats:input_type -> jitllm.v1.WatchStatsRequest
+	10, // 13: jitllm.v1.TelemetryService.GetServerInfo:input_type -> jitllm.v1.GetServerInfoRequest
+	8,  // 14: jitllm.v1.TelemetryService.GetStats:output_type -> jitllm.v1.GetStatsResponse
+	8,  // 15: jitllm.v1.TelemetryService.WatchStats:output_type -> jitllm.v1.GetStatsResponse
+	11, // 16: jitllm.v1.TelemetryService.GetServerInfo:output_type -> jitllm.v1.GetServerInfoResponse
+	14, // [14:17] is the sub-list for method output_type
+	11, // [11:14] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_jitllm_v1_telemetry_proto_init() }
