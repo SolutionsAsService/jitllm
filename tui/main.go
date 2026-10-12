@@ -8,6 +8,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -42,6 +43,10 @@ func main() {
 	e := engine.New(f, f.st)
 	defer e.Close()
 
+	// Asked before the API starts (root.Init), or the probe would find this app.
+	if _, warning, ok := engine.Beside(context.Background(), ""); ok {
+		f.st.Status.Set(warning)
+	}
 	r := newRoot(f, e, cfg, dirs)
 	defer func() {
 		if r.env.api != nil {

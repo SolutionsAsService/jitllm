@@ -15,8 +15,11 @@ import Surfaces from '../../../../components/fig/Surfaces.astro'
 | `POST /v1/embeddings` | OpenAI embeddings |
 | `/v1/files`, `/v1/batches` | OpenAI Files and Batch APIs |
 | `POST /v1/messages` | Anthropic messages |
+| `POST /v1/systemone` | a decision model's answers (jitllm's own) |
 | `/jitllm.v1.*` | the Connect control plane (Connect, gRPC and gRPC-Web) |
-| `GET /healthz` | returns `ok` |
+| `GET /v1/capabilities` | what this build serves: every route, each request field and its limits, and the combinations refused |
+| `GET /metrics` | engine counters in Prometheus text format |
+| `GET /healthz`, `GET /health` | returns `ok` |
 
 <Surfaces />
 
@@ -30,7 +33,7 @@ jitllmd serve -addr 127.0.0.1:8080 -models ./models \
 | Flag | Default | Meaning |
 |---|---|---|
 | `-addr` | `:8080` | listen address |
-| `-models DIR` | a developer path | directory scanned by the model list and used to resolve a bare model name. Always pass it. |
+| `-models DIR` | `JITLLM_MODELS`, else `models` | directory scanned by the model list and used to resolve a bare model name |
 | `-load FILE` | | a `.jlm` to load at startup, absolute or relative to `-models` |
 | `-id NAME` | generated (`m-…`) | the model name clients send. The file name without `.jlm` works too. |
 | `-devices SPEC` | CPU only | where to run it, in the [device grammar](/docs/guides/devices/#the-device-grammar). Empty opens no device. |
@@ -184,7 +187,7 @@ curl http://127.0.0.1:8080/v1/chat/completions \
 
 The model's output is parsed back into `tool_calls` (OpenAI) or `tool_use` blocks (Anthropic). While streaming, ordinary text streams as it arrives; text that is, or may be becoming, a call is held back and emitted as a call once it parses. Send the tool's result back as a `tool` message (OpenAI) or a `tool_result` block (Anthropic) and the conversation continues.
 
-`tool_choice: "none"` (Anthropic: `{"type": "none"}`) withholds the tools. `"auto"`, `"required"` and a named function are all treated as `"auto"`: the prompt offers the tools, and nothing forces the sampler to call one.
+`tool_choice: "none"` (Anthropic: `{"type": "none"}`) withholds the tools, and `"auto"` (the default) lets the model call one or answer. `"required"` and a named function (Anthropic: `{"type": "any"}` and `{"type": "tool", "name": ...}`) force a call: the reply is sampled under a grammar that admits only a call to a declared tool, or to the named one. `parallel_tool_calls: false` (Anthropic: `disable_parallel_tool_use`) limits the reply to one call.
 
 Two call formats are parsed, which cover the models trained for tools: Hermes-style `<tool_call>{...}</tool_call>` blocks (Qwen2.5, Qwen3 and most fine-tunes), and a bare JSON call opening the reply (Llama 3.1 and 3.2, Mistral v0.3). Only a call to a tool you declared counts, so a model asked to answer in JSON does not have its answer taken for a call.
 
@@ -238,6 +241,10 @@ jitllmd run -session SESSION -continue "and then?"       # continue from its pos
 ```
 
 `SESSION` is the id `sessions -new` printed. `place -devices` must name devices the model was loaded with, and `place` with no `-devices` brings every block home to the CPU. A move waits for the session's current generation to finish, and the conversation keeps its history: the KV cache and any recurrent state move with the blocks. `jitllmd <verb> -h` lists each verb's flags; the [CLI reference](/docs/reference/cli/#jitllmd) has them all.
+
+## Ask the server what it serves
+
+`GET /v1/capabilities` returns the same manifest as `jitllm capabilities -json`, for the running build: the architectures and quantizations it converts and runs, each backend and the hardware it is verified on, every route with its request fields and their limits, and the combinations the server refuses rather than ignores, each with the message it returns. An agent or a client can read it before sending anything. On the machine itself, `jitllm doctor` says whether this build can run here, and what to do about anything missing.
 
 ## The Connect API
 

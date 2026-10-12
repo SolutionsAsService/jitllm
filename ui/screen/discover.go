@@ -166,6 +166,16 @@ func SetBalance(sh *app.Shell, step int) {
 	downloadsFor(sh).pref.Set(min(max(step, 0), len(discover.BalanceSteps)-1))
 }
 
+// ShowDownload puts Discover in the state a download in flight leaves it:
+// busy, the bar at fraction, the note beside it. The mock scenarios paint it
+// without a Hub.
+func ShowDownload(sh *app.Shell, fraction float64, note string) {
+	d := downloadsFor(sh)
+	d.busy.Set(true)
+	d.progress.Set(fraction)
+	d.note.Set(note)
+}
+
 // --- the ranking -----------------------------------------------------------------
 
 // order is the current ranking.
@@ -294,11 +304,20 @@ func (d *downloadScreen) panel() widget.Widget {
 		button.OnClick(d.act),
 		button.PainterOpt(p.Button),
 	)
-	bar := widgets.Hide(d.busy.AsReadonly(), progressbar.New(
-		progressbar.ValueReadonlySignal(d.progress.AsReadonly()),
-		progressbar.ColorSchemeOpt(p.ProgressBar),
-		progressbar.Height(6),
-	))
+	bar := widgets.Hide(d.busy.AsReadonly(), primitives.HBox(
+		primitives.Expanded(progressbar.New(
+			progressbar.ValueReadonlySignal(d.progress.AsReadonly()),
+			progressbar.ColorSchemeOpt(p.ProgressBar),
+			progressbar.Height(6),
+		)),
+		button.New(
+			button.TextOpt("Stop"),
+			button.SizeOpt(button.Small),
+			button.VariantOpt(button.Outlined),
+			button.OnClick(d.cancel),
+			button.PainterOpt(p.Button),
+		),
+	).Gap(p.Space.S).CrossAlign(primitives.CrossAxisCenter))
 	none := state.NewComputed(func() bool { _, _, ok := d.selected(); return !ok }, d.sel.AsReadonly())
 	some := state.NewComputed(func() bool { return !none.Get() }, none)
 

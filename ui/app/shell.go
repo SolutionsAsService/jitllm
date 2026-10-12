@@ -67,6 +67,10 @@ type Shell struct {
 	// drop is the registered dnd target, kept so its bounds can follow the
 	// window instead of registering a second one on every resize.
 	drop dnd.DropTarget
+
+	// ConnectTo switches the window to the jitllmd at addr; nil where it
+	// cannot (the mock), and OfferService then only says what is running.
+	ConnectTo func(addr string)
 }
 
 // NewShell builds the shell around an already-created gogpu app.
@@ -199,7 +203,10 @@ func (s *Shell) sidebar() widget.Widget {
 
 	return newRail(primitives.Box(primitives.VBox(
 		mark,
-		primitives.Box().Height(12),
+		primitives.Box().Height(6),
+		// Which engine the window drives, always in view; it opens the setting.
+		widgets.NewChatRow(s.Badge(), nil, s.GoSettings, colors, s.P.Type.LabelSmall.FontSize),
+		primitives.Box().Height(6),
 		primitives.VBox(items...).Gap(2),
 		primitives.Box().Height(16),
 		widgets.NewNavItem(widgets.IconPlus, "New chat", nil, func() { s.chatAction(s.Store.NewChat) }, colors, size),

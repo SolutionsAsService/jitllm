@@ -23,5 +23,11 @@ func (m *Model) enterPager() func() {
 		return func() {}
 	}
 	m.pager.Lock()
+	// The method value is bound once at construction: m.pager.Unlock written
+	// here is a fresh closure every call, one heap object per token on a
+	// paging model (TestDecodeDoesNotAllocate, olmoe over a Vulkan budget).
+	if m.pagerUnlock != nil {
+		return m.pagerUnlock
+	}
 	return m.pager.Unlock
 }

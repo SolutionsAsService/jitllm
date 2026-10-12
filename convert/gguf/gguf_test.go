@@ -352,7 +352,7 @@ func FuzzParse(f *testing.F) {
 	f.Add([]byte("GGUF"))
 	f.Add([]byte{})
 	f.Fuzz(func(t *testing.T, b []byte) {
-		file, err := parse(b, "fuzz", func() error { return nil })
+		file, err := parse(b, b, "fuzz", func() error { return nil })
 		if err != nil {
 			return
 		}

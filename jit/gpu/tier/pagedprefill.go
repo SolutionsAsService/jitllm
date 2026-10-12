@@ -51,7 +51,8 @@ type pagedPrefill struct {
 	// flash is the one-kernel form, and fmerge its merge where the plan has
 	// sinks (the kernel's one split writes partials; the merge adds the sink).
 	flash, fmerge backend.Kernel
-	// flash80 says flash is kernels.FlashPrefill80, the m16n8k16 form.
+	// flash80 says flash is kernels.FlashPrefill80, the m16n8k16 form, or
+	// its m16n8k8 twin on sm_75 (FlashPrefill80K8).
 	flash80         bool
 	fGroups, fWidth int
 	fRows           int // the merge's threads: rows x heads x value
@@ -152,6 +153,13 @@ func (g *devTier) initPagedPrefill(bs *blockScratch) error {
 		case !g.kb.noAttnMMA && g.f16GemmK() == 16 && kernels.FlashPrefill80WhyNot(fs) == "":
 			// sm_80 on: the whole attention in one kernel on m16n8k16.
 			if pf.flash = comp(kernels.FlashPrefill80(fs)); pf.flash != nil {
+				pf.fGroups, pf.fWidth = kernels.FlashPrefill80Groups(fs), kernels.FlashPrefill80Threads
+				pf.flash80 = true
+			}
+		case !g.kb.noAttnMMA && g.f16GemmK() == 8 && kernels.FlashPrefill80WhyNot(fs) == "":
+			// sm_75: the same kernel on m16n8k8, two products for each of
+			// the k16 form's. A width it does not divide keeps sm_70's pair.
+			if pf.flash = comp(kernels.FlashPrefill80K8(fs)); pf.flash != nil {
 				pf.fGroups, pf.fWidth = kernels.FlashPrefill80Groups(fs), kernels.FlashPrefill80Threads
 				pf.flash80 = true
 			}

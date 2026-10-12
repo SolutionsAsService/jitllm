@@ -313,10 +313,19 @@ func (r *root) footer() string {
 	if r.toast != "" {
 		left = pill("✓", cBg, cBrand) + " " + sFg.Render(r.toast)
 	}
-	room := r.w - 4 - lipgloss.Width(left)
-	right := ""
+	// The engine badge is always shown, whatever else gives way: which engine
+	// this is cannot be a thing that scrolls off.
+	badge := sMuted.Render(r.env.badge())
+	if r.env.where.Lost {
+		badge = pill(r.env.badge(), cBg, cRed)
+	}
+	if w := r.w - 4 - lipgloss.Width(badge); lipgloss.Width(left) > w {
+		left = ansi.Truncate(left, max(0, w), "…")
+	}
+	room := r.w - 7 - lipgloss.Width(left) - lipgloss.Width(badge)
+	right := badge
 	if room > 16 {
-		right = ansi.Truncate(sDim.Render(r.env.f.st.Status.Get()), room, "…")
+		right = ansi.Truncate(sDim.Render(r.env.f.st.Status.Get()), room, "…") + sDim.Render(" · ") + badge
 	}
 	line := " " + left + strings.Repeat(" ", max(1, r.w-2-lipgloss.Width(left)-lipgloss.Width(right))) + right + " "
 	return ansi.Truncate(line, r.w, "")

@@ -465,6 +465,7 @@ func buildEncoderModel(c *jlm.File, options ...tok.Option) (*Model, error) {
 		return nil, fmt.Errorf("model: %s is an encoder with a causal mask, which is not this graph", cfg.Arch)
 	}
 	m := &Model{Cfg: cfg}
+	m.pagerUnlock = m.pager.Unlock
 	if m.Vocab, m.TokErr = tok.New(c.Vocab(), options...); m.TokErr != nil {
 		m.Vocab = nil
 	}
