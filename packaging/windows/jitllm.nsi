@@ -125,29 +125,32 @@ Section "Add jitllm to PATH" SecPath
   WriteRegDWORD HKCU "Software\jitllm" "AddedToPath" 1
 SectionEnd
 
-; jitllmd is a console program; started from the Run key it would open a
-; console window at every login. The script starts it hidden (window style 0)
-; and does not wait for it.
+; `jitllmd service install` writes the login entry: a script in
+; %LOCALAPPDATA%\jitllm that starts jitllmd hidden (window style 0, so the
+; console program opens no window) on 127.0.0.1:8080 over the models folder,
+; logging to jitllmd.log beside it, and the Run key value that runs it. It
+; starts the server now too. `jitllmd service` manages it afterwards.
 Section /o "Start the server at login" SecLogin
-  FileOpen $0 "$INSTDIR\${LOGIN_SCRIPT}" w
-  FileWrite $0 `CreateObject("WScript.Shell").Run """$INSTDIR\jitllmd.exe"" serve -addr 127.0.0.1:8080 -models ""$LOCALAPPDATA\jitllm\models""", 0, False$\r$\n`
-  FileClose $0
-  CreateDirectory "$LOCALAPPDATA\jitllm\models"
-  WriteRegStr HKCU "${RUN_KEY}" "jitllmd" '"$SYSDIR\wscript.exe" "$INSTDIR\${LOGIN_SCRIPT}"'
-  ; And now, so the server is up without logging out and in.
-  Exec '"$SYSDIR\wscript.exe" "$INSTDIR\${LOGIN_SCRIPT}"'
+  ; An earlier installer's script, which the service's replaces.
+  Delete "$INSTDIR\${LOGIN_SCRIPT}"
+  nsExec::ExecToLog '"$INSTDIR\jitllmd.exe" service install'
+  Pop $0
 SectionEnd
 
 ; An upgrade that leaves "start at login" unticked removes an earlier
 ; install's login entry, so the ticked boxes are the state after setup.
 Section "-login off"
   ${IfNot} ${SectionIsSelected} ${SecLogin}
+    nsExec::ExecToLog '"$INSTDIR\jitllmd.exe" service uninstall'
+    Pop $0
     DeleteRegValue HKCU "${RUN_KEY}" "jitllmd"
     Delete "$INSTDIR\${LOGIN_SCRIPT}"
   ${EndIf}
 SectionEnd
 
 Section "Uninstall"
+  nsExec::ExecToLog '"$INSTDIR\jitllmd.exe" service uninstall'
+  Pop $0
   !insertmacro stopRunning
   DeleteRegValue HKCU "${RUN_KEY}" "jitllmd"
   ReadRegDWORD $1 HKCU "Software\jitllm" "AddedToPath"

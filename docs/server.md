@@ -169,5 +169,25 @@ prompt store a Speculator does not use).
 | `sessions` | create, list, describe, reset and close sessions |
 | `place` | read and move the CPU/device seam and the pager budget |
 | `stats` | engine counters, once or streamed (`-watch`) |
+| `service` | `install`, `uninstall`, `start`, `stop`, `status`: jitllmd as this person's background service |
+
+## The service
+
+`jitllmd service install` runs `jitllmd serve -addr 127.0.0.1:8080 -models
+<the models folder>` in the background, now and at every login, restarted
+after a crash and not after a clean stop. Loopback only: nothing is opened to
+the network unless `-addr` says so.
+
+| System | What runs it | Log |
+|---|---|---|
+| Linux | systemd user unit `~/.config/systemd/user/jitllm.service` | `journalctl --user -u jitllm` |
+| macOS | launchd agent `~/Library/LaunchAgents/org.jitllm.service.plist` (the app's "start the server at login" writes the same one) | `~/Library/Logs/jitllm/jitllmd.log` |
+| Windows | `%LOCALAPPDATA%\jitllm\jitllmd-login.vbs` under the user Run key (the installer's "start the server at login" calls `jitllmd service install`) | `%LOCALAPPDATA%\jitllm\jitllmd.log` |
+
+`install.sh` installs the service on Linux when it installs jitllmd
+(`--no-service` or `JITLLM_NO_SERVICE=1` skips it). `jitllmd service status`
+shows whether it is installed, the address, the version, the models folder
+and the loaded models. On Linux, `loginctl enable-linger` keeps it running
+without a login session.
 
 The Connect API is defined in [`proto/jitllm/v1`](../proto/jitllm/v1/).
