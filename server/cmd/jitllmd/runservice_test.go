@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -38,6 +39,9 @@ func TestJitllmRunGoesThroughTheService(t *testing.T) {
 	defer s.Close()
 
 	bin := filepath.Join(t.TempDir(), "jitllm")
+	if runtime.GOOS == "windows" {
+		bin += ".exe"
+	}
 	build := exec.Command("go", "build", "-o", bin, "./cmd/jitllm")
 	build.Dir = filepath.Join("..", "..", "..")
 	if out, err := build.CombinedOutput(); err != nil {
