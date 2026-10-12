@@ -139,3 +139,9 @@ func (k *Kernel) typeOf(v Value) Type {
 	}
 	return k.Ops[v-1].Type
 }
+
+// Prefetch hints that element idx of the global buffer buf will be read
+// soon: see OpPrefetch.
+func (b *Builder) Prefetch(buf, idx Value) {
+	b.emit(Op{Kind: OpPrefetch, Type: Void, Args: [3]Value{buf, idx}})
+}

@@ -1,6 +1,7 @@
 package backend
 
 import (
+	"errors"
 	"sort"
 	"sync"
 )
@@ -126,3 +127,9 @@ func (l *resLedger) list() []KernelResources {
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
 }
+
+// ErrGroupTooWide is a compile refused because the kernel's register use
+// leaves the device unable to launch its declared workgroup width: the launch
+// would fail with too many resources requested, so the compile says so first
+// and a caller with another kernel for the job keeps that one.
+var ErrGroupTooWide = errors.New("backend: the workgroup is wider than the kernel's registers allow")

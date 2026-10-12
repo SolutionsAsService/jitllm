@@ -914,6 +914,13 @@ func (c *cudaDev) Compile(k *ir.Kernel) (Kernel, error) {
 	if err != nil {
 		return nil, err
 	}
+	if attrsOK && a.MaxThreads > 0 && a.MaxThreads < k.Group[0] {
+		// The driver refuses the launch (too many resources requested); a
+		// refusal here lets the caller keep another kernel instead.
+		c.do(m.Unload)
+		return nil, fmt.Errorf("%w: %s at %d registers a thread launches at most %d threads, not %d",
+			ErrGroupTooWide, k.Name, a.Regs, a.MaxThreads, k.Group[0])
+	}
 	kern := &cudaKern{m: m, dev: c, name: k.Name, group: k.Group}
 	if attrsOK {
 		kern.res = KernelResources{Name: k.Name, API: "cuda", Group: k.Group[0], Regs: a.Regs,

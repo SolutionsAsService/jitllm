@@ -317,6 +317,9 @@ type MatVecShape struct {
 	// the same arithmetic in smaller steps. It must divide K, be a multiple of
 	// 4 and be at most the format's own sub-block.
 	Sub int
+	// In builds the int8 operand in the kernel from the float row (ActIn):
+	// parameters pIn [pNW] in place of pA and pAX.
+	In ActIn
 }
 
 // MatVec builds the decode matvec.
@@ -522,6 +525,9 @@ func matVec(s MatVecShape, into *segCtx) (*ir.Kernel, error) {
 	if s.BiasRows {
 		name += "_res"
 	}
+	if s.In.On {
+		name += actInName(s.In)
+	}
 	var b *ir.Builder
 	suffix := ""
 	cta := func() ir.Value { return b.CTAID() }
@@ -553,10 +559,22 @@ func matVec(s MatVecShape, into *segCtx) (*ir.Kernel, error) {
 	// format adds two of them, which is one instruction and avoids a second
 	// array.
 	var pAX ir.Value
-	if into == nil {
+	var pIn actParamSet
+	switch {
+	case into == nil && s.In.On:
+		// The operand prologue (ActIn): pIn [pNW] in pA/pAX's place.
+		if s.NTok > 1 || s.Experts > 1 || s.ActRows > 1 || qi.float > 0 {
+			return nil, fmt.Errorf("kernels: MatVec: ActIn needs a one-token dense quantized decode shape")
+		}
+		if err := s.In.check(s.K, group); err != nil {
+			return nil, err
+		}
+		// Emitted just before the k loop, behind the weight prefetch.
+		pIn = actParams(b, s.In)
+	case into == nil:
 		pA = b.Param("pA", ir.U32)
 		pAX = b.Param("pAX", ir.F32)
-	} else {
+	default:
 		pA, pAX = into.pA, into.pAX
 	}
 	pOut := b.Param("pOut"+suffix, ir.F32)
@@ -774,6 +792,19 @@ func matVec(s MatVecShape, into *segCtx) (*ir.Kernel, error) {
 			b.Mul(ir.U32, segSub, b.Const(ir.U32, int64(fsub))))
 	}
 
+	if into == nil && s.In.On {
+		// The weight stream starts before the prologue: its reduction and
+		// barriers otherwise hold every word of it back (ActIn.Prefetch).
+		if n := s.In.Prefetch; n != 0 && qi.float == 0 {
+			if n < 0 || n > spg*words {
+				n = spg * words
+			}
+			for j := 0; j < n; j++ {
+				b.Prefetch(pQS, b.Add(ir.U32, wStart, b.Mul(ir.U32, b.Const(ir.U32, int64(j)), bankRows)))
+			}
+		}
+		pA, pAX = actPrologue(b, s.K, group, s.In, pIn)
+	}
 	b.Loop(int64(spg))
 	// One accumulator per (tile row, token column): the weight word is loaded
 	// once and consumed by Tok dot products, which is the weight reuse.
@@ -1220,6 +1251,13 @@ func matVec(s MatVecShape, into *segCtx) (*ir.Kernel, error) {
 // thread (Tok == NTok, the same for all): the grid is decode's and each
 // segment writes NTok rows of its own output.
 func MatVecSegments(segs []MatVecShape, split int, grp bool) (*ir.Kernel, error) {
+	return MatVecSegmentsIn(segs, split, grp, ActIn{})
+}
+
+// MatVecSegmentsIn is MatVecSegments with the operand prologue (ActIn) when
+// in.On: parameters pIn [pNW] in pA/pAX's place, so the norm-and-quantize
+// launch before q/k/v goes.
+func MatVecSegmentsIn(segs []MatVecShape, split int, grp bool, in ActIn) (*ir.Kernel, error) {
 	blocks, group, err := SegmentsGrid(segs, split, grp)
 	if err != nil {
 		return nil, err
@@ -1235,8 +1273,23 @@ func MatVecSegments(segs []MatVecShape, split int, grp bool) (*ir.Kernel, error)
 	if grp {
 		name += "g"
 	}
-	b := ir.New(name, [3]int{group, 1, 1})
-	ctx := segCtx{b: b, pA: b.Param("pA", ir.U32), pAX: b.Param("pAX", ir.F32)}
+	var ctx segCtx
+	if in.On {
+		if segs[0].NTok > 1 {
+			return nil, fmt.Errorf("kernels: MatVecSegments: ActIn needs one token")
+		}
+		if err := in.check(segs[0].K, group); err != nil {
+			return nil, err
+		}
+		name += actInName(in)
+		b := ir.New(name, [3]int{group, 1, 1})
+		pA, pAX := actPrologue(b, segs[0].K, group, in, actParams(b, in))
+		ctx = segCtx{b: b, pA: pA, pAX: pAX}
+	} else {
+		b := ir.New(name, [3]int{group, 1, 1})
+		ctx = segCtx{b: b, pA: b.Param("pA", ir.U32), pAX: b.Param("pAX", ir.F32)}
+	}
+	b := ctx.b
 	if grp {
 		ctx.shPart, ctx.hasSh = b.Shared("part", ir.F32, group*max(segs[0].Tok, 1)), true
 	}

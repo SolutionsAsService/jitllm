@@ -6000,3 +6000,108 @@ swapped -- 3.6-3.8% faster prefill, IQR/median at most 0.5%. Decode does not
 run GemmVolta and its kernel split is unchanged (2706.5 against 2708.4 us of
 kernels a token). On sm_86 no tile spills, so nothing changes there by
 construction.
+
+## The operand prologue: the norm and the quantize inside the matvec
+
+The section above found the launch was not the decode's cost. What a
+per-op norm or quantize does cost is its latency: a 1024-thread norm on one
+multiprocessor, or a 16-group quantize, while HBM idles, before the matvec
+that reads its operand can start. `kernels.ActIn` moves that work into the
+consumer: every workgroup of the next matvec normalises (or forms
+act(gate)*up) and quantizes the row into threadgroup memory and reads its
+int8 operand from there. The bits are the launch's it replaces (the norm's
+sum of squares is RMSNormGroup's reduction run by virtual threads in the same
+order; amax and per-16 sums are a max and integer sums). Before the prologue
+each thread prefetches its first weight words (`ir.OpPrefetch`,
+`prefetch.global.L2` on PTX) so the weight stream starts under the prologue.
+
+What it costs is the prologue once per workgroup instead of once per row, so
+it pays only where few groups share the row. Tried in order (V100, Llama-3.2-1B
+Q4_K_M, `speed -p 32 -n 128`, process per arm, 1312 MHz):
+
+    per-op (two launches)                             535 tok/s
+    prologue, every site, norm pass then quantPhase   ~490 (a loss: three barriers a 128-word iteration, two global passes)
+    + shuffles for the window and sums, one pass      537 (even)
+    + prefetch 4-8 words a thread                     541-544
+    + prefetch every word                             507 (thrashes L2)
+    sites q/k/v + attention output + down (no gate/up) 557
+
+gate and up (256 groups of 32 rows) lose: their prologue is 4-6 us a launch
+against the norm launch's ~5 us, and two of them replace one. The policy
+(`tier.actInPays`): groups <= 128 and groups*k <= 512Ki. Llama-3.1-8B's down
+(128 groups, k 14336) lost 4% (132 against 137.6 tok/s) and is outside it;
+its attention output (128, 4096) is even.
+
+A verify -ab that ran the table splits (partial-writing split 32, 512 groups
+for q) read the prologue at 0.50 against per-op; the policy excludes them,
+and `-ab actfuse` warms past the split tuner before it compares.
+
+The in-process A/B (`verify -ab actfuse`, JITLLM_GPU_TUNE=1, n=20, 64 tokens a
+round, A/A first):
+
+    V100 1B   A/A 1.0054 (IQR 2.9%)   1.0280 (2.2%), 1.0232 (3.0%)
+    V100 8B   A/A 1.0027 (1.7%)       1.0077 (2.2%), 1.0081 (2.0%)
+    T4 1B     A/A 1.0066 (2.2%)       0.9929 (2.6%), 0.9818 (2.4%)
+    T4 8B     A/A 1.0012 (1.6%)       0.9907 (2.2%), 0.9939 (2.0%)
+
+On the T4 (40 multiprocessors) the redundancy costs more per launch: q/k/v's
+segment kernel took 506 us of event-timed device time a token against 334
+plain, more than the norm launches it removed. A per-device measurement in
+place of actInPays' two numbers is the open item (the split tuner times the
+plain kernels only).
+
+Launches a token (CUDA kernel timing, event nodes): V100 1B 198 -> 150 (16
+norm launches before q/k/v, 16 quantizes before the attention output, 16
+before down), 8B 390 -> 358 (the attention output's 32). Every launch is a
+kernel boundary, the only synchronisation a decode token has inside its
+graph, so syncs fall by the same count. DRAM bytes a token are unchanged to
+within the operand's few KiB (it was L2-resident); L2 reads grow by
+groups*k*4 a prologue launch (about 4 MiB a block on the 1B).
+
+Against llama.cpp CUDA (build at llama-sm70, vs-llamacpp.sh gpu, decode 128,
+12 ABBA rounds, cores 43-53):
+
+    V100 1B   prologue 1.1648 (IQR 0.054)   main 1.1316 (0.028)
+    V100 8B   prologue 1.0807 (0.012)       main 1.0735 (0.026)
+
+Found on the way: the retune built the FFN up projection's gated variant
+only where the first split already had one, so a block prepared at a
+partial-writing split ran act(gate)*up as its own launch for good
+(`mv.wantGated`). And a CUDA kernel whose registers allow fewer threads than
+its workgroup failed at launch (T4, the q/k/v prologue at 1024 threads); the
+compile now refuses it with `backend.ErrGroupTooWide`.
+
+### The prologue decided per card by measurement
+
+Five T4 rows read 0.982-0.994 with actInPays' V100-fitted constants: a small
+regression, not noise. `tuneActIn` replaced the constants: after the decode
+retune it times each site's two launches against its prologue over up to 16
+placed blocks, interleaved, and keeps the prologue only under 0.99 (cached per
+binary, device and shape). Its verdicts:
+
+    V100 1B   q/k/v 0.88 and 0.86, attention output 0.71: kept; down 1.04-1.07: dropped
+    V100 8B   q/k/v 0.95: kept; attention output 0.997, down 1.12-2.4: dropped
+    T4 1B     1 of 5 sites kept
+    T4 8B     none kept
+
+and the in-process A/B after it (JITLLM_GPU_TUNE=1, n=20, A/A first):
+
+    V100 1B   A/A 1.0047 (IQR 2.2%)   1.0327 (2.6%), 1.0337 (2.8%)
+    V100 8B   A/A 1.0026 (2.6%)       1.0072 (1.8%), 1.0063 (1.9%)
+    T4 1B     A/A 1.0050 (2.0%)       1.0106 (2.2%), 1.0091 (2.3%)
+    T4 8B     no site kept, both arms one launch sequence: 0.9920 (2.4%), 1.0016 (1.3%)
+
+The T4 8B A/A run did not complete: `fuseActIn` keyed a site before its
+prologue compiled, so a site the T4 declined (`ErrGroupTooWide`) went to the
+tuner with no kernel to time. A key now goes only beside a built kernel, and
+the rows taken again with that build (A/A first, two passes):
+
+    V100 1B   A/A 0.9986 (3.0%)       1.0348 (2.7%), 1.0253 (2.3%)   3 of 5 sites kept
+    V100 8B   A/A 1.0031 (1.7%)       1.0042 (2.1%), 1.0071 (2.2%)   2 sites kept
+    T4 1B     A/A 1.0000 (2.7%)       1.0099 (2.5%), 1.0079 (1.9%)   1 of 5 kept
+    T4 8B     A/A 1.0021 (1.0%)       1.0008 (1.4%), 1.0022 (0.9%)   none kept
+
+The verdict on a marginal site moves between processes: the tuned model gate
+kept 3 of 5 on the same T4 where `verify` kept 1. Each process is held to
+what it chose (`TestActInKeepsThePrinciples/tuned`), and the rows read the
+shipping configuration either way.

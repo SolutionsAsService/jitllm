@@ -1,6 +1,7 @@
 package model
 
 import (
+	"fmt"
 	"math"
 	"os"
 	"strings"
@@ -79,9 +80,17 @@ func TestFusedDecodeMatchesPerOp(t *testing.T) {
 			host, _ := run(nil, -1)
 			for _, seam := range []int{-1, m.Cfg.NLayer / 2} {
 				var arms [2][][]float32
+				exact := false
 				for i, noFuse := range []bool{false, true} {
 					g, err := tier.OpenWith(tier.WithDeviceTune(tier.TuneOff),
-						tier.WithConfig(func(c *tier.Config) { c.NoFuse = noFuse }))
+						tier.WithConfig(func(c *tier.Config) {
+							// In-group splits in both arms: the operand prologue is
+							// built only where few workgroups share a row (actInPays).
+							c.NoFuse, c.ForceGroupSplit = noFuse, true
+							// Forced: TuneOff runs no prologue tuner. 11 is q/k/v,
+							// the attention output and down.
+							c.ActInSites = 11
+						}))
 					if err != nil || g == nil {
 						t.Skipf("no GPU: %v", err)
 					}
@@ -94,10 +103,15 @@ func TestFusedDecodeMatchesPerOp(t *testing.T) {
 						g.Close()
 						t.Fatalf("seam %d: the device took %d blocks, want %d: %s", seam, placed, want, g.Err())
 					}
-					fl := g.Stats().FusedLaunches
+					fl, ai := g.Stats().FusedLaunches, g.Stats().ActInLaunches
+					why := fmt.Sprintf("%s; %d prologue kernels declined at their width", g.Err(), g.Stats().ActInDeclined)
+					exact = strings.Contains(g.Name(), "[ptx]") && g.Devices() == 1
 					g.Close()
-					if noFuse && fl != 0 {
-						t.Fatalf("NoFuse encoded %d fused launches", fl)
+					if noFuse && (fl != 0 || ai != 0) {
+						t.Fatalf("NoFuse encoded %d fused launches and %d operand prologues", fl, ai)
+					}
+					if !noFuse && ai == 0 {
+						t.Fatalf("seam %d: no matvec built its own operand: the per-op path answered (%s)", seam, why)
 					}
 					if !noFuse && fl == 0 {
 						t.Fatalf("seam %d: no fused launch was encoded: the per-op path answered", seam)
@@ -105,11 +119,21 @@ func TestFusedDecodeMatchesPerOp(t *testing.T) {
 					arms[i] = got
 				}
 				for i := range arms[0] {
+					var fn, fd float64
 					for j := range arms[0][i] {
+						if !exact {
+							d := float64(arms[0][i][j] - arms[1][i][j])
+							fn, fd = fn+d*d, fd+float64(arms[1][i][j])*float64(arms[1][i][j])
+							continue
+						}
 						if math.Float32bits(arms[0][i][j]) != math.Float32bits(arms[1][i][j]) {
 							t.Fatalf("seam %d step %d logit %d: fused %v, per-op %v -- the fused kernel is not its parts",
 								seam, i, j, arms[0][i][j], arms[1][i][j])
 						}
+					}
+					if fn > 1e-6*fd || argmaxID(arms[0][i]) != argmaxID(arms[1][i]) {
+						t.Fatalf("seam %d step %d: fused against per-op NMSE %.3e, argmax %d vs %d", seam, i, fn/fd,
+							argmaxID(arms[0][i]), argmaxID(arms[1][i]))
 					}
 					var num, den float64
 					for j := range host[i] {

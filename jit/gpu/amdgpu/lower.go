@@ -557,6 +557,8 @@ func (l *lowerer) op(i int, o ir.Op, v ir.Value) error {
 		l.emit("%s = add i32 %d, 0", r, n)
 	case ir.OpPhi:
 		// Written at the loop header by loop().
+	case ir.OpPrefetch:
+		// A hint; this lowering emits none.
 	case ir.OpEndLoop:
 		return fmt.Errorf("amdgpu: op %d: EndLoop outside a loop", i)
 	default:

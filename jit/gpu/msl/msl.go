@@ -423,6 +423,8 @@ func (l *lowerer) arith(i int, o ir.Op) error {
 		l.name[i+1] = "jitllm_lane"
 	case ir.OpSubgroupSize:
 		l.name[i+1] = "jitllm_sgsize"
+	case ir.OpPrefetch:
+		// MSL has no prefetch; the hint lowers to nothing.
 	case ir.OpTileLoad, ir.OpTileSplat, ir.OpTileMMA, ir.OpTileStore:
 		return l.tile(i, o)
 	case ir.OpMMA, ir.OpMMAGet:

@@ -847,6 +847,25 @@ func abRun(m *model.Model, g *tier.GPU, which string, n, rounds, depth int) {
 			// The A/A self-control on this harness: both arms per-op.
 			b = bench.Case{Name: "per-op launches (A/A)", Fn: func(it int) { g.NoFuse = true; step(it) }}
 		}
+	case "actfuse":
+		// The operand prologue alone: every other fusion on in both arms.
+		g.NoFuse, g.NoActFuse = false, false
+		// Long enough for the split tuner to settle: the prologue is built
+		// only for the splits it pays at (tier.actInMaxGroups).
+		step(max(n, 64))
+		switch st := g.Stats(); {
+		case st.ActInLaunches == 0 && st.ActInTimed == 0:
+			panic(fmt.Errorf("this device built no operand prologue; there is nothing to compare (%s)", g.Err()))
+		case st.ActInLaunches == 0:
+			// The tuner kept no site here: the two arms are one launch
+			// sequence, and the row is what shipping costs on this card.
+			fmt.Printf("the tuner kept none of %d sites on this device\n", st.ActInTimed)
+		}
+		a = bench.Case{Name: "operand by its own launch", Fn: func(it int) { g.NoActFuse = true; step(it) }}
+		b = bench.Case{Name: "operand in the matvec prologue", Fn: func(it int) { g.NoActFuse = false; step(it) }}
+		if os.Getenv("JITLLM_AB_AA") == "1" {
+			b = bench.Case{Name: "operand by its own launch (A/A)", Fn: func(it int) { g.NoActFuse = true; step(it) }}
+		}
 	case "ropetab":
 		// Refuse rather than compare a knob that reached nothing: a device
 		// with no rotary-table kernel uploads on both arms.
@@ -857,13 +876,18 @@ func abRun(m *model.Model, g *tier.GPU, which string, n, rounds, depth int) {
 		a = bench.Case{Name: "table uploaded from the host", Fn: func(it int) { g.RopeTableHost = true; step(it) }}
 		b = bench.Case{Name: "table built on the device", Fn: func(it int) { g.RopeTableHost = false; step(it) }}
 	default:
-		panic(fmt.Errorf("jitllm: -ab takes split, submit, head, graph, softmax, fuse or ropetab, not %q", which))
+		panic(fmt.Errorf("jitllm: -ab takes split, submit, head, graph, softmax, fuse, actfuse or ropetab, not %q", which))
 	}
 	r := bench.AB(a, b, rounds, n)
 	fmt.Printf("\n%d blocks on device\n%s\n", s.GPULayers(), r)
 	if which == "ropetab" {
 		st := g.Stats()
 		fmt.Printf("%d table(s) built on the device, %d uploaded\n", st.RopeTables, st.RopeTableUploads)
+	}
+	if which == "fuse" || which == "actfuse" {
+		st := g.Stats()
+		fmt.Printf("%d captures; %d operand-prologue launches encoded, replacing %d; %d of %d sites kept by the tuner\n",
+			st.Captures, st.ActInLaunches, st.ActInSaved, st.ActInKept, st.ActInTimed)
 	}
 	if which == "graph" {
 		fmt.Printf("%d captures over the whole A/B\n", g.Stats().Captures)
