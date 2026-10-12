@@ -5483,6 +5483,43 @@ the time sits, not a rate:
 - **The KV prewarm** moves the pool's growth into placement: 100-200 ms more
   placement on the laptop, and the first prompt reads as warm.
 
+### A warm 514-token prompt, kernel by kernel, against llama.cpp on a T4
+
+`jitllm speed` prints JITLLM_CUDA_KERNEL_TIMING's split for the timed prompt
+(an event pair around each launch: a prompt chunk is not captured), and
+`scripts/kshim.c` under KSHIM_DIRECT=1 takes the same of llama.cpp b10825
+CUDA, which runs a batch past one row without a graph. Both are per-launch
+device time with the events' own cost inside it, so the sums run above the
+wall; they say where the time sits, not a rate. One T4 (sm_75), one sitting,
+llama.cpp's totals halved for its warm-up prompt:
+
+    Meta-Llama-3.1-8B Q4_K_M, us a prompt       jitllm      llama.cpp
+    GEMMs over the 512-row chunk               525,100     442,900 (mmq q4_k, q6_k)
+      + operand quantize / stream-k fixup            --      21,700
+    the 2-row tail's matvecs                    58,400      19,600 (mmvq)
+    attention (flash, + the tail's staged)      34,100      13,500
+    norms, SiLU, rotary, adds, conversions      35,100      29,700
+    head                                         1,700       1,800
+
+    Llama-3.2-1B Q4_K_M                          jitllm      llama.cpp
+    GEMMs over the 512-row chunk                56,100      90,800
+      + operand quantize / stream-k fixup            --       8,600
+    the 2-row tail's matvecs                    10,700       5,100
+    attention                                    7,400       5,300
+    norms, SiLU, rotary, adds, conversions       9,000      11,700
+
+Rates beside it (`jitllm speed -p 514 -n 0`, llama-bench `-p 514`): 8B
+705-887 against 1056-1085 tok/s, the card slowing between passes; 1B
+4.5-7.2k against 4.2-5.9k. The three gaps on the 8B, largest first: the
+staged GEMM against MMQ's int8 (about 60 ms net of llama.cpp's operand
+passes), the 2-row tail (39 ms: a GEMM at the grain over 30 rows of padding
+where llama.cpp runs a matvec), and the attention (20 ms: FlashPrefill70's
+m8n8k4, which sm_75 runs well under its m16n8 rate, and the tail's staged
+three kernels). The tail is the one the prompt length decides: on a V100 a
+514-token prompt took 30% longer than a 512-token one (1B, 12.9k against
+16.8k tok/s), and on the A100 board `jitllm speed -p 512` read 28.8k where the
+harness's 514-token row read 14.4k.
+
 ## Measurements once cited in jit/gpu/tier's comments
 
 The tier's comments state the engineering reason and the class of card; the

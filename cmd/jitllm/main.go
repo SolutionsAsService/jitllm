@@ -197,7 +197,7 @@ run flags:
                          placement sizes it itself.
   -maxmem BYTES          host weight residency budget (default: the cgroup limit
                          or MemAvailable, whichever is smaller, less headroom)
-  -n N                   tokens to generate (default 32)
+  -n N                   tokens to generate; 0 (the default) runs until the model ends its reply
   -depth N               pad the prompt to N tokens, so decode is measured at that context length
   -tune-seam             measure whether fewer device blocks are faster, and relocate
   -no-gpu-fallback       fail instead of finishing on the host when the device breaks

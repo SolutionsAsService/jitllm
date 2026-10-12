@@ -108,6 +108,10 @@ type Buf struct {
 	// in a declared one.
 	isa      ISA
 	declared bool
+
+	// regs is what this kernel asked of the register file and the stack,
+	// counted as it was emitted (regreport.go).
+	regs regUse
 }
 
 type fixup struct {
@@ -125,6 +129,7 @@ func (a *Buf) Bytes() []byte {
 			panic("jit: label used but never bound")
 		}
 	}
+	noteEmit(a.regs, len(a.b), a.regs.vex)
 	return a.b
 }
 
@@ -178,6 +183,7 @@ const (
 // finds.
 func (a *Buf) vex(r, v, b, x Reg, l256 bool, pp, mm, w byte) {
 	a.noVEXInSSE("a VEX-encoded instruction")
+	a.regs.vex = true
 	var lb byte
 	if l256 {
 		lb = 1
@@ -212,6 +218,9 @@ func (a *Buf) modrmReg(reg, rm Reg) { a.u8(0xC0 | reg.lo()<<3 | rm.lo()) }
 //   - disp8 when it fits, disp32 otherwise. Purely a size win, but it is most of
 //     the code size in an unrolled kernel.
 func (a *Buf) modrmMem(reg Reg, m Mem) {
+	if m.Base == RSP {
+		a.regs.stack++
+	}
 	const rmSIB = 4
 	base := m.Base.lo()
 	needSIB := m.hasIndex() || base == rmSIB // rsp or r12
@@ -268,6 +277,7 @@ func (a *Buf) vop(op byte, pp, mm, w byte, dst, src1, src2 Reg) {
 // horizontal reduction, where the upper lane has already been folded in and
 // operating on it would just burn power.
 func (a *Buf) vopL(op byte, pp, mm, w byte, l256 bool, dst, src1, src2 Reg) {
+	a.regs.vec(dst, src1, src2)
 	a.vex(dst, src1, src2, noIndex, l256, pp, mm, w)
 	a.u8(op)
 	a.modrmReg(dst, src2)
@@ -275,6 +285,7 @@ func (a *Buf) vopL(op byte, pp, mm, w byte, l256 bool, dst, src1, src2 Reg) {
 
 // vopMem emits a three-operand VEX instruction whose second source is memory.
 func (a *Buf) vopMem(op byte, pp, mm, w byte, dst, src1 Reg, m Mem) {
+	a.regs.vec(dst, src1)
 	idx := noIndex
 	if m.hasIndex() {
 		idx = m.Index

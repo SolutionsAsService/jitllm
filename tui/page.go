@@ -61,6 +61,8 @@ type env struct {
 	api *api.Server
 	// where is which engine this app drives, for the badge.
 	where engine.Where
+	// hub is the Hub downloads read from; "" is huggingface.co.
+	hub string
 }
 
 // syncAPI starts, restarts or stops the API to match the settings, and

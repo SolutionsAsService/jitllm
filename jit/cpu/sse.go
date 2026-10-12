@@ -48,6 +48,7 @@ const (
 // w selects REX.W. It is the operand-size bit, not a width: no SSE vector op
 // here needs it, and it is carried so the op table can stay shared with vex().
 func (a *Buf) sseOp(op byte, pp, mm, w byte, dst, src Reg) {
+	a.regs.vec(dst)
 	if p := ssePrefix[pp]; p != 0 {
 		a.u8(p)
 	}

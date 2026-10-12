@@ -97,6 +97,10 @@ The seam can move between tokens, and a block's KV pages move with it, so nothin
 
 <Stage step="relocate" />
 
+## Fewer dispatches, the same unit
+
+A decode token is a few hundred small operations, and starting each one costs time of its own. jitllm fuses operations into fewer kernels and runs consecutive blocks resident on one device as one submission, without ever letting fusion cross a block's device boundary, so the block stays the unit of placement, relocation and paging. [Kernel fusion and block bridging](/docs/concepts/fusion/) explains how.
+
 ## Many models, many conversations
 
 A server holds several models at once and many sessions per model. Each session owns its sequence (its KV cache, its position and where its blocks run) while the model's weights are shared. On a device, each session's history lives in its own pages of a shared pool, so sessions never see each other's state. Requests on a device decode together, as rows of one step that reads each block's weights once for all of them, and a joining request's prompt rides in the same steps a chunk at a time, so it never stalls the rows already generating.
@@ -109,6 +113,7 @@ Every generated kernel is tested against a reference implementation, including r
 
 The repository records the measurements behind each design decision, including the ones that were tried and did not pay:
 
+- [Kernel fusion and block bridging](/docs/concepts/fusion/): how per-op dispatch cost is removed without giving up the block.
 - [`docs/design`](https://github.com/jitllm/jitllm/tree/main/docs/design): block paging, device KV paging, device sessions.
 - [`docs/engineering-history`](https://github.com/jitllm/jitllm/tree/main/docs/engineering-history): CPU and GPU kernels, model correctness, placement, scheduling and measurement.
 - [`docs/perf/current.md`](https://github.com/jitllm/jitllm/blob/main/docs/perf/current.md): the performance scoreboard and every row below parity.

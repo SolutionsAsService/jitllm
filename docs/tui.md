@@ -26,7 +26,7 @@ terminal with 24-bit colour.
 | Key | Screen | What it does |
 |---|---|---|
 | `F1` | Chat | saved chats, the transcript and the prompt, with the engine at the right: decode rate, where each block runs, memory |
-| `F2` | Models | the `.jlm` files in your folders and the GGUF and safetensors sources beside them; `enter` loads a container, converts a source or rebuilds an outdated container, `ctrl+x` closes it |
+| `F2` | Models | the `.jlm` files in your folders and the GGUF and safetensors sources beside them; `enter` loads a container, converts a source or rebuilds an outdated container, `ctrl+x` unloads it; several stay loaded at once, each tagged loaded |
 | `F3` | Discover | the catalog ranked for this machine, fastest to smartest (`<` `>`), with whether each model fits; `enter` downloads and converts, or loads one already on disk |
 | `F4` | Engine | every block and where it runs, the rate over time, memory and the pager; `→` `←` move one block to the device or home, `home` and `end` all of them |
 | `F5` | Settings | the desktop app's settings file as a form; `enter` on the last field saves, `esc` discards |
@@ -50,7 +50,7 @@ running `jitllmd` says that the two share the GPU's memory.
 `enter` sends, `ctrl+j` or `alt+enter` adds a line, `↑` `↓` walk the prompt
 history, `esc` stops the reply or clears the prompt, `ctrl+t` folds the
 reasoning, `ctrl+y` copies the last reply, `ctrl+n` starts a chat and
-`ctrl+↑` `ctrl+↓` move between chats.
+`ctrl+↑` `ctrl+↓` (or `⌥↑` `⌥↓`, alt, which macOS leaves free) move between chats.
 
 A prompt that starts with `/` is a command, completed with `tab`: `/new`,
 `/delete`, `/chat`, `/completion`, `/system <text>`, `/temp <value>`,

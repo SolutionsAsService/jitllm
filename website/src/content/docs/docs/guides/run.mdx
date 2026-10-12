@@ -5,10 +5,12 @@ description: Prompts, chat templates, sampling, images, embeddings and benchmark
 
 import Spec from '../../../../components/fig/Spec.astro'
 
-`jitllm run` loads a container, generates, prints the text and a line of statistics, and exits. It is the quickest way to try a model and the easiest place to see what the engine is doing.
+`jitllm run` loads a container, generates, prints the text and a line of statistics, and exits. It is the quickest way to try a model and the easiest place to see what the engine is doing. Given no prompt, it holds a conversation instead.
 
 ```sh
 jitllm run [flags] model.jlm "prompt..."
+jitllm run [flags] model.jlm                  # an interactive chat
+echo "prompt..." | jitllm run model.jlm       # the prompt from stdin
 ```
 
 Flags go **before** the model path. Everything after the path is the prompt, so a flag written after it would be read as prompt text; jitllm refuses that rather than guess.
@@ -29,6 +31,34 @@ jitllm run -chat -system "Answer in one sentence." -n 128 \
 ```
 
 Under `-chat` the prompt is not echoed, because what the model received is the rendered template, not your text.
+
+## Interactive chat
+
+With no prompt on the command line and a terminal on stdin, `run` opens a chat with the model, through its own chat template:
+
+```sh
+jitllm run models/qwen3-8b.jlm
+```
+
+```
+Send a message (/? for help)
+>>> What is a mixture of experts?
+```
+
+Each reply streams as it is written. The conversation is rendered through the template every turn, and the history's KV pages are restored from memory rather than computed again, so a long chat does not prefill its whole past each time.
+
+| Input | Does |
+|---|---|
+| `/help` or `/?` | list the commands |
+| `/clear` | forget the conversation and start again |
+| `/bye` | leave; so does Ctrl+D |
+| Ctrl+C | stop the reply being written; at the prompt it reminds you how to leave |
+| a line ending in `\` | continue the message on the next line |
+| `"""` ... `"""` | a message of several lines |
+
+`-system` sets a system message, `-n` caps each reply, and the sampling and device flags apply as for a single prompt. The model must carry a chat template; a base model without one is refused, and completes a prompt instead. The chat takes neither `-image`, `-spec` nor `-depth`. When the conversation fills the model's context, `/clear` starts again.
+
+When stdin is a pipe or a file instead of a terminal, what it carries is the prompt, read whole, and `run` completes it (or, with `-chat`, answers it) and exits.
 
 ## Sampling
 
@@ -53,7 +83,14 @@ Sampling runs as generated code like everything else; it does not sort the vocab
 
 ## Speculative decoding
 
-A model that ships its own multi-token-prediction block (Qwen3.5 and Qwen3.6, DeepSeek-V3-class models, GLM-4.7-Flash, and GLM-4.5 when the checkpoint carries it) can draft several tokens with it and check them all in one pass of the full model:
+Speculative decoding drafts several tokens cheaply and checks them all in one pass of the full model. `-spec` picks where the drafts come from:
+
+| `-spec` | Drafts from |
+|---|---|
+| `mtp` | the model's own multi-token-prediction block: Qwen3.5 and Qwen3.6, DeepSeek-V3-class models, GLM-4.7-Flash, and GLM-4.5 when the checkpoint carries it |
+| `lookup` | the tokens that followed the last few tokens where they appeared earlier in the sequence. No model runs to draft, so it works on every architecture, for greedy decoding only |
+| `auto` | `mtp` where the model has the block, `lookup` where it does not |
+
 
 ```sh
 jitllm run -chat -spec mtp -n 256 models/qwen3.6.jlm "Explain paging in one paragraph."
@@ -61,7 +98,7 @@ jitllm run -chat -spec mtp -n 256 models/qwen3.6.jlm "Explain paging in one para
 
 Nothing about the output changes. Greedy decoding gives exactly the tokens it gives one at a time, since every draft is verified and the first wrong one replaced; with sampling, drafts are accepted by a rejection test against the sampler's own distribution, so the output is distributed exactly as plain sampling's. <Spec />
 
-With `-spec-k 0`, the default, jitllm chooses how many to draft each round from the acceptance and timing it measures, and stops drafting where no count pays. A model without a prediction block refuses `-spec` by name, and `-spec` does not combine with `-image` or `-kv-cache`.
+With `-spec-k 0`, the default, jitllm chooses how many to draft each round from the acceptance and timing it measures, and stops drafting where no count pays. A model without a prediction block refuses `-spec mtp` by name; with sampling, `lookup` drafts nothing and decoding is plain sampling. `-spec` does not combine with `-image` or `-kv-cache`.
 
 ## Ask about an image
 
@@ -122,6 +159,8 @@ jitllm batch -devices cuda:0 -batch 64 -n 128 models/llama.jlm "Hello"
 
 ```sh
 jitllm hardware                       # CPU tier, GPUs, spendable memory
+jitllm doctor models/llama.jlm        # can this machine run it; what is missing
+jitllm capabilities                   # what this build converts, runs and serves
 jitllm library                        # the catalog
 jitllm tokenize models/llama.jlm "Hello, world"
 jitllm asm Q4_K                       # the x86-64 kernel generated for a format

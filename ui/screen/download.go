@@ -1,6 +1,7 @@
 package screen
 
 import (
+	gocontext "context"
 	"errors"
 	"os"
 	"sync"
@@ -31,6 +32,9 @@ type downloadScreen struct {
 	pref     state.Signal[int] // the balance, an index into discover.BalanceSteps
 	picked   bool              // a person chose a model; stop following the top
 	ord      state.ReadonlySignal[[]int]
+
+	cancelMu sync.Mutex
+	stop     gocontext.CancelFunc // the running download's
 }
 
 var (
@@ -85,10 +89,13 @@ func (d *downloadScreen) onDisk(i int) bool {
 
 // --- the action ----------------------------------------------------------------
 
-// Seams for the tests: the Hub and the disk.
+// Seams for the tests: the Hub, the whole-file download a stream falls back
+// to, and the disk.
 var (
-	downloadFetch discover.FetchFunc = discover.HubFetch
-	downloadFree  discover.FreeFunc  = discover.FreeBytes
+	downloadEndpoint string
+	downloadNoStream bool
+	downloadFetch    discover.FetchFunc = discover.HubFetch
+	downloadFree     discover.FreeFunc  = discover.FreeBytes
 )
 
 // act is the button: Load a model that is on disk, fetch one that is not.
@@ -107,12 +114,11 @@ func (d *downloadScreen) act() {
 	d.fetch(m)
 }
 
-// fetch downloads m (and its vision tower), converts it on the engine's
-// queue, removes the GGUF it downloaded, and says where the model is. The
-// steps are [discover]'s; this puts them on the screen.
+// fetch turns m (and its vision tower) into a container, converting the GGUF
+// as it streams from the Hub, and says where the model is. The steps are
+// [discover.Get]'s; this puts them on the screen.
 func (d *downloadScreen) fetch(m library.Model) {
 	dir := d.dir()
-	dst := d.containerFor(m)
 	if note := discover.SpaceNote(m, dir, downloadFree); note != "" {
 		d.note.Set(note)
 		return
@@ -123,33 +129,70 @@ func (d *downloadScreen) fetch(m library.Model) {
 	d.note.Set("Downloading " + m.Title + "...")
 	d.sh.SetStatus("downloading " + m.Name)
 
+	ctx, cancel := gocontext.WithCancel(gocontext.Background())
+	d.cancelMu.Lock()
+	d.stop = cancel
+	d.cancelMu.Unlock()
+	run := modelsFor(d.sh).runner()
+	hub := discover.Hub{
+		Endpoint: downloadEndpoint,
+		Token:    hf.FindToken(os.Getenv, os.UserHomeDir),
+		Fetch:    downloadFetch,
+		NoStream: downloadNoStream,
+		// The runner may return before the job has run; Get waits for it.
+		Convert: func(job func()) bool {
+			done := make(chan struct{})
+			if !run(func() { defer close(done); job() }) {
+				return false
+			}
+			<-done
+			return true
+		},
+	}
 	go func() {
 		defer crash.Recover("download")
-		got, err := discover.Download(m, dir, hf.FindToken(os.Getenv, os.UserHomeDir), downloadFetch,
-			func(f float64) { d.sh.Post(func() { d.progress.Set(f) }) })
+		defer cancel()
+		_, err := discover.Get(ctx, m, dir, hub, func(s discover.Step) {
+			d.sh.Post(func() {
+				d.progress.Set(s.Fraction)
+				switch s.Stage {
+				case "streaming":
+					d.note.Set("Downloading " + m.Title + " and converting it as it arrives...")
+				case "converting":
+					d.note.Set("Converting " + m.Title + " to a .jlm (the bar is an estimate)...")
+				}
+			})
+		})
+		if errors.Is(err, gocontext.Canceled) {
+			d.sh.Post(func() {
+				d.busy.Set(false)
+				d.note.Set("Stopped. Press Download to carry on where it stopped.")
+				d.sh.SetStatus("download stopped: " + m.Name)
+			})
+			return
+		}
 		if err != nil {
 			d.fail(m, err)
 			return
 		}
-		d.sh.Post(func() { d.note.Set("Converting " + m.Title + " to a .jlm (the bar is an estimate)...") })
-		took := modelsFor(d.sh).runner()(func() {
-			if err := RunConvert(d.sh, got.Request(dst)); err != nil {
-				d.fail(m, err)
-				return
-			}
-			got.Cleanup()
-			d.sh.Post(func() {
-				d.refresh()
-				modelsFor(d.sh).rescan()
-				d.busy.Set(false)
-				d.note.Set(m.Title + " is ready. Press Load, or find it on the Models tab.")
-				d.sh.SetStatus("downloaded " + m.Name)
-			})
+		d.sh.Post(func() {
+			d.refresh()
+			modelsFor(d.sh).rescan()
+			d.busy.Set(false)
+			d.note.Set(m.Title + " is ready. Press Load, or find it on the Models tab.")
+			d.sh.SetStatus("downloaded " + m.Name)
 		})
-		if !took {
-			d.fail(m, errors.New("the engine is busy"))
-		}
 	}()
+}
+
+// cancel stops the running download; what it wrote is kept, and the next
+// Download of the same model carries on from it.
+func (d *downloadScreen) cancel() {
+	d.cancelMu.Lock()
+	defer d.cancelMu.Unlock()
+	if d.stop != nil {
+		d.stop()
+	}
 }
 
 // fail says what went wrong in words a person can act on.

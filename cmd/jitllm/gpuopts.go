@@ -47,6 +47,10 @@ func gpuOptions() []tier.Option {
 	case "1":
 		o = append(o, tier.WithDeviceTune(tier.TuneForce))
 	}
+	// A register cap on every CUDA kernel: the register report's what-if.
+	if n := num("JITLLM_CUDA_MAXREGS"); n > 0 {
+		o = append(o, tier.WithCUDAMaxRegs(n))
+	}
 	if set("JITLLM_GPU_VERBOSE") {
 		o = append(o, tier.WithVerbose(true))
 	}

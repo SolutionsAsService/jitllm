@@ -3,6 +3,14 @@ title: Troubleshooting
 description: Common errors and what to do about them.
 ---
 
+## Start with doctor
+
+```sh
+jitllm doctor models/m.jlm
+```
+
+`doctor` checks the build, the CPU's code-generator tier, memory, every GPU backend (and why one is not usable), and, given a container, whether this build reads its version and knows its architecture. Each problem comes with what to do next. It exits 0 when everything is in place and 2 when something is missing; `-json` is the same report for a script.
+
 ## "is not a .jlm container" or a convert command is printed
 
 The engine runs `.jlm` files only. Convert the GGUF or Hugging Face model first; the error prints the exact command:
@@ -60,4 +68,4 @@ The CPU and GPU add floating-point numbers in different orders, so logits differ
 
 ## Reporting a problem
 
-Include the output of `jitllm hardware`, the model and its quantization, the exact command, and what you saw. That is almost always enough to reproduce it.
+Include the output of `jitllm doctor` and `jitllm hardware`, the model and its quantization, the exact command, and what you saw. That is almost always enough to reproduce it.
