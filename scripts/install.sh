@@ -14,6 +14,8 @@
 #   JITLLM_VERSION      a release tag, such as v0.1.0 (default: the latest)
 #   JITLLM_INSTALL_DIR  where the binaries go (default: ~/.local/bin, or
 #                       /usr/local/bin when run as root)
+#   JITLLM_APPS_DIR     where jitllm.app goes on macOS (default: /Applications,
+#                       or ~/Applications when that is not writable)
 #   JITLLM_DOWNLOAD_URL where releases are fetched from (default: GitHub)
 set -eu
 
@@ -109,7 +111,7 @@ done
 mkdir -p "$dir"
 for p in $progs; do
 	if [ -d "$tmp/$p/jitllm.app" ]; then
-		apps=/Applications
+		apps=${JITLLM_APPS_DIR:-/Applications}
 		[ -w "$apps" ] || apps=$HOME/Applications
 		mkdir -p "$apps"
 		rm -rf "$apps/jitllm.app.new"

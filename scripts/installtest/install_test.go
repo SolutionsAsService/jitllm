@@ -15,8 +15,8 @@ import (
 )
 
 // TestDesktopOnMacInstallsTheApp: on macOS `install.sh desktop` installs the
-// release's signed jitllm.app, not the bare binary, into ~/Applications when
-// /Applications is not writable.
+// release's signed jitllm.app, not the bare binary, into the apps directory,
+// or into ~/Applications when that directory is not writable.
 func TestDesktopOnMacInstallsTheApp(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("install.sh is the Linux and macOS installer; Windows has install.ps1")
@@ -26,11 +26,27 @@ func TestDesktopOnMacInstallsTheApp(t *testing.T) {
 			t.Fatalf("%s is needed: %v", tool, err)
 		}
 	}
-	if fi, err := os.Stat("/Applications"); err == nil && fi.IsDir() {
-		t.Fatalf("/Applications exists on this host; the test expects the ~/Applications fallback")
-	}
-	root := t.TempDir()
+	t.Run("writable", func(t *testing.T) {
+		root := t.TempDir()
+		apps := filepath.Join(root, "apps")
+		must(t, os.MkdirAll(apps, 0o755))
+		installApp(t, root, apps, apps)
+	})
+	t.Run("not writable", func(t *testing.T) {
+		if os.Geteuid() == 0 {
+			t.Skip("root writes a read-only directory, so the fallback cannot be reached")
+		}
+		root := t.TempDir()
+		apps := filepath.Join(root, "apps")
+		must(t, os.MkdirAll(apps, 0o555))
+		installApp(t, root, apps, filepath.Join(root, "home", "Applications"))
+	})
+}
 
+// installApp runs install.sh desktop as an arm64 Mac with JITLLM_APPS_DIR=apps
+// and requires jitllm.app in want.
+func installApp(t *testing.T, root, apps, want string) {
+	t.Helper()
 	// The release: the .app.zip and a checksums.txt naming it.
 	rel := filepath.Join(root, "rel", "v1.2.3")
 	must(t, os.MkdirAll(rel, 0o755))
@@ -65,15 +81,16 @@ func TestDesktopOnMacInstallsTheApp(t *testing.T) {
 		"JITLLM_VERSION=v1.2.3",
 		"JITLLM_DOWNLOAD_URL=file://"+filepath.Join(root, "rel"),
 		"JITLLM_INSTALL_DIR="+filepath.Join(root, "bin"),
+		"JITLLM_APPS_DIR="+apps,
 	)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("install.sh desktop: %v\n%s", err, out)
 	}
-	app := filepath.Join(home, "Applications", "jitllm.app")
+	app := filepath.Join(want, "jitllm.app")
 	got, err := os.ReadFile(filepath.Join(app, "Contents", "MacOS", "jitllm-desktop"))
 	if err != nil || string(got) != "app" {
-		t.Fatalf("jitllm.app not installed (%v)\n%s", err, out)
+		t.Fatalf("jitllm.app not installed in %s (%v)\n%s", want, err, out)
 	}
 	if _, err := os.Stat(filepath.Join(root, "bin", "jitllm-desktop")); err == nil {
 		t.Fatalf("a bare jitllm-desktop was installed beside the app")
