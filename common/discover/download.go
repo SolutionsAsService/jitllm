@@ -15,6 +15,7 @@ import (
 	"github.com/jitllm/jitllm/common/config"
 	"github.com/jitllm/jitllm/common/convertjob"
 	"github.com/jitllm/jitllm/common/session"
+	"github.com/jitllm/jitllm/convert/gguf"
 	"github.com/jitllm/jitllm/convert/hf"
 	"github.com/jitllm/jitllm/convert/library"
 )
@@ -45,8 +46,9 @@ func OnDisk(dir string) []bool {
 	return have
 }
 
-// Need is the disk a download of m takes at its peak: the GGUF and the
-// container coexist for a moment, with a tenth to spare.
+// Need is the disk a download of m takes at its peak when it is not streamed
+// (see [Get]): the GGUF and the container coexist for a moment, with a tenth
+// to spare.
 func Need(m library.Model) int64 { return m.Bytes*2 + m.Bytes/10 }
 
 // FreeFunc is how much disk is free on a folder's filesystem, false when
@@ -60,6 +62,9 @@ func SpaceNote(m library.Model, dir string, free FreeFunc) string {
 		free = FreeBytes
 	}
 	need := Need(m)
+	if !hasSource(m, dir) && gguf.Streamable() {
+		need = Streamed(m) // see Get: no GGUF is stored
+	}
 	if n, ok := free(dir); ok && n < need {
 		return fmt.Sprintf("Not enough disk space in %s: this needs about %s and %s is free.",
 			dir, session.Bytes(uint64(need)), session.Bytes(uint64(n)))

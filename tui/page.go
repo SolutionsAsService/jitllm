@@ -58,6 +58,8 @@ type env struct {
 	spin  spinner.Model
 	// api is the API this app serves, nil when it is off.
 	api *api.Server
+	// hub is the Hub downloads read from; "" is huggingface.co.
+	hub string
 }
 
 // syncAPI starts, restarts or stops the API to match the settings, and
