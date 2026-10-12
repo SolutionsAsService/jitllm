@@ -197,7 +197,7 @@ run flags:
                          placement sizes it itself.
   -maxmem BYTES          host weight residency budget (default: the cgroup limit
                          or MemAvailable, whichever is smaller, less headroom)
-  -n N                   tokens to generate (default 32)
+  -n N                   tokens to generate; 0 (the default) runs until the model ends its reply
   -depth N               pad the prompt to N tokens, so decode is measured at that context length
   -tune-seam             measure whether fewer device blocks are faster, and relocate
   -no-gpu-fallback       fail instead of finishing on the host when the device breaks
@@ -1581,6 +1581,11 @@ func loadOpts(t []tok.Option, budget uint64) []model.Option {
 	}
 	if os.Getenv("JITLLM_SH_OVERLAP") == "0" {
 		o = append(o, model.WithSharedOverlap(false))
+	}
+	// JITLLM_TAIL_ROWS=0 runs a prompt's few-row chunk batched rather than as
+	// a ragged step of its rows (model.WithTailRows).
+	if os.Getenv("JITLLM_TAIL_ROWS") == "0" {
+		o = append(o, model.WithTailRows(false))
 	}
 	if n := numaNodes(); n != nil {
 		o = append(o, model.WithInterleave(n))

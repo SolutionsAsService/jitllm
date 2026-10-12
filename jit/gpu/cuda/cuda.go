@@ -263,6 +263,7 @@ func bindCUDA() error {
 	loadQueues(lib)
 	loadEvents(lib)
 	loadUUID(lib)
+	loadFuncAttrs(lib)
 	return nil
 }
 

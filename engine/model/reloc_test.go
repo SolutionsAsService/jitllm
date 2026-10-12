@@ -276,12 +276,17 @@ func TestLayerRelocatesToAnotherDevice(t *testing.T) {
 // layerRelocatesToAnotherDevice is TestLayerRelocatesToAnotherDevice on one model.
 func layerRelocatesToAnotherDevice(t *testing.T, path string) {
 
-	a, err := tier.Open(0)
+	// Both tiers' split tuner off: each tier tunes its own splits, so two
+	// tuned tiers can sum a matvec in different orders, and the two arms then
+	// part at a knife-edge argmax whatever the relocation did (it read token
+	// 7 of tinyllama either way on a V100, on main and on a branch alike).
+	// An equality gate pins every knob its equality depends on (RULE 11c).
+	a, err := tier.OpenWith(tier.WithDeviceTune(tier.TuneOff))
 	if err != nil || a == nil {
 		noDevice(t, "device", err)
 	}
 	defer a.Close()
-	b, err := tier.Open(0)
+	b, err := tier.OpenWith(tier.WithDeviceTune(tier.TuneOff))
 	if err != nil || b == nil {
 		noDevice(t, "second tier", err)
 	}

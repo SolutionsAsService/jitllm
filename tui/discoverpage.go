@@ -67,7 +67,7 @@ func fitText(fit string) string {
 // machineMsg is the hardware probe, taken on the engine's queue.
 type machineMsg struct{ mr session.MachineReport }
 
-type discoverKeys struct{ Get, Filter, Smaller, Larger key.Binding }
+type discoverKeys struct{ Get, Filter, Smaller, Larger, Stop key.Binding }
 
 // discoverPage is the models jitllm has verified, ranked for this machine by
 // the window's ranking (discover.Rank).
@@ -89,6 +89,7 @@ func newDiscoverPage(env *env) *discoverPage {
 		Filter:  bind("type", "filter", "/"),
 		Smaller: bind("<", "faster", "<", ","),
 		Larger:  bind(">", "smarter", ">", "."),
+		Stop:    bind("ctrl+x", "stop download"),
 	}}
 	p.list = list.New(nil, libRow{p}, 60, 20)
 	p.list.SetShowPagination(false)
@@ -127,7 +128,7 @@ func (p *discoverPage) refresh() {
 }
 
 func (p *discoverPage) Help() []key.Binding {
-	return []key.Binding{p.keys.Get, p.keys.Filter, p.keys.Smaller, p.keys.Larger}
+	return []key.Binding{p.keys.Get, p.keys.Filter, p.keys.Smaller, p.keys.Larger, p.keys.Stop}
 }
 
 func (p *discoverPage) Focus() tea.Cmd  { return nil }
@@ -156,6 +157,10 @@ func (p *discoverPage) Update(msg tea.Msg) tea.Cmd {
 		var kept tea.Cmd
 		if p.list.FilterState() == list.Filtering && key.Matches(msg, p.keys.Get) {
 			p.list, kept = p.list.Update(msg)
+		}
+		if key.Matches(msg, p.keys.Stop) {
+			p.env.jobs.cancel()
+			return kept
 		}
 		if p.list.FilterState() != list.Filtering {
 			switch {

@@ -14,6 +14,7 @@ import (
 
 	"github.com/jitllm/jitllm/dev/bench"
 	"github.com/jitllm/jitllm/engine/model"
+	"github.com/jitllm/jitllm/jit/cpu"
 	"github.com/jitllm/jitllm/jit/gpu/ir"
 	"github.com/jitllm/jitllm/jit/gpu/tier"
 )
@@ -34,11 +35,14 @@ func verifyCmd(args []string) error {
 	// 0 asks the device, like run's.
 	vram := bytesFlag(fs, "vram", 0, "device weight budget, bytes or 3G/512M; 0 asks the device")
 	maxmem := bytesFlag(fs, "maxmem", 0, "host weight residency budget, bytes or 3G/512M; 0 works it out")
-	ab := fs.String("ab", "", "instead of verifying, run a paired A/B: split, submit, head, graph, softmax, fuse, ropetab, attnchunk or attnpair")
+	ab := fs.String("ab", "", "instead of verifying, run a paired A/B: split, submit, head, graph, softmax, fuse, ropetab, attnchunk, attnpair or regs")
 	rounds := fs.Int("rounds", 21, "A/B rounds")
 	verify := fs.Bool("verify", false, "recompute every served matvec on the host and report disagreements")
 	prefill := fs.Int("prefill", 0, "gate the BATCHED device prefill: prefill this many tokens on both tiers and diff")
 	depth := fs.Int("depth", 0, "context depth to run an -ab arm at; attention is 1% of a token at 0 and 30% at 1536")
+	registers := fs.Bool("registers", false, "instead of verifying, run decode and the batched prefill on the "+
+		"device and report every compiled kernel's registers, spill, shared memory and occupancy")
+	asJSON := fs.Bool("json", false, "with -registers, print the report as JSON")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -77,6 +81,19 @@ func verifyCmd(args []string) error {
 	fmt.Printf("device: %s\n", g.Name())
 	fmt.Printf("model:  %s  L=%d d=%d\n", fs.Arg(0), m.Cfg.NLayer, m.Cfg.NEmbd)
 
+	if *registers {
+		// The kernels a model runs are the ones it compiles: decode, then the
+		// batched prefill (diffed against per-token decode, so a report is never
+		// read off a path that computes something else).
+		benchRun(m, nil, *n)
+		benchRun(m, g, *n)
+		if err := prefillDiff(m, g, max(*prefill, 40), 4); err != nil {
+			// The diff is printed above it; the report still describes the
+			// kernels that ran, which is what was asked for here.
+			fmt.Printf("  (prefill diff: %v)\n", err)
+		}
+		return registerReport(os.Stdout, cpu.KernelRegisters(), g.KernelResources(), *asJSON)
+	}
 	if *ab != "" {
 		abRun(m, g, *ab, *n, *rounds, *depth)
 		return nil
@@ -622,7 +639,7 @@ func abRun(m *model.Model, g *tier.GPU, which string, n, rounds, depth int) {
 	// measurement at a depth, keep rounds*n*2 small against depth.
 	fmt.Printf("  context runs %d..%d over the whole A/B (-depth is the START)\n",
 		depth, min(depth+rounds*n*2, lim))
-	step := func(iters int) {
+	runOn := func(s *model.State, iters int) {
 		tok := int32(1)
 		for i := 0; i < iters; i++ {
 			logits, err := s.Forward(tok)
@@ -652,8 +669,41 @@ func abRun(m *model.Model, g *tier.GPU, which string, n, rounds, depth int) {
 			}
 		}
 	}
+	step := func(iters int) { runOn(s, iters) }
 	var a, b bench.Case
 	switch which {
+	case "regs":
+		// B is a second tier on the same card whose every CUDA kernel is
+		// capped at JITLLM_AB_MAXREGS registers (.maxnreg), with a State of
+		// its own. 0 caps nothing, which makes this the A/A self-control: two
+		// tiers, two States, the same kernels.
+		maxRegs, _ := strconv.Atoi(os.Getenv("JITLLM_AB_MAXREGS"))
+		g2, err := tier.OpenWith(append([]tier.Option{tier.WithDevices("cuda:0"),
+			tier.WithDeviceTune(tier.TuneOff)}, append(gpuOptions(), tier.WithCUDAMaxRegs(maxRegs))...)...)
+		if err != nil {
+			panic(err)
+		}
+		defer g2.Close()
+		s2 := m.NewState(depth + rounds*n*2 + 16)
+		defer s2.Close()
+		if err := s2.SetDevice(g2); err != nil {
+			panic(err)
+		}
+		if s2.GPULayers() != s.GPULayers() {
+			panic(fmt.Errorf("the capped tier took %d blocks and the shipped one %d: not one comparison",
+				s2.GPULayers(), s.GPULayers()))
+		}
+		if depth > 0 {
+			ids := make([]int32, depth)
+			for i := range ids {
+				ids[i] = int32(1 + i%(m.Cfg.NVocab-1))
+			}
+			if _, err := s2.Prefill(ids); err != nil {
+				panic(err)
+			}
+		}
+		a = bench.Case{Name: "shipped registers", Fn: step}
+		b = bench.Case{Name: fmt.Sprintf("capped at %d registers", maxRegs), Fn: func(it int) { runOn(s2, it) }}
 	case "attnchunk":
 		// Needs -depth to mean anything. With GQA, adjacent query heads share
 		// a kv head; one head per task scatters them across workers.

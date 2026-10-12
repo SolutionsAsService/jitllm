@@ -8,7 +8,7 @@ What that buys:
 - **Relocation at run time.** Blocks move between the CPU and GPUs while a model is serving, and their attention and recurrent state move with them, so a conversation survives the move. Several GPUs, of different vendors, can share one model.
 - **Paged KV cache and long context.** The KV cache grows a page at a time instead of reserving the whole context, pages can spill to a store and come back, and a growing context can push blocks back to the host to make room.
 - **Prefix reuse.** KV pages are keyed by the tokens that produced them, so sessions and runs that share a system prompt or document reuse it without recomputing.
-- **No dependencies.** One self-contained executable per platform (Linux and macOS, x86-64 and ARM64): no Python, no vendor SDK. It finds the installed CUDA, Vulkan or Metal drivers on its own and falls back to the CPU.
+- **No dependencies.** One self-contained executable per platform (Linux, macOS and Windows, x86-64 and ARM64): no Python, no vendor SDK. It finds the installed CUDA, Vulkan or Metal drivers on its own and falls back to the CPU.
 - **Drop-in APIs.** OpenAI- and Anthropic-compatible streaming endpoints, plus an embeddable Go library, a CLI and a desktop app.
 - **Breadth.** Dense, mixture-of-experts and hybrid recurrent architectures (Llama, Qwen, Gemma, Phi, GPT-OSS, DeepSeek, Kimi Linear and more), vision towers and embedding models.
 

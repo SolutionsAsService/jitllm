@@ -23,6 +23,8 @@ jitllm has no precompiled kernels. It probes the machine at startup and generate
 
 A CPU below the SSE tier is refused at load with the missing extensions named, rather than crashing on an unsupported instruction. AVX-512 is not used yet; on a Xeon D-2123IT without VNNI, jitllm's 256-bit code decoded Llama-3.2-1B at 97% of llama.cpp's AVX-512 build.
 
+On the CPU too, a prompt is prefilled a chunk of rows at a time as matrix products, including the input and output projections of the recurrent blocks of hybrid and state-space models (the gated delta rule, Kimi Delta Attention, Mamba and the short convolution); only the recurrence itself runs row by row.
+
 Decode uses one worker per physical performance core. Hybrid CPUs' efficiency cores and hyperthread siblings are left out, because decode is bound by memory bandwidth and they add stragglers rather than bandwidth.
 
 ## GPUs
@@ -32,8 +34,11 @@ Decode uses one worker per physical performance core. Hybrid CPUs' efficiency co
 | CUDA | PTX, loaded by the driver | Linux, WSL, Windows | Tesla V100 (sm_70, up to 5 per model), RTX 3050 Ti Laptop |
 | Vulkan | SPIR-V compute | Linux, Windows, macOS through MoltenVK | Intel Iris Xe, RTX 3050 Ti |
 | Metal | Metal Shading Language | macOS | Apple M4 |
+| HIP (`hip:N`) | AMDGPU code, assembled through ROCm's comgr | Linux and Windows, when ROCm is installed | not yet tested on AMD hardware; an AMD GPU also runs through Vulkan with only its driver |
 
-All three run the same model features: every architecture's block runs whole on the device, including attention, mixture-of-experts routing, multi-head latent attention, the gated delta rule of hybrid models, and vision-tower blocks. On CUDA, prefill uses the tensor cores, and decode replays captured graphs.
+CUDA, Vulkan and Metal run the same model features: every architecture's block runs whole on the device, including attention, mixture-of-experts routing, multi-head latent attention, the gated delta rule of hybrid models, and vision-tower blocks. Prompts are prefilled on the device in chunks, as matrix products. On CUDA, prefill uses the tensor cores (binary16 by default from sm_80), and decode replays captured graphs.
+
+The device tuners' answers are kept in the user cache directory (`jitllm` under it), keyed by the device's UUID, the driver and the executable, so a second run starts tuned. A shape not measured yet runs a default split while the tuner measures it in the background.
 
 jitllm reaches the drivers through a foreign-function interface rather than cgo, so the same executable runs with or without a GPU and needs no SDK at build time.
 

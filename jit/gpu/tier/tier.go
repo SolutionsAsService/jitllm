@@ -1958,6 +1958,30 @@ func (g *GPU) Stats() Stats {
 	return s
 }
 
+// DeviceKernels is one device's compiled kernels and what each cost it.
+// Known is false where the backend cannot read its compiler's allocation
+// (backend.ResourceReporter), and Kernels is then empty rather than a guess.
+type DeviceKernels struct {
+	Device  string                    `json:"device"`
+	Known   bool                      `json:"known"`
+	Kernels []backend.KernelResources `json:"kernels"`
+}
+
+// KernelResources is every device's DeviceKernels, fastest device first:
+// registers, spill, shared memory and occupancy for each kernel this tier
+// has compiled so far.
+func (g *GPU) KernelResources() []DeviceKernels {
+	out := make([]DeviceKernels, 0, len(g.devs))
+	for _, d := range g.devs {
+		dk := DeviceKernels{Device: label(d.dev, d.ord)}
+		if r, ok := d.dev.(backend.ResourceReporter); ok {
+			dk.Known, dk.Kernels = true, r.KernelResources()
+		}
+		out = append(out, dk)
+	}
+	return out
+}
+
 // DevStats is the same counters kept apart, fastest device first.
 func (g *GPU) DevStats() []Stats {
 	out := make([]Stats, 0, len(g.devs))

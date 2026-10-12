@@ -36,6 +36,9 @@ type modelOpts struct {
 	// noKVPrewarm leaves a device's KV pools at their first frame after
 	// placement (WithKVPrewarm).
 	noKVPrewarm bool
+	// noTailRows runs a prompt's few-row chunk batched rather than as a
+	// ragged step (tailrows.go).
+	noTailRows bool
 	// experts is WithExperts' choice.
 	experts string
 	// trialAA makes the stream trial an A/A self-control (WithStreamTrialAA).
@@ -141,6 +144,12 @@ func WithStreamTrial(on bool) Option { return func(l *loadOpts) { l.opt.noStream
 // (nn.KVPrewarmer), so its first prompt does not grow them inside its own
 // time. On by default; off is the A/B arm.
 func WithKVPrewarm(on bool) Option { return func(l *loadOpts) { l.opt.noKVPrewarm = !on } }
+
+// WithTailRows sets whether a prompt chunk of at most four rows, every block
+// and the head on one device that runs ragged rows, runs as one ragged step
+// of its rows (decode's matvec over them) rather than as a batched chunk at
+// the device's grain (tailrows.go). On by default; off is the A/B arm.
+func WithTailRows(on bool) Option { return func(l *loadOpts) { l.opt.noTailRows = !on } }
 
 // WithProfile arms the per-op nanosecond counters OpProfile reports.
 func WithProfile(on bool) Option { return func(l *loadOpts) { l.opt.profile = on } }
