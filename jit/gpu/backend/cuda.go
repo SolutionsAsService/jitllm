@@ -282,6 +282,7 @@ func (s *cudaSession) Launch(k Kernel, groups, width int, bufs ...Buf) error {
 	if err := m.LaunchArgs(st, groups, width, args); err != nil {
 		return err
 	}
+	ck.noteRan()
 	if t0 != nil {
 		if e, err := cuda.NewEvent(); err == nil && e.RecordOn(st) == nil {
 			directMarks.add(kernPair{t0, e, ck.name})
@@ -913,12 +914,15 @@ func (c *cudaDev) Compile(k *ir.Kernel) (Kernel, error) {
 	if err != nil {
 		return nil, err
 	}
+	kern := &cudaKern{m: m, dev: c, name: k.Name, group: k.Group}
 	if attrsOK {
-		c.res.note(KernelResources{Name: k.Name, API: "cuda", Group: k.Group[0], Regs: a.Regs,
+		kern.res = KernelResources{Name: k.Name, API: "cuda", Group: k.Group[0], Regs: a.Regs,
 			SpillBytes: a.Local, SharedBytes: a.Shared, MaxGroup: a.MaxThreads,
-			Resident: a.Blocks, ResidentThreads: a.Blocks * k.Group[0], MaxThreads: c.d.MaxThreadsPerSM()})
+			Resident: a.Blocks, ResidentThreads: a.Blocks * k.Group[0], MaxThreads: c.d.MaxThreadsPerSM()}
+		kern.resOK = true
+		c.res.note(kern.res)
 	}
-	return &cudaKern{m: m, dev: c, name: k.Name, group: k.Group}, nil
+	return kern, nil
 }
 
 type cudaBuf struct {
@@ -1025,6 +1029,22 @@ type cudaKern struct {
 	// group is the declared workgroup. CUDA runs the launch's width, so a
 	// mismatch computes here and not on Vulkan; checkWidth refuses it on both.
 	group [3]int
+	// res is what the driver reported for this compile (resOK false where it
+	// would not say); see KernelResourcesOf.
+	res   KernelResources
+	resOK bool
+	// ran is set at the first launch, which marks the kernel in the device's
+	// ledger as one that ran rather than one compiled and passed over.
+	ran atomic.Bool
+}
+
+func (k *cudaKern) resources() (KernelResources, bool) { return k.res, k.resOK }
+
+// noteRan is one atomic load a launch; the first launch records it.
+func (k *cudaKern) noteRan() {
+	if !k.ran.Load() && k.ran.CompareAndSwap(false, true) {
+		k.dev.res.ran(k.name)
+	}
 }
 
 // Launch synchronises before returning. cuLaunchKernel is asynchronous and the
@@ -1041,6 +1061,7 @@ func (k *cudaKern) Launch(groups, width int, bufs ...Buf) error {
 	err := errCUDAClosed
 	k.dev.do(func() {
 		if err = k.m.Launch(groups, width, cb...); err == nil {
+			k.noteRan()
 			err = k.dev.syncAll()
 		}
 	})

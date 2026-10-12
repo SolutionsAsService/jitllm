@@ -54,11 +54,15 @@ func registerReport(w io.Writer, host []cpu.KernelRegs, devs []tier.DeviceKernel
 			fmt.Fprintf(w, "  this backend does not report its compiler's register allocation\n")
 			continue
 		}
-		fmt.Fprintf(w, "  %-44s %5s %5s %6s %7s %5s %9s %6s\n",
-			"kernel", "group", "regs", "spill", "shared", "res", "occupancy", "shapes")
+		fmt.Fprintf(w, "  %-44s %5s %5s %6s %7s %5s %9s %6s %4s\n",
+			"kernel", "group", "regs", "spill", "shared", "res", "occupancy", "shapes", "ran")
 		for _, k := range d.Kernels {
-			fmt.Fprintf(w, "  %-44s %5d %5d %6d %7d %5d %8.0f%% %6d\n",
-				k.Name, k.Group, k.Regs, k.SpillBytes, k.SharedBytes, k.Resident, 100*k.Occupancy(), k.Compiles)
+			ran := "yes"
+			if !k.Ran {
+				ran = "no"
+			}
+			fmt.Fprintf(w, "  %-44s %5d %5d %6d %7d %5d %8.0f%% %6d %4s\n",
+				k.Name, k.Group, k.Regs, k.SpillBytes, k.SharedBytes, k.Resident, 100*k.Occupancy(), k.Compiles, ran)
 		}
 	}
 	return nil

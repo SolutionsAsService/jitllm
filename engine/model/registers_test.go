@@ -48,10 +48,13 @@ var hostStagers = map[string]bool{
 	"cpu.EmitPackedMatVecFusedSSE": true,
 }
 
-// hotKernelFaults is every hot kernel in ks that spills or sits below its
+// hotKernelFaults is every hot kernel in ks that ran and spills or sits below its
 // family's floor, and how many hot kernels it checked.
 func hotKernelFaults(ks []backend.KernelResources) (faults []string, checked int) {
 	for _, k := range ks {
+		if !k.Ran {
+			continue // compiled and passed over: a tile refused for spilling
+		}
 		for _, f := range hotFloors {
 			hot := false
 			for _, p := range f.prefixes {
@@ -189,9 +192,9 @@ func TestHotKernelsKeepTheirRegisters(t *testing.T) {
 // spilling, so the floors are shown to fire here on the driver's own fields.
 func TestHotKernelFloorsFire(t *testing.T) {
 	ks := []backend.KernelResources{
-		{Name: "matvec_q4_k_2048x2048_s32", Group: 128, Regs: 128, Resident: 3, ResidentThreads: 384, MaxThreads: 1536},
-		{Name: "flashkvpaged", Group: 128, Regs: 255, Resident: 1, ResidentThreads: 128, MaxThreads: 1536},
-		{Name: "add", Group: 128, Regs: 255, Resident: 1, ResidentThreads: 128, MaxThreads: 1536},
+		{Name: "matvec_q4_k_2048x2048_s32", Ran: true, Group: 128, Regs: 128, Resident: 3, ResidentThreads: 384, MaxThreads: 1536},
+		{Name: "flashkvpaged", Ran: true, Group: 128, Regs: 255, Resident: 1, ResidentThreads: 128, MaxThreads: 1536},
+		{Name: "add", Ran: true, Group: 128, Regs: 255, Resident: 1, ResidentThreads: 128, MaxThreads: 1536},
 	}
 	faults, checked := hotKernelFaults(ks)
 	if checked != 2 || len(faults) != 2 {

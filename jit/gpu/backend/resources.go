@@ -35,6 +35,9 @@ type KernelResources struct {
 	// the worst of those compiles: most registers, most spill, least
 	// resident.
 	Compiles int `json:"compiles"`
+	// Ran is whether any compile of this name was launched: a kernel
+	// compiled and passed over (a spilling tile) is reported with Ran false.
+	Ran bool `json:"ran"`
 }
 
 // Occupancy is ResidentThreads over MaxThreads, or -1 when either is unknown.
@@ -54,6 +57,20 @@ type ResourceReporter interface {
 	// KernelResources lists every kernel name compiled on this device so far,
 	// worst compile per name, sorted by name.
 	KernelResources() []KernelResources
+}
+
+// resourced is a compiled kernel that knows what its compile cost.
+type resourced interface {
+	resources() (KernelResources, bool)
+}
+
+// KernelResourcesOf is what compiling k cost its device, for a JIT choosing
+// between variants by count; ok is false where the backend cannot say.
+func KernelResourcesOf(k Kernel) (r KernelResources, ok bool) {
+	if rk, is := k.(resourced); is {
+		return rk.resources()
+	}
+	return r, false
 }
 
 // resLedger is the per-device record behind ResourceReporter.
@@ -88,6 +105,15 @@ func (l *resLedger) note(r KernelResources) {
 		old.Group, old.Resident, old.ResidentThreads, old.MaxGroup = r.Group, r.Resident, r.ResidentThreads, r.MaxGroup
 	}
 	l.by[r.Name] = old
+}
+
+func (l *resLedger) ran(name string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if r, ok := l.by[name]; ok {
+		r.Ran = true
+		l.by[name] = r
+	}
 }
 
 func (l *resLedger) list() []KernelResources {
