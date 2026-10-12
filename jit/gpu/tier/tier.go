@@ -842,6 +842,9 @@ type Stats struct {
 	// (kernels.ActIn), and ActInSaved the norm or quantize launches they
 	// replaced: the selection check that the prologue ran.
 	ActInLaunches, ActInSaved int
+	// ActInDeclined counts prologue kernels the device would not launch at
+	// their width (backend.ErrGroupTooWide): those shapes keep two launches.
+	ActInDeclined int
 	// PagedLaunches counts encoded paged-attention launches: the check that a
 	// paged run read its history through the pool.
 	PagedLaunches int
@@ -1179,6 +1182,7 @@ func (s *Stats) add(o Stats) {
 	s.FusedLaunches += o.FusedLaunches
 	s.ActInLaunches += o.ActInLaunches
 	s.ActInSaved += o.ActInSaved
+	s.ActInDeclined += o.ActInDeclined
 	s.PagedLaunches += o.PagedLaunches
 	s.PagedPrefillLaunches += o.PagedPrefillLaunches
 	s.PagedStagedLaunches += o.PagedStagedLaunches

@@ -1,6 +1,7 @@
 package model
 
 import (
+	"fmt"
 	"math"
 	"os"
 	"strings"
@@ -100,13 +101,14 @@ func TestFusedDecodeMatchesPerOp(t *testing.T) {
 						t.Fatalf("seam %d: the device took %d blocks, want %d: %s", seam, placed, want, g.Err())
 					}
 					fl, ai := g.Stats().FusedLaunches, g.Stats().ActInLaunches
+					why := fmt.Sprintf("%s; %d prologue kernels declined at their width", g.Err(), g.Stats().ActInDeclined)
 					exact = strings.Contains(g.Name(), "[ptx]") && g.Devices() == 1
 					g.Close()
 					if noFuse && (fl != 0 || ai != 0) {
 						t.Fatalf("NoFuse encoded %d fused launches and %d operand prologues", fl, ai)
 					}
 					if !noFuse && ai == 0 {
-						t.Fatalf("seam %d: no matvec built its own operand: the per-op path answered", seam)
+						t.Fatalf("seam %d: no matvec built its own operand: the per-op path answered (%s)", seam, why)
 					}
 					if !noFuse && fl == 0 {
 						t.Fatalf("seam %d: no fused launch was encoded: the per-op path answered", seam)

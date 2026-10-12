@@ -2,6 +2,7 @@ package backend_test
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
 	"math/rand"
@@ -166,12 +167,18 @@ func actInCase(t *testing.T, d backend.Device, name string, shapes []kernels.Mat
 	if grp {
 		width = kernels.GroupSplitWidth(split)
 	}
-	run := func(kk *ir.Kernel, groups int, bufs ...backend.Buf) {
+	// run reports false for a kernel the device refuses at its width
+	// (backend.ErrGroupTooWide): the tier then keeps the two launches.
+	run := func(kk *ir.Kernel, groups int, bufs ...backend.Buf) bool {
 		t.Helper()
 		if err := kk.Validate(); err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
 		kern, err := d.Compile(kk)
+		if errors.Is(err, backend.ErrGroupTooWide) {
+			t.Logf("%s: not a shape on this device (%v)", name, err)
+			return false
+		}
 		if err != nil {
 			t.Fatalf("%s: compile: %v", name, err)
 		}
@@ -179,6 +186,7 @@ func actInCase(t *testing.T, d backend.Device, name string, shapes []kernels.Mat
 		if err := kern.Launch(groups, width, bufs...); err != nil {
 			t.Fatalf("%s: launch: %v", name, err)
 		}
+		return true
 	}
 	for i, s := range shapes {
 		qs, dw, scw, err := kernels.PackWeights(s.T, rawWeights(s.T, s.Rows, k, rng), s.Rows, k)
@@ -212,7 +220,9 @@ func actInCase(t *testing.T, d backend.Device, name string, shapes []kernels.Mat
 			bufs[5] = ws[i].sep
 		}
 		if !seg {
-			run(kk, (s.Rows*split+width-1)/width, bufs...)
+			if !run(kk, (s.Rows*split+width-1)/width, bufs...) {
+				return false
+			}
 			one.In = in
 			fk, err := kernels.MatVec(one)
 			if err != nil {
@@ -229,9 +239,11 @@ func actInCase(t *testing.T, d backend.Device, name string, shapes []kernels.Mat
 			if ws[i].extra != nil {
 				fb = append(fb, ws[i].extra)
 			}
-			run(fk, (s.Rows*split+width-1)/width, fb...)
-		} else {
-			run(kk, (s.Rows*split+width-1)/width, bufs...)
+			if !run(fk, (s.Rows*split+width-1)/width, fb...) {
+				return false
+			}
+		} else if !run(kk, (s.Rows*split+width-1)/width, bufs...) {
+			return false
 		}
 	}
 	if seg {
@@ -261,7 +273,9 @@ func actInCase(t *testing.T, d backend.Device, name string, shapes []kernels.Mat
 				bufs = append(bufs, ws[i].extra)
 			}
 		}
-		run(kk, total, bufs...)
+		if !run(kk, total, bufs...) {
+			return false
+		}
 	}
 	for i, s := range shapes {
 		n := s.Rows

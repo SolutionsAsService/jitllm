@@ -1,6 +1,7 @@
 package tier
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/jitllm/jitllm/jit/gpu/backend"
@@ -138,7 +139,7 @@ const (
 func (g *devTier) inKernel(s kernels.MatVecShape) backend.Kernel {
 	k, err := g.idKernel(s)
 	if err != nil {
-		g.LastErr = err.Error()
+		g.actInDeclined(err)
 		return nil
 	}
 	return k
@@ -155,7 +156,7 @@ func (g *devTier) segInKernel(segs []kernels.MatVecShape, split int, grp bool, i
 		k, err = g.dev.Compile(ker)
 	}
 	if err != nil {
-		g.LastErr = err.Error()
+		g.actInDeclined(err)
 		k = nil
 	}
 	if g.segKerns == nil {
@@ -167,3 +168,14 @@ func (g *devTier) segInKernel(segs []kernels.MatVecShape, split int, grp bool, i
 
 // actInOn is whether this submission may take the operand prologue at all.
 func (g *devTier) actInOn() bool { return !g.NoFuse && !g.NoActFuse }
+
+// actInDeclined records why a prologue kernel was not built. A width the
+// kernel's registers cannot launch at (backend.ErrGroupTooWide) is a shape
+// this device takes in two launches, not an error.
+func (g *devTier) actInDeclined(err error) {
+	if errors.Is(err, backend.ErrGroupTooWide) {
+		g.ActInDeclined++
+		return
+	}
+	g.LastErr = err.Error()
+}
