@@ -40,6 +40,9 @@ type Hub struct {
 	// is not put there: it runs at the network's pace, for as long as the
 	// download takes.
 	Convert func(job func()) bool
+	// NoStream downloads first, as a platform that cannot stream does, so
+	// that path is testable everywhere.
+	NoStream bool
 }
 
 // Get turns library model m into its container in dir and returns the
@@ -62,7 +65,7 @@ func Get(ctx context.Context, m library.Model, dir string, hub Hub, progress fun
 		progress = func(Step) {}
 	}
 	dst := ContainerFor(dir, m)
-	if !hasSource(m, dir) && gguf.Streamable() {
+	if !hasSource(m, dir) && gguf.Streamable() && !hub.NoStream {
 		line, err := stream(ctx, m, dst, hub, progress)
 		if !errors.Is(err, gguf.ErrNoStream) && !errors.Is(err, convert.ErrStreamHolds) {
 			return line, err
@@ -171,12 +174,16 @@ func stream(ctx context.Context, m library.Model, dst string, hub Hub, progress 
 // fetchThenConvert is the whole-file path: download, convert, remove the
 // download.
 func fetchThenConvert(ctx context.Context, m library.Model, dir, dst string, hub Hub, progress func(Step)) (string, error) {
-	fetch := hub.Fetch
-	if fetch == nil {
-		fetch = func(cl *hf.Client, r hf.Ref, dir string) (string, error) {
-			cl.Endpoint = hub.Endpoint
-			return cl.Fetch(r, dir)
-		}
+	given := hub.Fetch
+	if given == nil {
+		given = HubFetch
+	}
+	// The download reads from the same Hub the stream would have: a given
+	// fetch that went elsewhere would turn this Hub's refusal into another's
+	// answer.
+	fetch := func(cl *hf.Client, r hf.Ref, dir string) (string, error) {
+		cl.Endpoint = hub.Endpoint
+		return given(cl, r, dir)
 	}
 	got, err := Download(m, dir, hub.Token, fetch, func(f float64) {
 		progress(Step{Stage: "downloading", Fraction: f, Label: fmt.Sprintf("%.0f%% of %s", 100*f, m.Title)})

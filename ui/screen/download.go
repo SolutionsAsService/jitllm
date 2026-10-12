@@ -93,6 +93,7 @@ func (d *downloadScreen) onDisk(i int) bool {
 // to, and the disk.
 var (
 	downloadEndpoint string
+	downloadNoStream bool
 	downloadFetch    discover.FetchFunc = discover.HubFetch
 	downloadFree     discover.FreeFunc  = discover.FreeBytes
 )
@@ -137,6 +138,7 @@ func (d *downloadScreen) fetch(m library.Model) {
 		Endpoint: downloadEndpoint,
 		Token:    hf.FindToken(os.Getenv, os.UserHomeDir),
 		Fetch:    downloadFetch,
+		NoStream: downloadNoStream,
 		// The runner may return before the job has run; Get waits for it.
 		Convert: func(job func()) bool {
 			done := make(chan struct{})

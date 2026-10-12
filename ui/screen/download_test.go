@@ -95,21 +95,29 @@ func hubFor(t *testing.T, m library.Model, b []byte) *hubtest.Hub {
 }
 
 // A gated repository says what to do, not what HTTP said.
+// Both ways: streamed, and downloaded first as a platform that cannot stream.
 func TestAGatedModelSaysHowToGetIt(t *testing.T) {
-	sh := dropShell(t)
-	d := downloadsFor(sh)
-	m, i := firstText(t)
-	d.sel.Set(i)
-	defer func(g func(string) (int64, bool)) { downloadFree = g }(downloadFree)
-	downloadFree = func(string) (int64, bool) { return 1 << 50, true }
-	hubFor(t, m, nil).Gated = true
+	for _, noStream := range []bool{false, true} {
+		sh := dropShell(t)
+		d := downloadsFor(sh)
+		m, i := firstText(t)
+		d.sel.Set(i)
+		defer func(g func(string) (int64, bool), n bool) { downloadFree, downloadNoStream = g, n }(downloadFree, downloadNoStream)
+		downloadFree = func(string) (int64, bool) { return 1 << 50, true }
+		downloadNoStream = noStream
+		h := hubFor(t, m, nil)
+		h.Gated = true
 
-	d.act()
-	waitIdle(t, sh, d)
-	note := d.note.Get()
-	for _, want := range []string{"gated or private", "huggingface.co/" + m.Repo, "HF_TOKEN"} {
-		if !strings.Contains(note, want) {
-			t.Errorf("the note %q does not say %q", note, want)
+		d.act()
+		waitIdle(t, sh, d)
+		if h.Requests.Load() == 0 {
+			t.Errorf("noStream=%v: the download never asked the Hub it was given", noStream)
+		}
+		note := d.note.Get()
+		for _, want := range []string{"gated or private", "huggingface.co/" + m.Repo, "HF_TOKEN"} {
+			if !strings.Contains(note, want) {
+				t.Errorf("noStream=%v: the note %q does not say %q", noStream, note, want)
+			}
 		}
 	}
 }
