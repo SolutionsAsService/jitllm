@@ -6,6 +6,12 @@
 // kernel i-1's. Read one launch later and summed per kernel -- the same
 // measurement jitllm's JITLLM_CUDA_KERNEL_TIMING takes of its own graphs
 // (docs/engineering-history/gpu-kernels.md).
+//
+// KSHIM_DIRECT=1 also times every launch OUTSIDE a capture between two
+// events, as jitllm times its own uncaptured launches: llama.cpp runs a
+// prompt (a batch past one row) without a graph, so this is the prefill
+// split. The pairs are read at exit; the totals cover every prompt the run
+// made, so divide by the prompt count llama-bench ran (its -r plus a warm-up).
 #define _GNU_SOURCE
 #include <dlfcn.h>
 #include <stdio.h>
@@ -45,7 +51,18 @@ static void settle(list *l) {
   }
   graphs++;
 }
+#define D 1048576
+static cudaEvent_t dev0[D], dev1[D];
+static int dkern[D], nd, direct = -1;
 static void report(void) {
+  if (nd) {
+    cudaDeviceSynchronize();
+    for (int i = 0; i < nd; i++) {
+      float ms;
+      if (cudaEventElapsedTime(&ms, dev0[i], dev1[i]) == cudaSuccess) { us[dkern[i]] += ms * 1e3; cnt[dkern[i]]++; }
+    }
+    fprintf(stderr, "kshim direct launches %d\n", nd);
+  }
   fprintf(stderr, "kshim graphs %d\n", graphs);
   for (int i = 0; i < nk; i++) fprintf(stderr, "kshim %12.1f us %8ld  %s\n", us[i], cnt[i], names[i]);
 }
@@ -74,6 +91,17 @@ cudaError_t cudaStreamEndCapture(cudaStream_t s, cudaGraph_t *g) {
 cudaError_t cudaLaunchKernel(const void *f, dim3 g, dim3 b, void **args, size_t sh, cudaStream_t s) {
   static cudaError_t (*real)(const void *, dim3, dim3, void **, size_t, cudaStream_t);
   if (!real) real = dlsym(RTLD_NEXT, "cudaLaunchKernel");
+  if (direct < 0) { const char *e = getenv("KSHIM_DIRECT"); direct = e && *e == '1'; if (direct) atexit(report); }
+  if (!cap && direct && nd < D) {
+    int k = slot(f);
+    cudaEventCreate(&dev0[nd]);
+    cudaEventCreate(&dev1[nd]);
+    cudaEventRecord(dev0[nd], s);
+    cudaError_t r = real(f, g, b, args, sh, s);
+    cudaEventRecord(dev1[nd], s);
+    dkern[nd++] = k;
+    return r;
+  }
   cudaError_t r = real(f, g, b, args, sh, s);
   if (cap && s == capS) mark(s, slot(f));
   return r;
