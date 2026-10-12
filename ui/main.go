@@ -19,7 +19,6 @@ import (
 
 	"github.com/jitllm/jitllm/common/config"
 	"github.com/jitllm/jitllm/common/crash"
-	core "github.com/jitllm/jitllm/common/engine"
 	"github.com/jitllm/jitllm/ui/app"
 	"github.com/jitllm/jitllm/ui/engine"
 	"github.com/jitllm/jitllm/ui/mock"
