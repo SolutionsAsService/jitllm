@@ -426,16 +426,17 @@ func sidebar(env *env, w, h int) string {
 	section("MODELS")
 	models := st.Models.Get()
 	if len(models) == 0 {
-		b.WriteString(sDim.Render("none open · f2") + "\n")
+		b.WriteString(sDim.Render("none loaded · f2") + "\n")
 	}
 	for _, lm := range models {
 		name := truncate(strings.TrimSuffix(lm.Name, ".jlm"), iw-2)
+		// Every loaded model is loaded and usable; the chat's own is bold.
+		ns := sMuted
 		if lm.Active {
-			b.WriteString(lipgloss.NewStyle().Foreground(colourOf(lm.Colour, modelColours)).Render("●") + " " + sBold.Render(name) + "\n")
-			b.WriteString("  " + sDim.Render(fmt.Sprintf("%s · %d blocks", lm.Arch, lm.Blocks)) + "\n")
-		} else {
-			b.WriteString(sDim.Render("○ ") + sMuted.Render(name) + "\n")
+			ns = sBold
 		}
+		b.WriteString(lipgloss.NewStyle().Foreground(colourOf(lm.Colour, modelColours)).Render("●") + " " + ns.Render(name) + "\n")
+		b.WriteString("  " + sDim.Render(fmt.Sprintf("%s · %d blocks", lm.Arch, lm.Blocks)) + "\n")
 	}
 
 	b.WriteString("\n")

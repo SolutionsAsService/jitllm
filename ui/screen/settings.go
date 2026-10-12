@@ -276,7 +276,7 @@ func files(sh *app.Shell) widget.Widget {
 		primitives.HBox(deleteChats, clearCache, reset).Gap(p.Space.S),
 		wrapped(sh, state.NewComputed(func() string {
 			if st.Loaded.Get() {
-				return "Close the model to clear the prompt cache: it is in use."
+				return "Unload the models to clear the prompt cache: they hold it."
 			}
 			return ""
 		}, st.Loaded.AsReadonly())),

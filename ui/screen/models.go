@@ -15,6 +15,7 @@ import (
 	"github.com/jitllm/jitllm/common/catalog"
 	"github.com/jitllm/jitllm/common/crash"
 	"github.com/jitllm/jitllm/common/discover"
+	"github.com/jitllm/jitllm/common/session"
 	"github.com/jitllm/jitllm/ui/app"
 	"github.com/jitllm/jitllm/ui/widgets"
 )
@@ -99,7 +100,17 @@ func newModelsScreen(sh *app.Shell) *modelsScreen {
 	}
 
 	m.dPath = m.field(func(e catalog.Entry) string { return e.Path })
-	m.dStatus = m.field(entryStatus)
+	// A loaded model says so here as on its row, not "ready to load".
+	m.dStatus = state.NewComputed(func() string {
+		e, ok := m.selected()
+		if !ok {
+			return "--"
+		}
+		if openState(m.store, e.Path) != "" {
+			return "loaded"
+		}
+		return entryStatus(e)
+	}, m.store.Catalog.AsReadonly(), m.store.CatalogSel.AsReadonly(), m.store.Models.AsReadonly())
 	m.dArch = m.field(entryArch)
 	m.dGeom = m.field(entryGeometry)
 	m.dMixture = m.field(entryMixture)
@@ -145,12 +156,12 @@ func newModelsScreen(sh *app.Shell) *modelsScreen {
 			}
 			return "Loading\u2026"
 		}
-		// An open model is a switch, and the one in use only a way back to it.
-		switch openState(m.store, e.Path) {
-		case "In use":
-			return "Go to chat"
-		case "Open":
-			return "Switch to it"
+		// A loaded model is chatted with, never loaded twice.
+		if openState(m.store, e.Path) != "" {
+			if m.store.Active.Get() == e.Path {
+				return "Go to chat"
+			}
+			return "Chat with it"
 		}
 		return "Load"
 	}, m.store.Catalog.AsReadonly(), m.store.CatalogSel.AsReadonly(), m.store.Loads.AsReadonly(), m.store.Models.AsReadonly())
@@ -334,9 +345,9 @@ func (m *modelsScreen) load() {
 				"The container itself reads fine: "+e.Path)
 		return
 	}
-	// The model in use is already running: loading it again would close its
-	// session and place it on the device anew, for nothing.
-	if openState(m.store, e.Path) == "In use" {
+	// The model the chat talks to is already there: loading it again would
+	// close its session and place it on the device anew, for nothing.
+	if openState(m.store, e.Path) != "" && m.store.Active.Get() == e.Path {
 		m.sh.GoSession()
 		return
 	}
@@ -428,18 +439,10 @@ func (m *modelsScreen) rowState(e catalog.Entry) string {
 	}
 }
 
-// openState is "In use" for the running model, "Open" for one held open
-// beside it, and "" for one that is not open.
+// openState is "Loaded" for every loaded model, whichever the chat talks to,
+// and "" for one that is not loaded (session.LoadState).
 func openState(st *app.Store, path string) string {
-	for _, lm := range st.Models.Get() {
-		if lm.Path == path {
-			if lm.Active {
-				return "In use"
-			}
-			return "Open"
-		}
-	}
-	return ""
+	return session.LoadState(st.Models.Get(), path)
 }
 
 // entryFacts is a row's line of facts: what someone choosing a model asks.

@@ -34,7 +34,7 @@ func Devices(sh *app.Shell) widget.Widget {
 	body := primitives.VBox(
 		devicesHeader(sh),
 		machineStats(sh),
-		card(sh, "Open models", openModels(sh)),
+		card(sh, "Loaded models", openModels(sh)),
 		// The loaded model's placement: the part of this page that moves.
 		card(sh, "Where the model is", primitives.VBox(
 			placement(sh),
@@ -200,7 +200,7 @@ func openModels(sh *app.Shell) widget.Widget {
 				})),
 			).Gap(2)),
 			widgets.Hide(active, primitives.Box(widgets.NewStatusPill(state.NewComputed(func() widgets.Status {
-				return widgets.Status{Label: "In use", Dot: p.Colors.Primary}
+				return widgets.Status{Label: "In chat", Dot: p.Colors.Primary}
 			}, active), p.Muted(), p.Type.BodySmall.FontSize)).PaddingTop(4)),
 			primitives.Box(primitives.Text("").ContentSignal(held).FontSize(p.Type.BodySmall.FontSize).Color(p.Text())).PaddingTop(4),
 		).Gap(p.Space.S + p.Space.XS)
@@ -227,10 +227,10 @@ func openModels(sh *app.Shell) widget.Widget {
 
 	// The policy that divides memory between open models is the user's
 	// choice. Off, it is divided in load order and opening a second model does
-	// not slow the first. On, the model in use gets the rest and a switch moves
+	// not slow the first. On, the model in chat gets the rest and a switch moves
 	// the bytes, paid in page-ins.
 	prio := chip.New(
-		chip.LabelFn(func() string { return "Memory follows the model in use" }),
+		chip.LabelFn(func() string { return "Memory follows the model in chat" }),
 		chip.SelectedReadonlySignal(st.Priority.AsReadonly()),
 		chip.OnClick(func() {
 			on := !st.Priority.Get()
@@ -254,8 +254,8 @@ func openModels(sh *app.Shell) widget.Widget {
 		wrapped(sh, loads),
 		primitives.HBox(prio, primitives.Expanded(primitives.Box()), more).Gap(p.Space.S),
 		note(sh,
-			"Open models share the host memory; one runs at a time. With the toggle off",
-			"each keeps what it was given in load order. On, the model in use takes the rest.",
+			"Loaded models share the host memory, and each stays usable. With the toggle off",
+			"each keeps what it was given in load order. On, the model in chat takes the rest.",
 		),
 	)
 	return primitives.VBox(rows...).Gap(p.Space.S).CrossAlign(primitives.CrossAxisStretch)
@@ -347,7 +347,7 @@ func devicesHeader(sh *app.Shell) widget.Widget {
 	// again, which contends with the live one (see Reprobe).
 	why := reactive(sh, sh.Store.Loaded.AsReadonly(), func() string {
 		if sh.Store.Loaded.Get() {
-			return "Re-probe is off while a model is loaded. Close the model to probe again."
+			return "Re-probe is off while a model is loaded. Unload the models to probe again."
 		}
 		return ""
 	})
@@ -356,7 +356,7 @@ func devicesHeader(sh *app.Shell) widget.Widget {
 		primitives.HBox(
 			primitives.Expanded(primitives.VBox(
 				p.Role(primitives.Text("Machine").Color(p.Text()), p.Type.HeadlineSmall).Bold(),
-				widgets.NewParagraph("What this computer gives jitllm, and where the open models sit in it.").
+				widgets.NewParagraph("What this computer gives jitllm, and where the loaded models sit in it.").
 					FontSize(p.Type.BodyMedium.FontSize).Color(p.Muted()).Font(app.Prose),
 			).Gap(p.Space.XS).CrossAlign(primitives.CrossAxisStretch)),
 			reprobe,

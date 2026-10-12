@@ -146,7 +146,7 @@ func (e *Engine) SetPriority(on bool) {
 		e.srv.SetPriority(on)
 		e.publishModels()
 		if on {
-			e.status("the model in use gets the memory; switching moves it")
+			e.status("the model in chat gets the memory; chatting with another moves it")
 			return
 		}
 		e.status("memory divided in load order")

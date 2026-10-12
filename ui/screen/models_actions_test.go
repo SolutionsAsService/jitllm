@@ -17,6 +17,7 @@ import (
 
 	"github.com/jitllm/jitllm/common/catalog"
 	"github.com/jitllm/jitllm/common/discover"
+	"github.com/jitllm/jitllm/common/session"
 	"github.com/jitllm/jitllm/ui/app"
 )
 
@@ -448,7 +449,7 @@ func TestEveryRowStateFitsItsColumn(t *testing.T) {
 	size := sh.P.Type.BodySmall.FontSize
 	unprobed := catalog.Entry{Kind: catalog.KindContainer}
 	broken := catalog.Entry{Kind: catalog.KindContainer, Probed: true, ProbeErr: "truncated"}
-	words := []string{"Loading\u2026", "In use", "Open"}
+	words := []string{"Loading\u2026", "Loaded"}
 	for _, e := range []catalog.Entry{ready, stale, tower, gguf, unprobed, broken} {
 		words = append(words, m.rowState(e))
 	}
@@ -544,5 +545,37 @@ func TestReconvertNeverDowngradesANewerFile(t *testing.T) {
 	}
 	if !strings.Contains(c.note.Get(), "newer") {
 		t.Errorf("the note does not say the file is newer: %q", c.note.Get())
+	}
+}
+
+// Two loaded models are both "Loaded": neither is ranked "in use" over an
+// "open" one, and the one the chat is not talking to offers a chat, not a
+// switch.
+func TestTwoLoadedModelsAreBothLoaded(t *testing.T) {
+	dir := t.TempDir()
+	ready, _, _, _ := modelsRows(dir)
+	other := ready
+	other.Path, other.Name = filepath.Join(dir, "other.jlm"), "other.jlm"
+	sh, m := modelsReady(t, ready, other)
+	sh.Store.Models.Set([]session.LoadedModel{
+		{Path: ready.Path, Name: ready.Name},
+		{Path: other.Path, Name: other.Name, Colour: 1, Active: true},
+	})
+	sh.Store.Active.Set(other.Path)
+	for _, e := range []catalog.Entry{ready, other} {
+		if got := m.rowState(e); got != "Loaded" {
+			t.Errorf("%s reads %q, want Loaded", e.Name, got)
+		}
+	}
+	selectRow(t, m, ready)
+	if got := m.dStatus.Get(); got != "loaded" {
+		t.Errorf("the panel says %q for a loaded model", got)
+	}
+	if got := m.loadLabel.Get(); got != "Chat with it" {
+		t.Errorf("the loaded model the chat is not on offers %q", got)
+	}
+	selectRow(t, m, other)
+	if got := m.loadLabel.Get(); got != "Go to chat" {
+		t.Errorf("the chat's own model offers %q", got)
 	}
 }
