@@ -11,7 +11,8 @@
 | OpenAI-compatible | `POST /v1/chat/completions`, `POST /v1/completions`, `GET /v1/models`, `POST /v1/embeddings` (floats or base64), `/v1/files`, `/v1/batches` |
 | Anthropic-compatible | `POST /v1/messages` (named SSE events) |
 | Connect RPC | `ModelService`, `InferenceService` (`Generate`, `Complete`, `Cancel`, `Embed`), `SessionService`, `PlacementService`, `DeviceService`, `TelemetryService` |
-| Health | `GET /healthz` |
+| jitllm | `POST /v1/systemone` (a decision model's answers), `GET /v1/capabilities` (the manifest, [capabilities.md](capabilities.md)), `GET /metrics` (Prometheus) |
+| Health | `GET /healthz`, `GET /health` |
 
 A client checks what it is talking to before it relies on it:
 `TelemetryService.GetServerInfo` returns the version and revision, the

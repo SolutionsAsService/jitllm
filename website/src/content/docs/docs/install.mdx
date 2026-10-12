@@ -76,8 +76,9 @@ The script finds the latest release, downloads the archives for this machine, ch
 | which programs | arguments: `sh -s -- all` | `$env:JITLLM_PROGRAMS = "all"` before the line |
 | a version | `JITLLM_VERSION=v0.1.0` | `$env:JITLLM_VERSION = "v0.1.0"` |
 | another directory | `JITLLM_INSTALL_DIR=...` | `$env:JITLLM_INSTALL_DIR = "..."` |
+| where the macOS app goes | `JITLLM_APPS_DIR=...` (default `/Applications`, or `~/Applications` when that is not writable) | |
 
-The programs are `jitllm` (the CLI) and `jitllmd` (the server), installed by default, and `desktop` (the [desktop app](/docs/guides/desktop/)) and `tui` (the [terminal app](/docs/guides/terminal/)); `all` is the four. For example, the CLI and the terminal app:
+The programs are `jitllm` (the CLI) and `jitllmd` (the server), installed by default, and `desktop` (the [desktop app](/docs/guides/desktop/)) and `tui` (the [terminal app](/docs/guides/terminal/)); `all` is the four. On macOS, `desktop` installs the signed `jitllm.app` from the release's `.app.zip` rather than a bare binary. For example, the CLI and the terminal app:
 
 ```sh
 curl -fsSL https://jitllm.org/install.sh | sh -s -- jitllm tui
@@ -138,6 +139,8 @@ jitllm hardware
 ```
 
 `hardware` prints the CPU's instruction-set tier and the kernels it will generate, every GPU each backend can open, and how much memory is actually spendable on each. One card that answers to two backends (CUDA and Vulkan, say) is listed under both and counted once. Use the device names it prints with [`-devices`](/docs/guides/devices/).
+
+`jitllm doctor` answers the shorter question, whether this machine and build can run at all, and given a container (`jitllm doctor model.jlm`) whether it can run that one. It names each thing missing with what to do next, and exits 0 when all is well and 2 when something is missing; `-json` prints the report for a script or an agent.
 
 ## The apps
 

@@ -163,6 +163,7 @@ func (a *A64) Bytes() []byte {
 			panic("jit: label used but never bound")
 		}
 	}
+	noteEmitA64(a.b)
 	return a.b
 }
 

@@ -57,7 +57,9 @@ jitllm supports a fixed list of architectures, each one checked against a refere
 | Architecture | Models |
 |---|---|
 | `qwen2vl`, `qwen3vl`, `qwen3vlmoe` | Qwen2-VL, Qwen2.5-VL, Qwen3-VL (2B to 235B-A22B) |
+| `hunyuan_vl` | HunyuanOCR's text model |
 | `bert`, `nomic-bert` | sentence-embedding encoders (all-MiniLM, mxbai-embed, nomic-embed) |
+| `modern-bert` | Laya, a decision model answered through `/v1/systemone` and `jitllm decide` |
 
 Vision towers convert beside their language model into one container, and their blocks page and place like any other block.
 
@@ -71,6 +73,7 @@ Vision towers convert beside their language model into one container, and their 
 | `internvl` | InternVL 2.5 and 3 |
 | `resampler` | MiniCPM-V 2.6, 4.0, 4.5 |
 | `kimivl` | Kimi-VL (MoonViT) |
+| `hunyuanvl` | HunyuanOCR |
 | `janus_pro`, `pixtral`, `phi4`, `llama4` | Janus-Pro; Pixtral and Mistral 3; Phi-4 reasoning vision; Llama 4 |
 
 From Hugging Face safetensors, these model classes convert directly: Llama, Mixtral, Qwen2, Qwen2Moe, Qwen3, Qwen3Moe, Olmoe, Olmo2, Olmo3, Gemma, Phi3, PhiMoE, DeepseekV2, DeepseekV3, Glm4Moe, Glm4MoeLite, KimiLinear, Ernie4_5, Ernie4_5_Moe, HunYuanDenseV1, HunYuanMoEV1, Dots1, Apertus, SmolLM3, Arcee, SeedOss, Exaone4 and Ministral3. Every other architecture converts from GGUF.
@@ -166,6 +169,9 @@ Conversion keeps the source's quantization and changes only its layout, so a `.j
 | `all-minilm-l6-v2` | 22M | bert | F16 | 46 MB | embeddings |
 | `nomic-embed-text-v1.5` | 137M | nomic-bert | F16 | 274 MB | embeddings |
 | `mxbai-embed-large-v1` | 335M | bert | F16 | 670 MB | embeddings |
+| `laya` | 421M | modern-bert | BF16 | 844 MB | decisions |
+| `d1-3b` | 3B | lfm2 | Q8_0 | 2.9 GB | decisions |
+| `lev` | 4B | qwen35 | Q8_0 | 4.5 GB | decisions |
 | `qwen3-embedding-0.6b` | 0.6B | qwen3 | F16 | 1.2 GB | embeddings |
 | `smolvlm-256m-instruct` | 256M | llama | Q8_0 | 279 MB | images |
 | `smolvlm-500m-instruct` | 500M | llama | Q8_0 | 546 MB | images |
@@ -175,5 +181,6 @@ Conversion keeps the source's quantization and changes only its layout, so a `.j
 | `glm-4.6v-flash` | 9B | glm4 | Q4_K_M | 7.1 GB | images |
 | `glm-4-9b-0414` | 9B | glm4 | Q4_K_M | 6.2 GB |  |
 | `kimi-vl-a3b-thinking-2506` | 16B-A3B | deepseek2 | Q4_K_M | 11.2 GB | images |
+| `hunyuanocr` | 1B | hunyuan_vl | Q8_0 | 1.3 GB | images |
 
 The largest (Llama 3.3 70B, Qwen3-Next 80B, gpt-oss 120B) are larger than the memory of an ordinary desktop. They run anyway, [paged from disk](/docs/guides/memory/#running-larger-than-ram), at a speed set by the drive.

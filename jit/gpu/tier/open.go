@@ -46,6 +46,7 @@ type openOpts struct {
 	vk         vulkan.Config
 	kern       kernels.Center
 	cudaPosted bool
+	cudaRegs   int
 	metal      metal.Opts
 	hip        backend.HIPConfig
 	cfg        []func(*Config)

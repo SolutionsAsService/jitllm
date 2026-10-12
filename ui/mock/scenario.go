@@ -289,6 +289,9 @@ func Scenarios() []Scenario {
 					return ""
 				}},
 			{Name: "smartest", Do: func(sh *app.Shell, _ *Engine) { screen.SetBalance(sh, 4) }},
+			{Name: "streaming", Do: func(sh *app.Shell, _ *Engine) {
+				screen.ShowDownload(sh, 0.42, "Downloading and converting as it arrives...")
+			}, Shows: []string{"Stop"}},
 		}},
 		{Name: "convert", Tab: app.TabConvert, Steps: []Step{
 			{Name: "listed", Until: func(sh *app.Shell) bool { return sh.Store.SourcesRows.Get() == len(Sources()) },
