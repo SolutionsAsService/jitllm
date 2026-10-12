@@ -1143,6 +1143,9 @@ type Model struct {
 
 	// pager serialises decode when the container evicts; see pagelock.go.
 	pager sync.Mutex
+	// pagerUnlock is pager.Unlock bound once, so enterPager hands back the
+	// same func every token instead of allocating a method value.
+	pagerUnlock func()
 	// bind serialises re-pointing a block's weights at their frames. Rebinding
 	// writes only what moved (see sameSpan), so when the model fits the writes
 	// stop after the first token and concurrent sessions only ever read.
@@ -2726,6 +2729,7 @@ func build(c *jlm.File, options ...tok.Option) (*Model, error) {
 		}
 	}
 	m := &Model{Cfg: cfg}
+	m.pagerUnlock = m.pager.Unlock
 	// An unsupported tokenizer is not a reason to refuse the weights: Vocab
 	// nil is a model that runs token ids but cannot turn text into them.
 	// TokErr says why.
