@@ -43,7 +43,8 @@ func New(files map[string][]byte) *Hub {
 
 func (h *Hub) serve(w http.ResponseWriter, r *http.Request) {
 	if h.Gated {
-		http.Error(w, "gated", http.StatusUnauthorized)
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusUnauthorized)
 		return
 	}
 	p := r.URL.Path
@@ -73,6 +74,7 @@ func (h *Hub) serve(w http.ResponseWriter, r *http.Request) {
 			http.NotFound(w, r)
 			return
 		}
+		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(doc)
 		return
 	}
@@ -100,6 +102,9 @@ func (h *Hub) serve(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet && h.OnGet != nil {
 		h.OnGet(r)
 	}
+	// Bytes, never a page: nothing a request names is rendered.
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	cw := &counting{ResponseWriter: w, n: &h.Served}
 	http.ServeContent(cw, r, path.Base(file), time.Time{}, bytes.NewReader(b))
 }

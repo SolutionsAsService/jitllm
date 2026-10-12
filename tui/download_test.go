@@ -13,6 +13,7 @@ import (
 	"github.com/jitllm/jitllm/common/convertjob"
 	"github.com/jitllm/jitllm/common/discover"
 	"github.com/jitllm/jitllm/common/discover/hubtest"
+	"github.com/jitllm/jitllm/convert/gguf"
 	"github.com/jitllm/jitllm/convert/library"
 	"github.com/jitllm/jitllm/format/jlm"
 	"github.com/jitllm/jitllm/internal/testmodels"
@@ -67,7 +68,9 @@ func TestDownloadStreamsIntoTheContainer(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if s := seen(); len(s) > 0 {
+	// Where a stream cannot run, the download falls back to fetching the
+	// whole file and removing it once converted.
+	if s := seen(); len(s) > 0 && gguf.Streamable() {
 		t.Errorf("the GGUF was written to the model folder: %v", s)
 	}
 	if h.Served.Load() == 0 {
@@ -78,6 +81,9 @@ func TestDownloadStreamsIntoTheContainer(t *testing.T) {
 // ctrl+x on Discover stops a download and keeps what it wrote; the next
 // download of the model carries on from it.
 func TestStopKeyStopsADownload(t *testing.T) {
+	if !gguf.Streamable() {
+		t.Skip("this platform downloads the whole GGUF, which ctrl+x does not interrupt")
+	}
 	r := newTestRoot(t)
 	m, h, size := served(t, r, testmodels.Path("Qwen3-0.6B-Q8_0.gguf"))
 	dir := discover.Dir(r.env.dirs)

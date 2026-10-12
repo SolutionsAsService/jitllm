@@ -11,6 +11,7 @@ import (
 	"github.com/jitllm/jitllm/common/convertjob"
 	"github.com/jitllm/jitllm/common/discover"
 	"github.com/jitllm/jitllm/common/discover/hubtest"
+	"github.com/jitllm/jitllm/convert/gguf"
 	"github.com/jitllm/jitllm/convert/hf"
 	"github.com/jitllm/jitllm/convert/library"
 	"github.com/jitllm/jitllm/format/jlm"
@@ -131,12 +132,19 @@ func TestADownloadEndsAsAContainer(t *testing.T) {
 		downloadFetch, downloadFree = f, g
 	}(downloadFetch, downloadFree)
 	downloadFree = func(string) (int64, bool) { return 1 << 50, true }
+	streams := gguf.Streamable()
 	downloadFetch = func(*hf.Client, hf.Ref, string) (string, error) {
 		return "", errors.New("the stream fell back to a whole-file download")
+	}
+	if !streams {
+		downloadFetch = nil // this platform downloads, from the same Hub
 	}
 	h := hubFor(t, m, b)
 	var landed []string
 	h.OnGet = func(*http.Request) {
+		if !streams {
+			return
+		}
 		es, _ := os.ReadDir(d.dir())
 		for _, e := range es {
 			if strings.Contains(e.Name(), ".gguf") {
@@ -166,6 +174,9 @@ func TestADownloadEndsAsAContainer(t *testing.T) {
 
 // Stop ends a download with what it wrote kept, and says so.
 func TestStopEndsADownload(t *testing.T) {
+	if !gguf.Streamable() {
+		t.Skip("this platform downloads the whole GGUF, which Stop does not interrupt")
+	}
 	src := testmodels.Path("Qwen3-0.6B-Q8_0.gguf")
 	b, err := os.ReadFile(src)
 	if err != nil {

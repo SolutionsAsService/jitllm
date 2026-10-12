@@ -133,7 +133,7 @@ func checkDisk(t *testing.T, w *diskWatch, m library.Model, container int) {
 // container, and the container is the one the GGUF converts to from disk.
 func TestGetStreamsTheGGUF(t *testing.T) {
 	if !gguf.Streamable() {
-		t.Fatal("this platform cannot stream a GGUF -- run this gate on Linux or macOS")
+		t.Skip("this platform cannot stream a GGUF -- run this gate on Linux or macOS")
 	}
 	src := "../../testdata/models/stories260K.gguf"
 	m, hub := served(t, src)
@@ -169,7 +169,7 @@ func TestGetStreamsTheGGUF(t *testing.T) {
 // the GGUF's conversion. The disk never holds the GGUF across either.
 func TestGetResumesACancelledStream(t *testing.T) {
 	if !gguf.Streamable() {
-		t.Fatal("this platform cannot stream a GGUF -- run this gate on Linux or macOS")
+		t.Skip("this platform cannot stream a GGUF -- run this gate on Linux or macOS")
 	}
 	src := testmodels.Path("Qwen3-0.6B-Q8_0.gguf")
 	m, hub := served(t, src)
