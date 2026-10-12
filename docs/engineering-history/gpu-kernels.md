@@ -5697,3 +5697,48 @@ range and so the key -- the run is re-captured, not patched.
 queue: the event nodes were armed only on the legacy stream's capture, and the
 settle only on its replay. Both now run on a queue's capture too.
 
+
+## The register report, and the tile that spilled on sm_70
+
+`jitllm verify -registers [-json]` runs decode and the batched prefill and
+prints, for every kernel each CUDA device compiled, what the driver says ptxas
+allocated (cuFuncGetAttribute: registers, local bytes, static shared memory;
+cuOccupancyMaxActiveBlocksPerMultiprocessor: resident workgroups at the
+declared width), and for every host emitter the highest vector register it
+names and its stack-addressed operands. Vulkan and Metal do not report yet
+(VK_KHR_pipeline_executable_properties and MTLComputePipelineState are the
+sources to wire). Two driver readings were checked against `ptxas -v` (CUDA
+12.9) on the same PTX, sm_86: flashkvpaged 168 registers, 32768 B shared, no
+spill; matvec_q4_k 36 registers; both agree.
+
+Llama-3.2-1B Q4_K_M, worst first:
+
+- RTX 3050 Ti (sm_86, 1536 threads an SM): nothing spills. flashkvpaged 194
+  registers at its widest shape, 2 workgroups an SM (17%); the prefill
+  GemmVolta tiles 159-162 registers, 3 workgroups (25%); every matvec, norm
+  and quantize kernel 100% except the 1024-wide norms at 67%.
+- V100 (sm_70, 2048 threads an SM): GemmVolta q6_k m4n4w1x4k2 hit the
+  255-register ceiling and spilled 8 bytes a thread; q4_k m4n4 sat at 255
+  without spilling. Everything else is clean; flashkvpaged 170 registers, 2
+  workgroups.
+- Host, AVX2: the k-quant matvecs name all 16 YMM and stage their scales in
+  the red zone by design (emitMatVec4 8, emitKQuantMatVec 12, emitQ6KMatVec
+  18, emitQ3KMatVec 21 stack operands); no other emitter touches the stack.
+
+`TestHotKernelsKeepTheirRegisters` holds the hot kernels that ran to no spill
+and a floor -- streaming kernels at least half an SM, GEMM and flash attention
+at least two resident workgroups -- and every host emitter but the red-zone
+stagers to no stack operand. Capped at 32 registers (`tier.WithCUDAMaxRegs`)
+it reports 52 spilling kernels of 69 on sm_86; with a staging emitter taken
+off the list it names it.
+
+The batched GEMM now passes over a tile its compiler reports spilling
+(`tier.Config.SpillingTiles` is the other arm): on sm_70 q6_k takes the m4n2
+tile at 223 registers instead. `verify -ab spill`, V100, Llama-3.2-1B,
+four 512-token prompts a round, 21 rounds, pinned to the second socket: A/A
+1.0008 (refused both) and 1.0005 (allowed both); refused against allowed
+1.0362 and 1.0375 with the shipped tier as B, 0.9655 and 0.9637 with the arms
+swapped -- 3.6-3.8% faster prefill, IQR/median at most 0.5%. Decode does not
+run GemmVolta and its kernel split is unchanged (2706.5 against 2708.4 us of
+kernels a token). On sm_86 no tile spills, so nothing changes there by
+construction.

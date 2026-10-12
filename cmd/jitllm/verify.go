@@ -672,6 +672,51 @@ func abRun(m *model.Model, g *tier.GPU, which string, n, rounds, depth int) {
 	step := func(iters int) { runOn(s, iters) }
 	var a, b bench.Case
 	switch which {
+	case "spill":
+		// The batched prefill on two tiers of the same card, each iteration
+		// four -n token prompts from a fresh history. A is a second tier that
+		// allows GemmVolta's spilling tiles unless JITLLM_AB_SPILL_A=0; B is the
+		// verify tier, which refuses them unless JITLLM_GPU_SPILLING_TILES=1.
+		// Setting both alike is the A/A self-control; swapping them prices
+		// which tier is which.
+		aAllow := os.Getenv("JITLLM_AB_SPILL_A") != "0"
+		g2, err := tier.OpenWith(append([]tier.Option{tier.WithDevices("cuda:0"),
+			tier.WithDeviceTune(tier.TuneOff)}, append(gpuOptions(),
+			tier.WithConfig(func(c *tier.Config) { c.SpillingTiles = aAllow }))...)...)
+		if err != nil {
+			panic(err)
+		}
+		defer g2.Close()
+		s2 := m.NewState(n + 16)
+		defer s2.Close()
+		if err := s2.SetDevice(g2); err != nil {
+			panic(err)
+		}
+		ids := make([]int32, n)
+		for i := range ids {
+			ids[i] = int32(1 + (i*7919)%(m.Cfg.NVocab-1))
+		}
+		// bench.AB hands each arm -n as its iteration count, which here is
+		// the prompt length; a round is four prompts instead.
+		pre := func(st *model.State, _ int) {
+			for i := 0; i < 4; i++ {
+				st.Reset()
+				if _, err := st.Prefill(ids); err != nil {
+					panic(err)
+				}
+			}
+		}
+		name := func(allow bool, which string) string {
+			if allow {
+				return "spilling tiles allowed (" + which + ")"
+			}
+			return "spilling tiles refused (" + which + ")"
+		}
+		a = bench.Case{Name: name(aAllow, "second tier"), Fn: func(it int) { pre(s2, it) }}
+		b = bench.Case{Name: name(g.SpillingTiles, "verify tier"), Fn: func(it int) { pre(s, it) }}
+		defer func() {
+			fmt.Printf("tiles refused for spilling: A %d, B %d\n", g2.Stats().SpillRefused, g.Stats().SpillRefused)
+		}()
 	case "regs":
 		// B is a second tier on the same card whose every CUDA kernel is
 		// capped at JITLLM_AB_MAXREGS registers (.maxnreg), with a State of
