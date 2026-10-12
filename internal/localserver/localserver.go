@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -41,21 +42,34 @@ func ModelsDir(models, dataHome string) string {
 // ModelsDirFor is the default models folder on goos: XDG's data home on Linux
 // and the other Unixes, Application Support on macOS, the local AppData on
 // Windows (where the installer creates it), each with jitllm/models under it.
+//
+// The path follows goos's rules, not this host's: slash-separated for every
+// system but Windows, backslash-separated there.
 func ModelsDirFor(goos, dataHome, home, localAppData string) string {
 	switch goos {
 	case "darwin":
-		return filepath.Join(home, "Library", "Application Support", "jitllm", "models")
+		return path.Join(home, "Library", "Application Support", "jitllm", "models")
 	case "windows":
 		if localAppData == "" {
-			localAppData = filepath.Join(home, "AppData", "Local")
+			localAppData = winJoin(home, "AppData", "Local")
 		}
-		return filepath.Join(localAppData, "jitllm", "models")
+		return winJoin(localAppData, "jitllm", "models")
 	}
-	if dataHome == "" || !filepath.IsAbs(dataHome) {
-		// The XDG spec: a relative XDG_DATA_HOME is invalid and ignored.
-		dataHome = filepath.Join(home, ".local", "share")
+	if !path.IsAbs(dataHome) {
+		// The XDG spec: an empty or relative XDG_DATA_HOME is invalid and
+		// ignored.
+		dataHome = path.Join(home, ".local", "share")
 	}
-	return filepath.Join(dataHome, "jitllm", "models")
+	return path.Join(dataHome, "jitllm", "models")
+}
+
+// winJoin joins Windows path elements with backslashes, on any host.
+func winJoin(elem ...string) string {
+	out := strings.TrimRight(elem[0], `\/`)
+	for _, e := range elem[1:] {
+		out += `\` + strings.Trim(e, `\/`)
+	}
+	return out
 }
 
 // LegacyDir is where releases before the per-system folder looked: ./models

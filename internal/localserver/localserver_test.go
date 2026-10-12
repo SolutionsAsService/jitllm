@@ -6,27 +6,26 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"testing"
 )
 
 // TestModelsDirFollowsEachSystem: one default per system, each that
 // system's convention, and JITLLM_MODELS over all of them.
 func TestModelsDirFollowsEachSystem(t *testing.T) {
-	home := filepath.FromSlash("/h")
+	// Each system's paths in its own spelling, whatever host runs the test.
 	for _, c := range []struct {
-		goos, data, local, want string
+		goos, data, home, local, want string
 	}{
-		{"linux", "", "", "/h/.local/share/jitllm/models"},
-		{"linux", "/xdg", "", "/xdg/jitllm/models"},
-		{"linux", "relative", "", "/h/.local/share/jitllm/models"},
-		{"freebsd", "/xdg", "", "/xdg/jitllm/models"},
-		{"darwin", "/xdg", "", "/h/Library/Application Support/jitllm/models"},
-		{"windows", "", "/L", "/L/jitllm/models"},
-		{"windows", "", "", "/h/AppData/Local/jitllm/models"},
+		{"linux", "", "/h", "", "/h/.local/share/jitllm/models"},
+		{"linux", "/xdg", "/h", "", "/xdg/jitllm/models"},
+		{"linux", "relative", "/h", "", "/h/.local/share/jitllm/models"},
+		{"freebsd", "/xdg", "/h", "", "/xdg/jitllm/models"},
+		{"darwin", "/xdg", "/h", "", "/h/Library/Application Support/jitllm/models"},
+		{"windows", "", `C:\Users\h`, `C:\Users\h\AppData\Local`, `C:\Users\h\AppData\Local\jitllm\models`},
+		{"windows", "", `C:\Users\h`, "", `C:\Users\h\AppData\Local\jitllm\models`},
 	} {
-		got := ModelsDirFor(c.goos, filepath.FromSlash(c.data), home, filepath.FromSlash(c.local))
-		if got != filepath.FromSlash(c.want) {
+		got := ModelsDirFor(c.goos, c.data, c.home, c.local)
+		if got != c.want {
 			t.Errorf("%s data=%q local=%q: %q, want %q", c.goos, c.data, c.local, got, c.want)
 		}
 	}
