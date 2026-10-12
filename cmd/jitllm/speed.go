@@ -151,7 +151,7 @@ func speedCmd(args []string) error {
 		if timed && *cpuProf != "" {
 			pprof.StopCPUProfile()
 		}
-		ppOn, spills, fails := st.GPULayers(), st.Spills(), st.DeviceDemotions()
+		ppOn, spills, fails, tails := st.GPULayers(), st.Spills(), st.DeviceDemotions(), st.TailRowChunks()
 		moves := st.Relocations() + st.Reclaims()
 		st.Close()
 		if err != nil {
@@ -242,6 +242,10 @@ func speedCmd(args []string) error {
 			fmt.Printf("device %s: prompt on %d/%d blocks, decode on %d, %d spill(s), %d relocation(s)+reclaim(s), %s\n", name,
 				ppOn, m.Cfg.NLayer, st2.GPULayers(), spills+st2.Spills(),
 				moves+st2.Relocations()+st2.Reclaims(), deviceStats(d))
+			if tails > 0 {
+				// engine/model/tailrows.go
+				fmt.Printf("prompt: %d few-row chunk(s) ran as a ragged step\n", tails)
+			}
 		}
 		// A demotion moves the blocks to the host mid-run: the rate is then the
 		// host's, and printing it without saying so is a wrong row.

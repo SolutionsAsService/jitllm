@@ -5483,6 +5483,56 @@ the time sits, not a rate:
 - **The KV prewarm** moves the pool's growth into placement: 100-200 ms more
   placement on the laptop, and the first prompt reads as warm.
 
+### A prompt's few-row tail is a ragged step, not a padded chunk
+
+The device runs a prompt chunk at its grain (32 rows, 64 where
+FlashPrefill80 runs), so the 2 rows a 514-token prompt leaves after its
+512-row chunk ran every batched kernel at 32 or 64 rows: GEMMs dequantizing
+all their weights for 2 live rows, the staged attention over the padding.
+On a V100 that tail ran 6.7 ms of kernels for Llama-3.2-1B, against about
+1.6 ms for a decode token, and the 514-token prompt took 30% longer than a
+512-token one. llama.cpp runs a batch that small through its matvec.
+
+A chunk of 2 to 4 rows over the whole model, every block and the head on a
+device that runs ragged rows, now goes as one ragged step of its rows
+(engine/model/tailrows.go): nn.RowsDevice with the rows' positions as their
+slots, which the tier runs on decode's matvec carrying every live row in one
+pass over the weights (groupMV, `_t2of8` in a kernel name), each row
+attending to its own history. The head is the prompt's tail call, as for any
+chunk that did not fold it. The same 2 rows then run 2.2 ms of kernels on the
+V100. Not taken for a hybrid, a speculation step, a bidirectional run or a
+split placement, which keep the chunk; a refusal falls back to it.
+`model.WithTailRows(false)` (`JITLLM_TAIL_ROWS=0`) is the control arm.
+
+A first form chose by measurement: the fastest decode call, a short chunk and
+the ragged step, each kept on the Model. A first run includes its compiles
+and captures, so it could not tell the shapes apart. On the V100 the step's
+first run (75 ms, compiling) left it measured slower than the chunk for the
+rest of the process. The step reads every weight once where the chunk reads
+them at the grain, so it is the rule.
+
+Rows, same binary with the step on and off (`JITLLM_TAIL_ROWS=0`),
+interleaved, medians of 7-prompt `jitllm speed -n 0` runs, A/A first:
+
+    T4, Llama-3.1-8B Q4_K_M   A/A 0.97-1.03    pp514 off 847-870, on 913-922 tok/s (+6.4%)
+                                               pp516 off 856-874, on 891-920 (+4.5%)
+                                               pp2   off 27.2-30.0, on 60.5-60.9 (2.06x)
+    T4, Llama-3.2-1B Q4_K_M   A/A 0.72-1.05    pp514 off 6.07-6.50k, on 6.14-6.64k (unresolved)
+                                               pp516 off 5.98-6.19k, on 6.25-6.69k (+4%)
+                                               pp2   off 103-106, on 205-224 (2.07x)
+    V100, Llama-3.2-1B        (host loaded)    pp514 off 11.3-12.6k, on 13.1-13.9k (+7%)
+                                               pp2   off 223-245, on 280-309 (+25%)
+
+llama-bench on the same T4: 8B pp514 974, pp2 46; 1B pp514 5.6k, pp2 364.
+A 512-token prompt and decode are unchanged by construction (no chunk of 2-4
+rows) and read so: T4 tg128 230-232 against 230-232 tok/s on the 1B, 45.6-47.8
+against 45.9-47.1 on the 8B.
+
+What is left of the tail's cost is the host's: the step is recorded and
+replayed like a decode step, and a recording is the session's, so each new
+session captures it once (about 1 ms on the V100), and the head runs as its
+own call.
+
 ## Measurements once cited in jit/gpu/tier's comments
 
 The tier's comments state the engineering reason and the class of card; the
