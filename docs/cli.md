@@ -38,8 +38,9 @@ nothing in it is moved.
 ## Convert a model
 
 ```sh
-# A model from the catalog (jitllm library lists them).
-./jitllm convert -o models llama-3.2-1b-instruct models/llama.jlm
+# A model from the catalog (jitllm library lists them), into the models
+# folder, where it also answers to the catalog name: jitllm run llama-3.2-1b-instruct
+./jitllm convert llama-3.2-1b-instruct
 
 # A GGUF you already have.
 ./jitllm convert path/to/model.gguf models/model.jlm
@@ -80,3 +81,26 @@ With no prompt and a terminal on stdin, `run` holds a conversation through the
 model's chat template: `/help`, `/clear`, `/bye` (or Ctrl+D) to leave, Ctrl+C
 to stop a reply, a trailing `\` or a `"""` block for several lines. A pipe or
 file on stdin is read whole as the prompt instead.
+
+## Run by name, through the service
+
+`jitllm run NAME` (and `jitllm embed NAME`) asks the local service first. When
+a jitllmd answers on `127.0.0.1:8080` (`-addr` names another), the service
+resolves NAME -- a file name in its models folder, an alias, a loaded id --
+loads it if it is not loaded, and streams the answer; no second engine starts.
+With no prompt and a terminal, it is the same interactive chat as in-process.
+When nothing answers, NAME is looked up in the models folder (and a `models`
+folder in the working directory) by file name or alias and run in this
+process. A path always runs in this process, and so does a run with
+`-embedded` or with any flag about this process's engine (`-devices`,
+`-placement`, `-kv-cache`, `-image`, ...). One line on stderr says which:
+
+```text
+jitllm: using the service at http://127.0.0.1:8080 (jitllmd v0.4.0) for qwen3
+jitllm: running /home/me/.local/share/jitllm/models/Qwen3-8B-Q4_K_M.jlm in this process (no service answers at 127.0.0.1:8080)
+```
+
+A service of another API version is refused with a message rather than
+bypassed. The measuring commands (`speed`, `bench`, `batch`, `verify`) and
+`decide` always run in this process: they measure or drive this process's
+engine.

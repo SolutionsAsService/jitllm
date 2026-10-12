@@ -23,6 +23,27 @@ import Surfaces from '../../../../components/fig/Surfaces.astro'
 
 <Surfaces />
 
+## As a service
+
+```sh
+jitllmd service install   # on 127.0.0.1:8080, now and at every login
+jitllmd service status
+```
+
+It runs `jitllmd serve` over the models folder as a systemd user unit on Linux, a launchd agent on macOS (the app's "Start the server at login" is the same agent) and a login entry on Windows (the installer's option), restarted after a crash. `stop`, `start` and `uninstall` manage it. Logs: `journalctl --user -u jitllm`, `~/Library/Logs/jitllm/jitllmd.log`, `%LOCALAPPDATA%\jitllm\jitllmd.log`.
+
+## Models by name
+
+Every `.jlm` in the models folder is available by its file name, with or without `.jlm`, or by an alias, and a request naming one that is not loaded loads it (with `-devices`, `-gpu-layers` and `-sessions`; `-on-demand=false` turns this off). `GET /v1/models` lists the loaded models, then the available ones with `"loaded": false`. A model that does not fit memory pages from disk; a load that fails says which model, its size and the budget.
+
+```sh
+jitllmd models -alias Qwen3-8B-Q4_K_M=qwen3   # several names per model, unique across the folder
+jitllmd models -disable qwen3                 # listed, never loaded on demand
+jitllmd models -enable qwen3
+```
+
+Aliases and enable/disable are kept in the folder's `jitllm-models.json` and survive a restart. `jitllm convert NAME` gives the container its catalog name as an alias.
+
 ## Start the server
 
 ```sh
@@ -33,7 +54,8 @@ jitllmd serve -addr 127.0.0.1:8080 -models ./models \
 | Flag | Default | Meaning |
 |---|---|---|
 | `-addr` | `:8080` | listen address |
-| `-models DIR` | `JITLLM_MODELS`, else `models` | directory scanned by the model list and used to resolve a bare model name |
+| `-models DIR` | the models folder | directory scanned by the model list; its containers are available by name. `JITLLM_MODELS` sets the default. |
+| `-on-demand` | true | load a model a request names that is not loaded, unless it is disabled |
 | `-load FILE` | | a `.jlm` to load at startup, absolute or relative to `-models` |
 | `-id NAME` | generated (`m-…`) | the model name clients send. The file name without `.jlm` works too. |
 | `-devices SPEC` | CPU only | where to run it, in the [device grammar](/docs/guides/devices/#the-device-grammar). Empty opens no device. |

@@ -78,6 +78,8 @@ The script finds the latest release, downloads the archives for this machine, ch
 | another directory | `JITLLM_INSTALL_DIR=...` | `$env:JITLLM_INSTALL_DIR = "..."` |
 | where the macOS app goes | `JITLLM_APPS_DIR=...` (default `/Applications`, or `~/Applications` when that is not writable) | |
 
+On Linux the script also installs `jitllmd` as a systemd user service on `127.0.0.1:8080` (`jitllmd service install`), so `jitllm run NAME` and any OpenAI client find a server already running; `sh -s -- --no-service` (or `JITLLM_NO_SERVICE=1`) skips it. Its log is `journalctl --user -u jitllm`; `jitllmd service status|stop|start|uninstall` manage it, on every system.
+
 The programs are `jitllm` (the CLI) and `jitllmd` (the server), installed by default, and `desktop` (the [desktop app](/docs/guides/desktop/)) and `tui` (the [terminal app](/docs/guides/terminal/)); `all` is the four. On macOS, `desktop` installs the signed `jitllm.app` from the release's `.app.zip` rather than a bare binary. For example, the CLI and the terminal app:
 
 ```sh
