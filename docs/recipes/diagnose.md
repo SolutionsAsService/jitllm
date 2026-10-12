@@ -43,14 +43,14 @@ are) and the containers on disk it could load.
 ## 2. A failed request: read the error
 
 Every error is a JSON body naming the cause. Status codes: 400 for a request the
-server will not run as asked, 404 for a model that is not loaded, 429 when the
+server will not run as asked, 404 for a model that is neither loaded nor in the models folder, 400 for a disabled one, 429 when the
 model's queue is full (with `Retry-After`), 500 for an engine failure.
 
 ```sh
 curl -s -w '\nHTTP %{http_code}\n' http://127.0.0.1:8080/v1/completions -H 'Content-Type: application/json' \
   -d '{"model":"no-such-model","prompt":"x"}'
 ```
-<!-- test: expect no loaded model \"no-such-model\" -->
+<!-- test: expect no model \"no-such-model\" is loaded or in the models folder -->
 <!-- test: expect HTTP 404 -->
 
 ```sh

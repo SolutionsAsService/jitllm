@@ -204,6 +204,38 @@ func TestAliasesAreUniqueAndSurviveARestart(t *testing.T) {
 	}
 }
 
+// TestConcurrentRequestsLoadAModelOnce: requests arriving together for a
+// model nobody loaded share one load.
+func TestConcurrentRequestsLoadAModelOnce(t *testing.T) {
+	dir := modelsFolder(t, "stories260K")
+	e, c := folderEngine(t, dir)
+	errs := make(chan string, 4)
+	for range 4 {
+		go func() {
+			resp, err := http.Post(c.url+oaText, "application/json",
+				strings.NewReader(`{"model":"stories260K","prompt":"`+story+`","max_tokens":2}`))
+			if err != nil {
+				errs <- err.Error()
+				return
+			}
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				errs <- resp.Status
+				return
+			}
+			errs <- ""
+		}()
+	}
+	for range 4 {
+		if e := <-errs; e != "" {
+			t.Error(e)
+		}
+	}
+	if n := len(e.Models()); n != 1 {
+		t.Fatalf("%d models loaded, want one", n)
+	}
+}
+
 // TestAnUnknownModelNamesTheFolder: a name that is neither loaded nor in the
 // folder is a 404 that says where it looked.
 func TestAnUnknownModelNamesTheFolder(t *testing.T) {

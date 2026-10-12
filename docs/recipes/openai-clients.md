@@ -122,7 +122,7 @@ curl -s http://127.0.0.1:8080/v1/messages -H 'Content-Type: application/json' -d
 | You see | Cause | Do this |
 |---|---|---|
 | `openai.APIConnectionError` / `ECONNREFUSED` | wrong base URL or the server is down | the base URL ends in `/v1` for OpenAI SDKs and has no `/v1` for Anthropic ones; check `curl http://127.0.0.1:8080/healthz` |
-| `404` with `no loaded model` | the `model` string is not a loaded id | `client.models.list()` lists the ids |
+| `404` with `no model ... is loaded or in the models folder` | the `model` string names no loaded model and no file or alias in the models folder | `client.models.list()` lists the ids |
 | `429` with `Retry-After` | the model's queue (`-max-queue`, 64 by default) is full | retry after the header's delay, or raise `-max-queue` |
 | a field you sent is ignored or refused | not every OpenAI field is implemented | the 400 names the field; `docs/server.md` lists what is supported |
 | the SDK times out on a long reply | a slow first token on a large model | raise the client timeout; [diagnose](diagnose.md) where the time goes |

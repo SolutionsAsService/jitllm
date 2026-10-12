@@ -108,7 +108,7 @@ message asks it not to, and its reply then starts with an empty
 |---|---|---|
 | `curl: (7) Failed to connect` | the server is not up yet, or exited | read its terminal; a model that failed to load is named there |
 | `... is not a .jlm container, and inference reads nothing else` | `-load` was given a GGUF | run the `jitllm convert` command the message prints |
-| `no loaded model "X": load it first, or call ListModels` | the `model` field names nothing loaded | use an `id` from `/v1/models` |
+| `no model "X" is loaded or in the models folder` | the `model` field names nothing loaded and no file or alias in `-models` | use an `id` from `/v1/models` |
 | `carries no chat template, so a chat request would run as a RAW COMPLETION` | a base model on `/v1/chat/completions` | send a `prompt` to `/v1/completions`, or load an instruction model |
 | `misplaced flag` | a flag after a positional argument | put every flag before the file |
 | the reply is only a `<think>` block, `finish_reason` `length` | a reasoning model ran out of `max_tokens` while thinking | raise `max_tokens`, or end the message with `/no_think` on Qwen3 |
