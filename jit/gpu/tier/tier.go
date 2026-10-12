@@ -265,6 +265,11 @@ type Config struct {
 	// kernels.FlashPrefillTile on Metal -- the other arm of those kernels'
 	// gates and measurements.
 	NoFlashPrefill bool
+	// SpillingTiles lets the batched GEMM run a tile whose kernel spills
+	// registers to local memory. By default a tile the device's compiler
+	// reports spilling (backend.KernelResources.SpillBytes) is passed over
+	// for the next one that divides the shape; this is the other arm.
+	SpillingTiles bool
 	// DecodePlanOff puts pieces of kernels.ChooseDecodePlan back as the tier
 	// had them before it, for the plan's A/B: 1 the split count (the square
 	// root, the cap rounded down, the default width), 2 the group-per-item
@@ -665,6 +670,9 @@ type Stats struct {
 	// VoltaGemm counts those of them that are the shared-memory-staged
 	// kernels.GemmVolta rather than MatVecMMA70.
 	VoltaGemm int
+	// SpillRefused counts GemmVolta tiles compiled and passed over because
+	// the compiler reported them spilling (Config.SpillingTiles).
+	SpillRefused int
 	// GemmF16 counts batched matvecs built as GemmVolta on the m16n8 binary16
 	// instruction (sm_75 on, devTier.f16Gemm) rather than MatVecMMA.
 	GemmF16 int
@@ -1065,6 +1073,7 @@ func (s *Stats) add(o Stats) {
 	s.RowtTiles += o.RowtTiles
 	s.RowtPlain += o.RowtPlain
 	s.VoltaMV += o.VoltaMV
+	s.SpillRefused += o.SpillRefused
 	s.RagGroupMV += o.RagGroupMV
 	s.RagQKVFused += o.RagQKVFused
 	s.RagResFused += o.RagResFused
