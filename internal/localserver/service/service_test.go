@@ -19,10 +19,10 @@ func (r *recorder) run(name string, args ...string) ([]byte, error) {
 // default loopback address over the models folder, quoted for systemd, is
 // restarted only after a failure, and starts with the person's session.
 func TestUnitRunsTheServerOnLoopback(t *testing.T) {
-	s := Service{GOOS: "linux", Home: "/home/p"}
-	u := s.Render(Args("/opt/jitllm bin/jitllmd", "/home/p/50%/models", ""))
+	s := Service{GOOS: "linux", Home: "/srv/p"}
+	u := s.Render(Args("/opt/jitllm bin/jitllmd", "/srv/p/50%/models", ""))
 	for _, want := range []string{
-		`ExecStart="/opt/jitllm bin/jitllmd" "serve" "-addr" "127.0.0.1:8080" "-models" "/home/p/50%%/models"`,
+		`ExecStart="/opt/jitllm bin/jitllmd" "serve" "-addr" "127.0.0.1:8080" "-models" "/srv/p/50%%/models"`,
 		"Restart=on-failure",
 		"WantedBy=default.target",
 	} {
@@ -30,10 +30,10 @@ func TestUnitRunsTheServerOnLoopback(t *testing.T) {
 			t.Errorf("the unit lacks %q:\n%s", want, u)
 		}
 	}
-	if got := s.File(); got != "/home/p/.config/systemd/user/jitllm.service" {
+	if got := s.File(); got != "/srv/p/.config/systemd/user/jitllm.service" {
 		t.Errorf("unit at %s", got)
 	}
-	if got := (Service{GOOS: "linux", Home: "/home/p", ConfigHome: "/cfg"}).File(); got != "/cfg/systemd/user/jitllm.service" {
+	if got := (Service{GOOS: "linux", Home: "/srv/p", ConfigHome: "/cfg"}).File(); got != "/cfg/systemd/user/jitllm.service" {
 		t.Errorf("with XDG_CONFIG_HOME: %s", got)
 	}
 }
@@ -41,7 +41,7 @@ func TestUnitRunsTheServerOnLoopback(t *testing.T) {
 // TestPlistIsTheAgentTheAppInstalls: the macOS agent keeps the label, the
 // arguments and the log of the app's switch, and decodes as a plist.
 func TestPlistIsTheAgentTheAppInstalls(t *testing.T) {
-	s := Service{GOOS: "darwin", Home: "/Users/p&q"}
+	s := Service{GOOS: "darwin", Home: "/srv/m&q"}
 	p := s.Render(Args("/Applications/jitllm.app/Contents/Resources/bin/jitllmd", "/m<x>", ""))
 	var doc struct {
 		Strings []string `xml:"dict>array>string"`
@@ -53,7 +53,7 @@ func TestPlistIsTheAgentTheAppInstalls(t *testing.T) {
 	if strings.Join(doc.Strings, "|") != strings.Join(want, "|") {
 		t.Errorf("arguments %q, want %q", doc.Strings, want)
 	}
-	if s.File() != "/Users/p&q/Library/LaunchAgents/org.jitllm.service.plist" {
+	if s.File() != "/srv/m&q/Library/LaunchAgents/org.jitllm.service.plist" {
 		t.Errorf("plist at %s", s.File())
 	}
 	if !strings.Contains(p, "<string>org.jitllm.service</string>") || !strings.Contains(p, "Library/Logs/jitllm/jitllmd.log") {
