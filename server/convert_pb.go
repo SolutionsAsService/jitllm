@@ -190,6 +190,7 @@ func (e *Engine) pbModelInfo(lm *LoadedModel) *v1.ModelInfo {
 		DefaultDeviceIds:  lm.deviceIDs,
 		Pooling:           pooling,
 		Encoder:           lm.m.IsEncoder(),
+		Aliases:           e.aliasesOf(lm.path),
 	}
 }
 

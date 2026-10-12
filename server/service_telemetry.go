@@ -148,4 +148,6 @@ func (s *TelemetryService) GetServerInfo(ctx context.Context, req *connect.Reque
 
 // Features names what this server does beyond the manifest, for a client to
 // switch its own features on by. A name is added, never renamed.
-func Features() []string { return []string{"server_info"} }
+func Features() []string {
+	return []string{"server_info", "model_aliases", "model_enable", "on_demand_load"}
+}

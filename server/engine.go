@@ -146,6 +146,14 @@ type Config struct {
 	// expensive and exclusive: backend.Open() opens and closes every backend.
 	// Tests and deployments that know their topology supply it here.
 	Probe func() ([]DeviceInfo, error)
+
+	// OnDemand is how a model a request names but nobody loaded is loaded
+	// (library.go): its devices, budget and seam. Path and ModelID are
+	// filled per model.
+	OnDemand LoadOptions
+	// NoOnDemand turns on-demand loading off: a request names a loaded model
+	// or fails, as before the models folder was indexed.
+	NoOnDemand bool
 }
 
 // preloadDepth is how many pages a load keeps in flight behind model.Open
@@ -210,6 +218,12 @@ type Engine struct {
 	devices []DeviceInfo
 	devErr  error
 	probed  bool
+
+	// libMu orders read-modify-writes of the models folder's state file;
+	// demandMu makes on-demand loads one at a time, so two requests naming
+	// the same model load it once (library.go).
+	libMu    sync.Mutex
+	demandMu sync.Mutex
 }
 
 // New builds an Engine. It does not touch the hardware; the first ListDevices
@@ -903,10 +917,11 @@ func (e *Engine) CreateSession(o SessionOptions) (*Session, error) {
 	if err := o.check(e.cfg.PromptStore); err != nil {
 		return nil, err
 	}
-	lm, err := e.Model(o.ModelID)
+	lm, err := e.resolveModel(o.ModelID)
 	if err != nil {
 		return nil, err
 	}
+	o.ModelID = lm.id
 	if o.PromptCache && o.KVStore == nil {
 		// Through the model's memory cache when it has one, which layers
 		// over the same store (ttft.go, layered).
@@ -1389,6 +1404,19 @@ func (e *Engine) Generate(ctx context.Context, o GenerateOptions, emit func(Even
 	// so a request it refuses builds nothing and parks nobody; then, once the
 	// prompt is known, the KV budget (admitKV), which may park idle sessions
 	// to make room for this one.
+	//
+	// A model named rather than a session is resolved first: by id, file
+	// name or alias, loaded on demand when it is in the models folder.
+	if o.SessionID == "" && o.ModelID != "" {
+		lm, err := e.resolveModel(o.ModelID)
+		if err != nil {
+			return err
+		}
+		if o.ModelName == "" && lm.id != o.ModelID {
+			o.ModelName = o.ModelID
+		}
+		o.ModelID = lm.id
+	}
 	if lm := e.modelOf(o); lm != nil {
 		done, err := e.admitQueue(lm)
 		if err != nil {
@@ -2041,6 +2069,11 @@ type ModelFileInfo struct {
 	Size           uint64
 	IsContainer    bool
 	ConvertCommand string
+	// Aliases and Disabled are the file's entry in the folder's state file
+	// (library.go); ModelID is the id it is loaded under, when it is.
+	Aliases  []string
+	Disabled bool
+	ModelID  string
 }
 
 // ScanModels lists containers and GGUFs in a directory. A GGUF is listed WITH
@@ -2082,6 +2115,7 @@ func (e *Engine) ScanModels(dir string) ([]ModelFileInfo, string, error) {
 		out = append(out, m)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	e.applyState(dir, out)
 	return out, dir, nil
 }
 

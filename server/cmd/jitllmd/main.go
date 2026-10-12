@@ -146,6 +146,9 @@ func serve(args []string) {
 	load := fs.String("load", "",
 		"a .jlm container to load at startup, absolute or relative to -models")
 	modelID := fs.String("id", "", "model id for -load (default: derived)")
+	onDemand := fs.Bool("on-demand", true,
+		"load a model of -models a request names (by file name or alias) that is not loaded, unless it is disabled; "+
+			"it takes -devices (default auto), -gpu-layers and -sessions")
 	devices := fs.String("devices", "",
 		"devices for -load: auto|all|cpu|gpu[:N]|(cuda|vulkan|metal)[:DEVICE][=BYTES], comma-separated; "+
 			"a bare gpu, cuda or vulkan is every such device, a :DEVICE selector pins one")
@@ -294,7 +297,13 @@ func serve(args []string) {
 		}
 		store = fsStore
 	}
+	demand := server.LoadOptions{MaxDeviceBlocks: *gpuLayers, Sessions: *sessions, DeviceIDs: []string{"auto"}}
+	if *devices != "" {
+		demand.DeviceIDs = strings.Split(*devices, ",")
+	}
 	e := server.New(server.Config{
+		OnDemand:         demand,
+		NoOnDemand:       !*onDemand,
 		KVF16:            kvWidth,
 		OffHeap:          goheap.OffHeap,
 		PromptStore:      store,

@@ -177,8 +177,10 @@ func (s *scripted) Generate(ctx context.Context, o server.GenerateOptions, emit 
 }
 
 func (s *scripted) ListLoaded() []server.ModelSummary {
-	return []server.ModelSummary{{ID: "m-1", Name: "tinyllama"}}
+	return []server.ModelSummary{{ID: "m-1", Name: "tinyllama", Loaded: true}}
 }
+
+func (s *scripted) ListAvailable() []server.ModelSummary { return nil }
 
 func (s *scripted) BindTarget(o *server.GenerateOptions, sessionID, modelName string) error {
 	if sessionID != "" {

@@ -35,12 +35,21 @@ func cmdModels(ctx context.Context, c cli, args []string) error {
 	unload := fs.String("unload", "", "a loaded model id to unload")
 	force := fs.Bool("force", false, "with -unload, close sessions holding the model instead of refusing")
 
+	alias := fs.String("alias", "", "MODEL=ALIAS[,ALIAS...]: other names a request may use for a model in the models folder")
+	unalias := fs.String("unalias", "", "MODEL=ALIAS[,ALIAS...]: remove aliases")
+	enable := fs.String("enable", "", "a model in the models folder a request may load on demand (the default)")
+	disable := fs.String("disable", "", "a model in the models folder that is listed and never loaded on demand")
+
 	if err := parse(c, fs, args); err != nil {
 		return err
 	}
 	cn, err := dial(*addr)
 	if err != nil {
 		return err
+	}
+
+	if *alias != "" || *unalias != "" || *enable != "" || *disable != "" {
+		return setModelOptions(ctx, c, cn, *alias, *unalias, *enable, *disable)
 	}
 
 	switch {
@@ -78,6 +87,78 @@ func cmdModels(ctx context.Context, c cli, args []string) error {
 	}
 	listModels(c.out, resp.Msg)
 	return nil
+}
+
+// setModelOptions applies -alias, -unalias, -enable and -disable, one
+// SetModelOptions call per model named.
+func setModelOptions(ctx context.Context, c cli, cn *conn, alias, unalias, enable, disable string) error {
+	type change struct {
+		add, remove []string
+		enabled     *bool
+	}
+	changes := map[string]*change{}
+	var order []string
+	get := func(name string) *change {
+		if changes[name] == nil {
+			changes[name] = &change{}
+			order = append(order, name)
+		}
+		return changes[name]
+	}
+	split := func(flag, v string) (string, []string, error) {
+		name, list, ok := strings.Cut(v, "=")
+		if !ok || name == "" || list == "" {
+			return "", nil, usagef("-%s %q: want MODEL=ALIAS[,ALIAS...]", flag, v)
+		}
+		return name, csv(list), nil
+	}
+	if alias != "" {
+		n, a, err := split("alias", alias)
+		if err != nil {
+			return err
+		}
+		get(n).add = a
+	}
+	if unalias != "" {
+		n, a, err := split("unalias", unalias)
+		if err != nil {
+			return err
+		}
+		get(n).remove = a
+	}
+	on, off := true, false
+	if enable != "" {
+		get(enable).enabled = &on
+	}
+	if disable != "" {
+		if enable == disable {
+			return usagef("-enable and -disable name the same model")
+		}
+		get(disable).enabled = &off
+	}
+	for _, name := range order {
+		ch := changes[name]
+		resp, err := cn.Model.SetModelOptions(ctx, connect.NewRequest(&v1.SetModelOptionsRequest{
+			Name: name, AddAliases: ch.add, RemoveAliases: ch.remove, Enabled: ch.enabled,
+		}))
+		if err != nil {
+			return clientError("setting "+name, cn.base, err)
+		}
+		f := resp.Msg.GetFile()
+		state := "enabled"
+		if f.GetDisabled() {
+			state = "disabled"
+		}
+		fmt.Fprintf(c.out, "%s  %s  aliases: %s\n", f.GetName(), state, aliasList(f.GetAliases()))
+	}
+	return nil
+}
+
+func aliasList(a []string) string {
+	if len(a) == 0 {
+		return "none"
+	}
+	return strings.Join(a, ", ")
 }
 
 type loadOpts struct {
@@ -147,7 +228,21 @@ func listModels(w io.Writer, m *v1.ListModelsResponse) {
 			if f.GetContainerVersion() == 0 {
 				ver = "header did not parse"
 			}
-			fmt.Fprintf(w, "  %-44s %12s  %s\n", f.GetName(), bytesOf(f.GetSize()), ver)
+			var notes []string
+			if id := f.GetModelId(); id != "" {
+				notes = append(notes, "loaded as "+id)
+			}
+			if f.GetDisabled() {
+				notes = append(notes, "disabled")
+			}
+			if a := f.GetAliases(); len(a) > 0 {
+				notes = append(notes, "aliases "+strings.Join(a, ", "))
+			}
+			note := ""
+			if len(notes) > 0 {
+				note = "  (" + strings.Join(notes, "; ") + ")"
+			}
+			fmt.Fprintf(w, "  %-44s %12s  %s%s\n", f.GetName(), bytesOf(f.GetSize()), ver, note)
 			continue
 		}
 		fmt.Fprintf(w, "  %-44s %12s  needs conversion:\n      %s\n",

@@ -36,6 +36,25 @@ service ModelService {
   // which is the failure mode the engine records as producing fluent output
   // and no signal at all.
   rpc ApplyChatTemplate(ApplyChatTemplateRequest) returns (ApplyChatTemplateResponse) {}
+
+  // Aliases and enable/disable for a container in the models folder. A
+  // request naming a model by id, file name or alias loads an enabled one on
+  // demand; a disabled one is refused by name.
+  rpc SetModelOptions(SetModelOptionsRequest) returns (SetModelOptionsResponse) {}
+}
+
+message SetModelOptionsRequest {
+  // The model: its file name, with or without .jlm, an alias, or a loaded
+  // model's id.
+  string name = 1;
+  repeated string add_aliases = 2;
+  repeated string remove_aliases = 3;
+  // Unset leaves it as it is.
+  optional bool enabled = 4;
+}
+
+message SetModelOptionsResponse {
+  ModelFile file = 1;
 }
 
 // ModelFile is something on disk that has not necessarily been opened.
@@ -49,6 +68,14 @@ message ModelFile {
   uint32 container_version = 5;
   // Present when `is_container` is false: the command that would convert it.
   string convert_command = 6;
+  // Other names a request may use for this model, unique across the folder,
+  // kept in the models folder's jitllm-models.json.
+  repeated string aliases = 7;
+  // A disabled model is listed and never loaded on demand; an explicit
+  // LoadModel still loads it.
+  bool disabled = 8;
+  // The id it is loaded under, when it is loaded.
+  string model_id = 9;
 }
 
 // ModelInfo describes a LOADED model. Every field here needs the container
@@ -101,6 +128,9 @@ message ModelInfo {
   // True for an encoder (BERT, nomic-bert). It has no decoder session, so
   // Generate and CreateSession refuse it and Embed is its only path.
   bool encoder = 23;
+
+  // The aliases its file carries in the models folder (ModelFile.aliases).
+  repeated string aliases = 24;
 }
 
 message ListModelsRequest {

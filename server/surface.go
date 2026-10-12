@@ -19,6 +19,10 @@ type Backend interface {
 	// ListLoaded is what /v1/models reports.
 	ListLoaded() []ModelSummary
 
+	// ListAvailable is the models a request may name that are not loaded,
+	// which /v1/models lists after the loaded ones.
+	ListAvailable() []ModelSummary
+
 	// BindTarget resolves a wire "model" field, or a session id, onto the
 	// engine's own ids, filling in o.ModelID or o.SessionID.
 	BindTarget(o *GenerateOptions, sessionID, modelName string) error
@@ -47,6 +51,11 @@ type ModelSummary struct {
 	// MaxModelLen is the KV capacity a session of this model gets when it
 	// asks for none: the prompt and the completion together.
 	MaxModelLen int
+	// Aliases are the other names its file carries in the models folder.
+	Aliases []string
+	// Loaded is false for a model in the models folder that a request would
+	// load on demand.
+	Loaded bool
 }
 
 // compat carries the Backend into the two shims' handlers.
@@ -68,7 +77,7 @@ func (e *Engine) ListLoaded() []ModelSummary {
 	out := []ModelSummary{}
 	for _, lm := range e.Models() {
 		out = append(out, ModelSummary{ID: lm.id, Name: lm.name, LoadedAt: lm.loadedAt,
-			MaxModelLen: e.defaultMaxSeq(lm)})
+			MaxModelLen: e.defaultMaxSeq(lm), Aliases: e.aliasesOf(lm.path), Loaded: true})
 	}
 	return out
 }

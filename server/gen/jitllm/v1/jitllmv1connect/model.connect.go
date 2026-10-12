@@ -51,6 +51,9 @@ const (
 	// ModelServiceApplyChatTemplateProcedure is the fully-qualified name of the ModelService's
 	// ApplyChatTemplate RPC.
 	ModelServiceApplyChatTemplateProcedure = "/jitllm.v1.ModelService/ApplyChatTemplate"
+	// ModelServiceSetModelOptionsProcedure is the fully-qualified name of the ModelService's
+	// SetModelOptions RPC.
+	ModelServiceSetModelOptionsProcedure = "/jitllm.v1.ModelService/SetModelOptions"
 )
 
 // ModelServiceClient is a client for the jitllm.v1.ModelService service.
@@ -74,6 +77,10 @@ type ModelServiceClient interface {
 	// which is the failure mode the engine records as producing fluent output
 	// and no signal at all.
 	ApplyChatTemplate(context.Context, *connect.Request[v1.ApplyChatTemplateRequest]) (*connect.Response[v1.ApplyChatTemplateResponse], error)
+	// Aliases and enable/disable for a container in the models folder. A
+	// request naming a model by id, file name or alias loads an enabled one on
+	// demand; a disabled one is refused by name.
+	SetModelOptions(context.Context, *connect.Request[v1.SetModelOptionsRequest]) (*connect.Response[v1.SetModelOptionsResponse], error)
 }
 
 // NewModelServiceClient constructs a client for the jitllm.v1.ModelService service. By default, it
@@ -135,6 +142,12 @@ func NewModelServiceClient(httpClient connect.HTTPClient, baseURL string, opts .
 			connect.WithSchema(modelServiceMethods.ByName("ApplyChatTemplate")),
 			connect.WithClientOptions(opts...),
 		),
+		setModelOptions: connect.NewClient[v1.SetModelOptionsRequest, v1.SetModelOptionsResponse](
+			httpClient,
+			baseURL+ModelServiceSetModelOptionsProcedure,
+			connect.WithSchema(modelServiceMethods.ByName("SetModelOptions")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -148,6 +161,7 @@ type modelServiceClient struct {
 	tokenize          *connect.Client[v1.TokenizeRequest, v1.TokenizeResponse]
 	detokenize        *connect.Client[v1.DetokenizeRequest, v1.DetokenizeResponse]
 	applyChatTemplate *connect.Client[v1.ApplyChatTemplateRequest, v1.ApplyChatTemplateResponse]
+	setModelOptions   *connect.Client[v1.SetModelOptionsRequest, v1.SetModelOptionsResponse]
 }
 
 // ListModels calls jitllm.v1.ModelService.ListModels.
@@ -190,6 +204,11 @@ func (c *modelServiceClient) ApplyChatTemplate(ctx context.Context, req *connect
 	return c.applyChatTemplate.CallUnary(ctx, req)
 }
 
+// SetModelOptions calls jitllm.v1.ModelService.SetModelOptions.
+func (c *modelServiceClient) SetModelOptions(ctx context.Context, req *connect.Request[v1.SetModelOptionsRequest]) (*connect.Response[v1.SetModelOptionsResponse], error) {
+	return c.setModelOptions.CallUnary(ctx, req)
+}
+
 // ModelServiceHandler is an implementation of the jitllm.v1.ModelService service.
 type ModelServiceHandler interface {
 	// Containers and GGUFs discovered in the model directory, plus everything
@@ -211,6 +230,10 @@ type ModelServiceHandler interface {
 	// which is the failure mode the engine records as producing fluent output
 	// and no signal at all.
 	ApplyChatTemplate(context.Context, *connect.Request[v1.ApplyChatTemplateRequest]) (*connect.Response[v1.ApplyChatTemplateResponse], error)
+	// Aliases and enable/disable for a container in the models folder. A
+	// request naming a model by id, file name or alias loads an enabled one on
+	// demand; a disabled one is refused by name.
+	SetModelOptions(context.Context, *connect.Request[v1.SetModelOptionsRequest]) (*connect.Response[v1.SetModelOptionsResponse], error)
 }
 
 // NewModelServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -268,6 +291,12 @@ func NewModelServiceHandler(svc ModelServiceHandler, opts ...connect.HandlerOpti
 		connect.WithSchema(modelServiceMethods.ByName("ApplyChatTemplate")),
 		connect.WithHandlerOptions(opts...),
 	)
+	modelServiceSetModelOptionsHandler := connect.NewUnaryHandler(
+		ModelServiceSetModelOptionsProcedure,
+		svc.SetModelOptions,
+		connect.WithSchema(modelServiceMethods.ByName("SetModelOptions")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/jitllm.v1.ModelService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case ModelServiceListModelsProcedure:
@@ -286,6 +315,8 @@ func NewModelServiceHandler(svc ModelServiceHandler, opts ...connect.HandlerOpti
 			modelServiceDetokenizeHandler.ServeHTTP(w, r)
 		case ModelServiceApplyChatTemplateProcedure:
 			modelServiceApplyChatTemplateHandler.ServeHTTP(w, r)
+		case ModelServiceSetModelOptionsProcedure:
+			modelServiceSetModelOptionsHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -325,4 +356,8 @@ func (UnimplementedModelServiceHandler) Detokenize(context.Context, *connect.Req
 
 func (UnimplementedModelServiceHandler) ApplyChatTemplate(context.Context, *connect.Request[v1.ApplyChatTemplateRequest]) (*connect.Response[v1.ApplyChatTemplateResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("jitllm.v1.ModelService.ApplyChatTemplate is not implemented"))
+}
+
+func (UnimplementedModelServiceHandler) SetModelOptions(context.Context, *connect.Request[v1.SetModelOptionsRequest]) (*connect.Response[v1.SetModelOptionsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("jitllm.v1.ModelService.SetModelOptions is not implemented"))
 }

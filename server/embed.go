@@ -143,23 +143,6 @@ func (e *Engine) Embed(ctx context.Context, o EmbedOptions) (*EmbedResult, error
 	return res, nil
 }
 
-// resolveModel takes a loaded model's id, or the file name it was loaded from,
-// which is what a client configured from `jitllm run` sends.
-func (e *Engine) resolveModel(name string) (*LoadedModel, error) {
-	if name == "" {
-		return nil, fmt.Errorf("%w: model is required", ErrInvalid)
-	}
-	if lm, err := e.Model(name); err == nil {
-		return lm, nil
-	}
-	for _, lm := range e.Models() {
-		if lm.name == name {
-			return lm, nil
-		}
-	}
-	return nil, fmt.Errorf("%w: no loaded model %q: load it first, or call ListModels", ErrNotFound, name)
-}
-
 // embedders is a model's idle embedders. An Embedder is one sequence at a time
 // and owns a worker pool (an encoder) or a session (a decoder), so it is built
 // once and reused. Nothing bounds how many run at once: each concurrent request

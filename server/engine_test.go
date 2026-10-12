@@ -91,7 +91,10 @@ func serveEngine(t *testing.T, e *Engine) clients {
 func loadedEngine(t *testing.T, name, id string, o LoadOptions) (*Engine, *LoadedModel, clients) {
 	t.Helper()
 	path := modelPath(t, name)
-	e := New(Config{ModelDir: filepath.Dir(path), Probe: oneCardProbe, Version: "test"})
+	// The model directory is the whole test model disk: with on-demand loads
+	// on, a request naming any of its files would load it. These gates are
+	// about the one model they load; library_test.go gates the folder.
+	e := New(Config{ModelDir: filepath.Dir(path), Probe: oneCardProbe, Version: "test", NoOnDemand: true})
 	t.Cleanup(e.Close)
 	o.Path, o.ModelID = path, id
 	lm, err := e.LoadModel(o)
