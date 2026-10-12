@@ -677,6 +677,31 @@ func (s *State) prefillSrc(slot int, src []func(dst []float32) error, ids []int3
 						}
 					}
 				}
+				// A chunk of a few rows over the whole model is one ragged step
+				// of them (tailrows.go): decode's matvec over the live rows,
+				// where the chunk would run its batched kernels at the device's
+				// grain. The head is the tail call after the loop. A refusal
+				// falls through to the chunk.
+				if !s.m.opt.noTailRows && n >= 2 && n <= tailRowsMax && li == s.lo && hi == s.hi && !chunkBidir && s.rows == nil &&
+					!s.recurrent() && s.rowsRefusal() == nil {
+					pos := s.tailPos[:0]
+					for j := 0; j < n; j++ {
+						pos = append(pos, p0+j)
+					}
+					s.tailPos = pos
+					// One sequence: slot is the position (nn.RowsDevice).
+					if s.rowsRun(li, hi, pos, pos, s.bx[:n*c.ResidW()], s.bcs[:n*c.RopeW()],
+						s.bswaTable(n, c.NRotSWA), false, nil, 0) == nil {
+						s.tailRowChunks++
+						s.addDeep(hi-1, base, n)
+						li = hi - 1
+						continue
+					}
+					// The step may have written part of the residual.
+					if err := refill(); err != nil {
+						return nil, err
+					}
+				}
 				s.layerInputs(s.bple[:n*c.pleWidth()])
 				if s.bidirTell(p0, n) && s.ld.Layers(li, hi, p0, n, s.bx[:n*c.ResidW()], s.bcs[:n*c.RopeW()],
 					s.bswaTable(n, c.NRotSWA), fh) {
