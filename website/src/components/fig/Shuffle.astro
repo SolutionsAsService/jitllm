@@ -1,0 +1,82 @@
+---
+// Eight lanes summing their values: a butterfly of register shuffles against a
+// round trip through shared memory with a barrier per step.
+---
+<figure class="fig not-content" data-fig="shuffle">
+  <div class="ctl">
+    <span>exchange</span>
+    <button type="button" data-mode="shfl" aria-pressed="true">shuffle</button>
+    <button type="button" data-mode="mem" aria-pressed="false">shared memory</button>
+    <span class="sp"></span>
+    <button type="button" data-play aria-pressed="true">Pause</button>
+  </div>
+  <div class="fig-body">
+    <svg class="shf" viewBox="0 0 400 170" role="img" aria-labelledby="shf-t">
+      <title id="shf-t">Eight lanes reduce a sum, through register shuffles or through shared memory</title>
+      <g data-g></g>
+    </svg>
+    <div class="stats" aria-live="polite" data-sum></div>
+  </div>
+  <figcaption><b>A sum across eight lanes.</b> A shuffle hands a register straight to another lane: three steps, no memory, no barrier. Through shared memory each step is a store, a barrier and a load. The IR's subgroup reduction, broadcast and shuffle lower to PTX, SPIR-V, MSL and AMDGPU.</figcaption>
+</figure>
+
+<style is:global>
+  [data-fig='shuffle'] .shf { width: 100%; max-width: 34rem; display: block; margin: 0 auto; }
+  [data-fig='shuffle'] .shf .lane { fill: var(--surface); stroke: var(--line-strong); }
+  [data-fig='shuffle'] .shf .mem { fill: color-mix(in srgb, var(--m2) 18%, var(--surface)); stroke: var(--m2); }
+  [data-fig='shuffle'] .shf text { fill: var(--text); font: 11px var(--sl-font-mono); text-anchor: middle; }
+  [data-fig='shuffle'] .shf .lab { fill: var(--muted); font-size: 9px; text-anchor: start; }
+  [data-fig='shuffle'] .shf path { fill: none; stroke: var(--brand); stroke-width: 1.5; }
+  [data-fig='shuffle'] .shf path.m { stroke: var(--m2); }
+  [data-fig='shuffle'] .shf .bar { stroke: var(--m3); stroke-width: 2; stroke-dasharray: 4 3; }
+</style>
+
+<script>
+  import { ticker } from './ticker'
+
+  const init = [3, 1, 4, 1, 5, 9, 2, 6]
+  for (const fig of document.querySelectorAll<HTMLElement>('[data-fig="shuffle"]')) {
+    const g = fig.querySelector<SVGGElement>('[data-g]')!
+    const sum = fig.querySelector<HTMLElement>('[data-sum]')!
+    let mode = 'shfl'
+    let step = 0 // 0..3: values after step offsets 4, 2, 1
+    const x = (l: number) => 30 + l * 48
+    const vals = (s: number) => {
+      let v = init.slice()
+      for (let k = 0, off = 4; k < s; k++, off >>= 1) v = v.map((a, l) => a + v[l ^ off])
+      return v
+    }
+    const draw = () => {
+      const v = vals(step)
+      const mem = mode === 'mem'
+      let h = `<text class="lab" x="4" y="14">lanes (registers)</text>`
+      v.forEach((a, l) => (h += `<rect class="lane" x="${x(l) - 18}" y="20" width="36" height="26"/><text x="${x(l)}" y="37">${a}</text>`))
+      if (step < 3) {
+        const off = 4 >> step
+        if (!mem) {
+          for (let l = 0; l < 8; l++) h += `<path d="M${x(l)} 48 C ${x(l)} 90, ${x(l ^ off)} 90, ${x(l ^ off)} 140"/>`
+          h += `<text class="lab" x="4" y="160">shfl.xor ${off}: each lane reads lane^${off}'s register</text>`
+        } else {
+          h += `<text class="lab" x="4" y="78">shared memory</text>`
+          v.forEach((a, l) => (h += `<rect class="mem" x="${x(l) - 18}" y="84" width="36" height="22"/><text x="${x(l)}" y="99">${a}</text>`))
+          for (let l = 0; l < 8; l++) h += `<path class="m" d="M${x(l)} 48 L ${x(l)} 84"/><path class="m" d="M${x(l ^ off)} 106 L ${x(l)} 140"/>`
+          h += `<line class="bar" x1="10" x2="396" y1="116" y2="116"/><text class="lab" x="4" y="160">store, barrier, load lane^${off}</text>`
+        }
+      } else h += `<text class="lab" x="4" y="80">every lane holds the sum, ${v[0]}</text>`
+      g.innerHTML = h
+      const s = Math.min(step, 3)
+      sum.innerHTML = mem
+        ? `<span>step <b class="num">${s}/3</b></span><span>memory round trips <b class="num">${s}</b></span><span>barriers <b class="num">${s}</b></span>`
+        : `<span>step <b class="num">${s}/3</b></span><span>memory round trips <b class="num">0</b></span><span>barriers <b class="num">0</b></span>`
+      for (const b of fig.querySelectorAll<HTMLButtonElement>('[data-mode]')) b.setAttribute('aria-pressed', String(b.dataset.mode === mode))
+    }
+    for (const b of fig.querySelectorAll<HTMLButtonElement>('[data-mode]'))
+      b.addEventListener('click', () => {
+        mode = b.dataset.mode!
+        step = 0
+        draw()
+      })
+    draw()
+    ticker(fig, () => { step = (step + 1) % 4; draw() }, 1300, fig.querySelector<HTMLButtonElement>('[data-play]'))
+  }
+</script>

@@ -48,6 +48,7 @@ export const routes = [
     blurb: 'How the engine works inside, and the rules a change is held to.',
     items: [
       { label: 'How it works', slug: 'docs/concepts/how-it-works' },
+      { label: 'Kernel fusion and block bridging', slug: 'docs/concepts/fusion' },
       { label: 'The .jlm format', slug: 'docs/reference/jlm' },
       { label: 'Project rules (AGENTS.md)', link: `${repo}/AGENTS.md`, about: 'the binding rules: measurement, correctness gates, architecture scope' },
       { label: 'Contributing', link: `${repo}/CONTRIBUTING.md`, about: 'how to send a change' },
