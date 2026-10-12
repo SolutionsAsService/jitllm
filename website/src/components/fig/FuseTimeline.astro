@@ -1,0 +1,99 @@
+---
+// One decode token's host work, per op against fused. Schematic: the op
+// count is a toggle, the widths are proportions, not a measurement.
+---
+<figure class="fig not-content" data-fig="fusetl">
+  <div class="ctl">
+    <span>dispatch</span>
+    <button type="button" data-mode="op" aria-pressed="true">per op</button>
+    <button type="button" data-mode="fused" aria-pressed="false">fused run</button>
+    <span class="sp"></span>
+    <button type="button" data-play aria-pressed="true">Pause</button>
+  </div>
+  <div class="fig-body">
+    <svg class="ftl" viewBox="0 0 600 150" role="img" aria-labelledby="ftl-t" preserveAspectRatio="none">
+      <title id="ftl-t">Six workers running one block's ops, per op or as phases of one fused region</title>
+      <g data-rows></g>
+      <line data-head x1="0" x2="0" y1="4" y2="146" class="ftl-head" />
+    </svg>
+    <div class="stats" aria-live="polite" data-sum></div>
+    <div class="legend">
+      <span><i style="background:var(--brand)"></i>kernel work</span>
+      <span><i style="background:var(--m3)"></i>region door: publish, join, leave</span>
+      <span><i style="background:var(--line-strong)"></i>waiting on the slowest worker</span>
+    </div>
+  </div>
+  <figcaption><b>One block of a decode token on six host workers.</b> Per op, every op is a pool region: the caller opens it, every worker joins, and all wait for the slowest before the next op. Fused, the workers join once and each op is a phase published by one store; completion is counted in chunks, so a worker the OS delays holds nothing up unless it claimed one. Schematic proportions, not a measurement.</figcaption>
+</figure>
+
+<style is:global>
+  [data-fig='fusetl'] .ftl { width: 100%; height: 150px; display: block; }
+  [data-fig='fusetl'] .ftl .w { fill: var(--brand); }
+  [data-fig='fusetl'] .ftl .d { fill: var(--m3); }
+  [data-fig='fusetl'] .ftl .b { fill: var(--line-strong); }
+  [data-fig='fusetl'] .ftl text { fill: var(--muted); font: 9px var(--sl-font-mono); }
+  [data-fig='fusetl'] .ftl-head { stroke: var(--text); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+  [data-fig='fusetl'] .ftl rect { transition: x 0.5s, width 0.5s; }
+  @media (prefers-reduced-motion: reduce) { [data-fig='fusetl'] .ftl rect { transition: none; } }
+</style>
+
+<script>
+  import { ticker } from './ticker'
+
+  // One block's ops in a llama-shaped decode: the per-op path issues each as a region.
+  const ops = ['norm', 'q', 'k', 'v', 'rope', 'attn', 'o', 'add', 'norm', 'gate', 'up', 'act', 'down', 'add']
+  const W = 6
+  for (const fig of document.querySelectorAll<HTMLElement>('[data-fig="fusetl"]')) {
+    const rows = fig.querySelector<SVGGElement>('[data-rows]')!
+    const head = fig.querySelector<SVGLineElement>('[data-head]')!
+    const sum = fig.querySelector<HTMLElement>('[data-sum]')!
+    let mode = 'op'
+    let end = 600
+    let t = 0
+    // Fixed pseudo-random work per (worker, op), so the two modes draw the same chunks.
+    const work = (w: number, i: number) => 4 + ((w * 7 + i * 13) % 5)
+    const draw = () => {
+      const fused = mode === 'fused'
+      const door = 9
+      let out = ''
+      let x = 4
+      if (fused) {
+        for (let w = 0; w < W; w++) out += `<rect class="d" x="4" y="${8 + w * 22}" width="${door}" height="16"/>`
+        x += door
+      }
+      for (let i = 0; i < ops.length; i++) {
+        const start = x + (fused ? 1 : door)
+        let slow = 0
+        for (let w = 0; w < W; w++) slow = Math.max(slow, work(w, i))
+        for (let w = 0; w < W; w++) {
+          const y = 8 + w * 22
+          if (!fused) out += `<rect class="d" x="${x}" y="${y}" width="${door}" height="16"/>`
+          out += `<rect class="w" x="${start}" y="${y}" width="${work(w, i) * 3}" height="16"/>`
+          if (!fused) out += `<rect class="b" x="${start + work(w, i) * 3}" y="${y + 6}" width="${(slow - work(w, i)) * 3 + 2}" height="4"/>`
+        }
+        // Fused, the next phase starts when the chunks are done: chunks are shared, so the
+        // phase's length is the mean, not the slowest worker's.
+        x = start + (fused ? 21 : slow * 3 + 3)
+      }
+      end = x
+      rows.innerHTML = out
+      sum.innerHTML = fused
+        ? `<span>regions <b class="num">1</b></span><span>phases <b class="num">${ops.length}</b></span><span>barrier waits <b class="num">0</b></span>`
+        : `<span>regions <b class="num">${ops.length}</b></span><span>phases <b class="num">-</b></span><span>barrier waits <b class="num">${ops.length}</b></span>`
+      for (const b of fig.querySelectorAll<HTMLButtonElement>('[data-mode]')) b.setAttribute('aria-pressed', String(b.dataset.mode === mode))
+    }
+    for (const b of fig.querySelectorAll<HTMLButtonElement>('[data-mode]'))
+      b.addEventListener('click', () => {
+        mode = b.dataset.mode!
+        t = 0
+        draw()
+      })
+    draw()
+    const step = () => {
+      t = (t + 6) % (end + 30)
+      head.setAttribute('x1', String(t))
+      head.setAttribute('x2', String(t))
+    }
+    ticker(fig, step, 40, fig.querySelector<HTMLButtonElement>('[data-play]'))
+  }
+</script>

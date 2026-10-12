@@ -1,0 +1,128 @@
+---
+// Bridged runs follow placement: consecutive resident blocks on one device
+// run as one unit. Click a block, then move or evict it, and watch the runs
+// re-form. Mirrors engine/model/fuse.go's rule on the host and the captured
+// range on a CUDA device.
+const N = 12
+---
+<figure class="fig not-content" data-fig="bridge">
+  <div class="ctl" role="group" aria-label="Act on the selected block">
+    <span>block <output data-sel>4</output></span>
+    <button type="button" data-to="cpu">to CPU</button>
+    <button type="button" data-to="gpu1">to GPU1</button>
+    <button type="button" data-to="gpu2">to GPU2</button>
+    <button type="button" data-evict>evict / page in</button>
+    <span class="sp"></span>
+    <button type="button" data-reset>reset</button>
+  </div>
+  <div class="fig-body">
+    <div class="br-grid" data-grid style={`--n:${N + 1}`}></div>
+    <div class="stats" aria-live="polite" data-sum></div>
+    <div class="legend">
+      <span><i style="background:var(--brand)"></i>a bridged run</span>
+      <span><i style="border-style:dashed"></i>paged out: read before it runs, ends the run</span>
+    </div>
+  </div>
+  <figcaption><b>Click a block (or Tab to it and press Enter), then move or evict it.</b> A run is consecutive resident blocks on one device; on the host the head joins the run before it. A device change or a block that must be paged in ends a run. On the host the next token simply follows the new placement; a CUDA range is re-captured.</figcaption>
+</figure>
+
+<style is:global>
+  [data-fig='bridge'] .br-grid { display: grid; grid-template-columns: 2.6rem repeat(var(--n), minmax(1.3rem, 1fr)); gap: 3px; min-width: 0; }
+  [data-fig='bridge'] .br-lab { color: var(--muted); font-size: 11px; align-self: center; }
+  [data-fig='bridge'] .br-slot { height: 1.9rem; border: 1px dotted var(--line); }
+  [data-fig='bridge'] button.cell { padding: 0; cursor: pointer; font: inherit; font-size: 10px; }
+  [data-fig='bridge'] .cell.out { border-style: dashed; background: var(--surface); color: var(--muted); }
+  [data-fig='bridge'] .br-run { height: 4px; background: var(--brand); align-self: start; }
+  [data-fig='bridge'] .br-run.flash { animation: fig-flash 0.6s ease-out; }
+  [data-fig='bridge'] .cell:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+  @media (prefers-reduced-motion: reduce) { [data-fig='bridge'] .br-run.flash { animation: none; } }
+</style>
+
+<script>
+  type B = { dev: string; res: boolean }
+  const N = 12
+  const devs = ['cpu', 'gpu1', 'gpu2']
+  const name: Record<string, string> = { cpu: 'CPU', gpu1: 'GPU1', gpu2: 'GPU2' }
+  const cls: Record<string, string> = { cpu: 'host', gpu1: 'gpu', gpu2: 'gpu2' }
+  const initial = (): B[] => Array.from({ length: N }, (_, i) => ({ dev: i < 3 ? 'cpu' : i < 8 ? 'gpu1' : 'gpu2', res: true }))
+
+  for (const fig of document.querySelectorAll<HTMLElement>('[data-fig="bridge"]')) {
+    const grid = fig.querySelector<HTMLElement>('[data-grid]')!
+    const sum = fig.querySelector<HTMLElement>('[data-sum]')!
+    const out = fig.querySelector<HTMLOutputElement>('[data-sel]')!
+    let blocks = initial()
+    let sel = 4
+    let prev = new Set<string>()
+
+    // Runs: [device, first, last]; the head (index N) runs on the host after the last block.
+    const runs = () => {
+      const r: [string, number, number][] = []
+      for (let i = 0; i <= N; i++) {
+        const b = i === N ? { dev: 'cpu', res: true } : blocks[i]
+        if (!b.res) continue
+        const last = r[r.length - 1]
+        const prevB = i === 0 ? null : blocks[i - 1]
+        if (last && last[0] === b.dev && last[2] === i - 1 && prevB?.res) last[2] = i
+        else r.push([b.dev, i, i])
+      }
+      return r
+    }
+
+    const render = (focus = false) => {
+      const rs = runs()
+      const keys = new Set(rs.map((r) => r.join(':')))
+      let h = ''
+      devs.forEach((d, row) => {
+        h += `<div class="br-lab" style="grid-row:${row * 2 + 1};grid-column:1">${name[d]}</div>`
+        for (let i = 0; i <= N; i++) {
+          const b = i === N ? { dev: 'cpu', res: true } : blocks[i]
+          const pos = `grid-row:${row * 2 + 1};grid-column:${i + 2}`
+          if (b.dev !== d) { h += `<div class="br-slot" style="${pos}"></div>`; continue }
+          const label = i === N ? 'head' : String(i)
+          const st = i === N ? '' : ` aria-pressed="${i === sel}"`
+          const tip = `${i === N ? 'head' : 'block ' + i} on ${name[d]}${b.res ? '' : ', paged out'}`
+          h += i === N
+            ? `<div class="cell host" style="${pos};font-size:9px" title="${tip}">${label}</div>`
+            : `<button type="button" class="cell ${cls[d]}${b.res ? '' : ' out'}${i === sel ? ' on' : ''}" data-i="${i}" style="${pos}"${st} title="${tip}" aria-label="${tip}">${label}</button>`
+        }
+        for (const r of rs.filter((r) => r[0] === d)) {
+          const k = r.join(':')
+          h += `<div class="br-run${prev.size && !prev.has(k) ? ' flash' : ''}" style="grid-row:${row * 2 + 2};grid-column:${r[1] + 2} / ${r[2] + 3}"></div>`
+        }
+      })
+      grid.innerHTML = h
+      const changed = prev.size ? rs.filter((r) => !prev.has(r.join(':'))) : []
+      prev = keys
+      const gpuRe = changed.filter((r) => r[0] !== 'cpu').length
+      const cpuRe = changed.filter((r) => r[0] === 'cpu').length
+      sum.innerHTML =
+        `<span>runs <b class="num">${rs.length}</b></span>` +
+        devs.map((d) => `<span>${name[d]} <b class="num">${rs.filter((r) => r[0] === d).length}</b></span>`).join('') +
+        (changed.length ? `<span class="warn">re-link: ${gpuRe} range${gpuRe === 1 ? '' : 's'} re-captured, ${cpuRe} host run${cpuRe === 1 ? '' : 's'} re-formed</span>` : '')
+      out.textContent = String(sel)
+      grid.querySelectorAll<HTMLButtonElement>('button[data-i]').forEach((b) =>
+        b.addEventListener('click', () => {
+          sel = +b.dataset.i!
+          render(true)
+        }),
+      )
+      if (focus) grid.querySelector<HTMLButtonElement>(`button[data-i="${sel}"]`)?.focus()
+    }
+
+    for (const b of fig.querySelectorAll<HTMLButtonElement>('[data-to]'))
+      b.addEventListener('click', () => {
+        blocks[sel] = { dev: b.dataset.to!, res: true }
+        render()
+      })
+    fig.querySelector('[data-evict]')!.addEventListener('click', () => {
+      blocks[sel].res = !blocks[sel].res
+      render()
+    })
+    fig.querySelector('[data-reset]')!.addEventListener('click', () => {
+      blocks = initial()
+      prev = new Set()
+      render()
+    })
+    render()
+  }
+</script>

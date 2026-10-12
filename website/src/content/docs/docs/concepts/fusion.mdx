@@ -1,0 +1,61 @@
+---
+title: Kernel fusion and block bridging
+description: 'How jitllm removes per-op dispatch cost without giving up the block as the unit of placement, relocation and paging.'
+---
+
+import FuseTimeline from '../../../../components/fig/FuseTimeline.astro'
+import Bridge from '../../../../components/fig/Bridge.astro'
+import Shuffle from '../../../../components/fig/Shuffle.astro'
+
+A decode token is a few hundred small operations, and on a small model the cost of starting each one is a large share of the token. jitllm removes that cost in two ways: **fusion** joins operations into fewer kernels or fewer dispatches, and **bridging** runs consecutive blocks on one device as a single unit. Both are bounded by one rule.
+
+## The unit: a block
+
+A block is jitllm's unit of placement and relocation. It moves between the host and a device, between devices, and in and out of memory through the pager, mid-sequence and with the same answer ([How it works](/docs/concepts/how-it-works/)). So:
+
+- **Fusion never crosses a block's device boundary.** A fused kernel or phase works inside what one device runs.
+- **Bridging follows placement.** A bridged run is whatever consecutive blocks happen to be resident on one device right now. When placement changes, the runs change with it.
+
+## Why: dispatch costs
+
+| where | the cost | measured on |
+|---|---|---|
+| CPU | each op was a pool region, about 2.7 us (`TestFusionCeiling`), plus the wait for the slowest worker at its barrier | Linux x86-64 host |
+| CPU | a decode token ran 218 regions on Llama-3.2-1B, 234 on OLMoE-1B-7B, 354 on Qwen3.5-0.8B, 353 on gemma-3-1b (Q4_K_M) | counted, any host |
+| Metal | about 316 barriers among about 370 dispatches per decode token | Ministral-3B, Apple M4 |
+| CUDA | a launch inside a captured graph costs about 0.6 us | V100, T4 |
+
+On CUDA the graph already pays for launches, so fusion is not the main decode lever there; weight traffic is.
+
+## Fusion
+
+<FuseTimeline />
+
+Three kinds, in order of how far they reach:
+
+1. **Pairwise kernel fusion.** One kernel does what two did, so the intermediate never leaves registers or cache. The norm writes the matmul's quantized input (shipped); the activation and gate product write the down projection's input (shipped); on CUDA, q's rotation, k's rotation into its KV page and v's copy into its page are one launch (in progress, branch `gpu-cuda-fuse`, bit-identical to the three kernels it replaces).
+2. **Fused host regions.** The pool's workers join once per run and each op becomes a *phase*: one store publishes it, and completion is counted in chunks rather than workers. The kernels, chunks and order are the per-op path's, so the logits are the same bits. Llama-3.2-1B goes from 218 regions a token to 1 region and 218 phases (in progress, branch `host-fused-runs`).
+3. **Collectives in the IR.** Subgroup (simdgroup) reductions, broadcasts and shuffles, lowered to PTX, SPIR-V, MSL and AMDGPU, and tensor-core tiles on `mma.sync`. These let a fused kernel pass data between threads in registers instead of through memory (in progress, PR #80).
+
+<Shuffle />
+
+## Bridging
+
+<Bridge />
+
+Consecutive resident blocks on one device run as one unit, with no Go between them:
+
+- **Host:** one fused region per token across the resident host run plus the head (in progress, `host-fused-runs`). Nothing is compiled for a run, so after a relocation, eviction or seam move the next token's runs simply follow the new placement.
+- **CUDA:** the device's resident range is one submission, captured as a CUDA graph and re-captured when the range changes (shipped).
+- **What ends a run:** a block on another device, or a block whose page has to be read first. With a two-frame page budget a host token runs one run per block read.
+
+## What it keeps
+
+- **Per-op kernels stay the reference.** Every fused path is gated against them: `TestFusedBlocksMatchPerOp` holds fused host decode to the same logit bits on every principle fixture, resident and paged; the CUDA fused writer is gated kernel-to-parts and a whole decode fused against per op, every block placed and on a partial seam.
+- **The gates were run against violations.** A phase published before its predecessor finished fails `TestFusedPhaseOrder`; workers dropping chunks fail the model gate at token 0.
+- **Relocation, paging, batching and sessions are untouched.** The principle gates (`TestLayerRelocatesToAnotherDevice`, `TestPagingDoesNotChangeTheAnswer`, `TestDecodeDoesNotAllocate` and the rest in AGENTS.md) run with fusion on. A host crew shared with another session is not fused, by choice, and neither are prefill and the batched step, whose regions carry far more work each.
+- **It is switchable.** `JITLLM_FUSE=0` runs decode one region per op, for A/B and bisection.
+
+## Numbers
+
+The region and phase counts above are counts, not timings. Throughput from fusion is **being measured**: the host rows on a Xeon per the project's measurement rules, the CUDA writer reads sub-noise on a V100 and an M4, and no speedup is claimed here until those rows are in.
