@@ -231,11 +231,11 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '')
         </ul>
       </section>
 
-      <section id="kernel" class="band">
+      <section id="engine" class="band">
         <div class="col sec">
           <div class="head">
             <div>
-              <h2 class="h2">The kernel</h2>
+              <h2 class="h2">The engine</h2>
               <p class="desc">Four subsystems between your application and the hardware.</p>
             </div>
             <a class="more" href={`${base}/docs/concepts/how-it-works/`}>How it works <span aria-hidden="true">→</span></a>
@@ -277,26 +277,11 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '')
             <div><dt>Architectures</dt><dd>x86-64 · ARM64</dd></div>
             <div><dt>Backends</dt><dd>CPU · CUDA · Vulkan · Metal · ROCm (untested)</dd></div>
             <div><dt>Setup</dt><dd>one executable, no Python, no SDK</dd></div>
+            <div><dt>Models</dt><dd>57 graphs · 17 vision projectors · each gated against its reference</dd></div>
+            <div><dt>Hot path</dt><dd>a warm decode token allocates nothing on the Go heap</dd></div>
+            <div><dt>Faster tokens</dt><dd>speculative decoding · int8 KV cache · prefix caching</dd></div>
           </dl>
         </div>
-      </section>
-
-      <section id="engine" class="col sec">
-        <div class="head">
-          <div>
-            <h2 class="h2">The engine</h2>
-            <p class="desc">What runs underneath every program jitllm ships.</p>
-          </div>
-          <a class="more" href={`${base}/docs/concepts/how-it-works/`}>How it works <span aria-hidden="true">→</span></a>
-        </div>
-        <ul class="models engine">
-          <li><b>Kernels for this machine</b><span>Every kernel is emitted at load for the model's shapes and weight formats: x86 (SSE, AVX2, AVX-512, VNNI) and Arm (NEON, dot-product) on the CPU, PTX for CUDA, SPIR-V for Vulkan, Metal shaders, and AMDGPU for ROCm (not yet tested on AMD hardware). No vendor math library, no interpreted fallback.</span></li>
-          <li><b>Layers move mid-conversation</b><span>Blocks relocate between the CPU and any GPU, or from one GPU to another, carrying their KV pages and recurrent state, and the answer stays the same.</span></li>
-          <li><b>Models bigger than memory</b><span>Disk, RAM and VRAM are one paged hierarchy: weights page in on demand (read with O_DIRECT, never mmap), every expert of a mixture is its own page, and KV history pages and streams through the card.</span></li>
-          <li><b>Held to the reference</b><span>57 graphs and 17 vision projectors: dense, mixture-of-experts, MLA, gated-delta and state-space hybrids, vision-language, embeddings and decision models, each gated against llama.cpp or the model's own transformers class.</span></li>
-          <li><b>No garbage on the hot path</b><span>A warm decode token allocates nothing on the Go heap, on the host and every GPU backend; weights and page frames live off the heap.</span></li>
-          <li><b>Faster tokens, same distribution</b><span>Speculative decoding with a model's own prediction head or prompt lookup, an int8 KV cache, prefix caching and shared prefixes across sessions.</span></li>
-        </ul>
       </section>
 
       <section id="jlm" class="col sec">
