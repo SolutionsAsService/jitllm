@@ -39,15 +39,17 @@ fused:   [door] work.. work.... work. ...                              1 region,
 
 1. Pairwise kernels: the norm writes the matmul's quantized input (shipped);
    activation times gate writes the down projection's input (shipped); on CUDA
-   q and k rotation, the k page write and the v copy as one launch (in
-   progress, branch `gpu-cuda-fuse`).
+   q and k rotation, the k page write and the v copy as one launch (shipped;
+   `TestRoPEQKVPagedMatchesItsParts`, `TestFusedDecodeMatchesPerOp`,
+   `jitllm verify -ab fuse`).
 2. Fused host regions (`sched.Pool.Fuse`, `engine/model/fuse.go`): workers join
    once, each op is a phase published by one store, completion counted in
    chunks; same kernels, chunks and order, so the same logit bits (in progress,
-   branch `host-fused-runs`).
+   not yet on main).
 3. IR collectives: subgroup reduce, broadcast and shuffle lowered to PTX,
    SPIR-V, MSL and AMDGPU, and tensor-core tiles on `mma.sync`, so fused
-   kernels pass data between threads in registers (in progress, PR #80).
+   kernels pass data between threads in registers (shipped in the IR; the
+   fused kernels that use them are to come).
 
 ## Bridging
 
@@ -60,14 +62,17 @@ fused:   [door] work.. work.... work. ...                              1 region,
 
 ## What it keeps
 
-- Per-op kernels are the reference: `TestFusedBlocksMatchPerOp` (same logit
-  bits, every principle fixture, resident and paged); the CUDA writer is gated
-  kernel-to-parts and whole-decode against per op, every block placed and on a
-  partial seam. Run against violations: `TestFusedPhaseOrder`, and workers that
-  drop chunks fail the model gate at token 0.
+- Per-op kernels are the reference. On main, the CUDA writer is gated
+  kernel-to-parts (`TestRoPEQKVPagedMatchesItsParts`) and whole-decode against
+  per op, every block placed and on a partial seam
+  (`TestFusedDecodeMatchesPerOp`). On the host branch, `TestFusedBlocksMatchPerOp`
+  (same logit bits, every principle fixture, resident and paged), run against
+  violations: `TestFusedPhaseOrder`, and workers that drop chunks fail the
+  model gate at token 0.
 - The five principles' gates (AGENTS.md) run with fusion on. A crew shared with
   another session, a NUMA pool, prefill and the batched step are not fused, by
   choice.
-- `JITLLM_FUSE=0` runs decode one region per op, for A/B and bisection.
+- `jitllm verify -ab fuse` times CUDA's fused launches against their parts;
+  on the host branch, `JITLLM_FUSE=0` runs decode one region per op.
 
 Throughput from fusion is being measured; no speedup is claimed here yet.
