@@ -153,6 +153,27 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '')
         </div>
       </section>
 
+      <section class="col sec" aria-labelledby="analogy-title">
+        <div class="split">
+          <div>
+            <h2 class="h2" id="analogy-title">What an OS does for programs, jitllm does for models.</h2>
+            <p class="lede">It is one process. Inside it, models are the programs, their blocks are the threads, and every CPU core and accelerator on the machine is somewhere they can run.</p>
+            <p class="lede">Placement, paging and tuning are automatic, and every one of those decisions can be forced by the application.</p>
+          </div>
+          <div class="panel map" role="table" aria-label="Operating-system concepts and their jitllm counterparts">
+            <div class="map-row map-head" role="row"><span role="columnheader">Operating system</span><span role="columnheader">jitllm</span></div>
+            <div class="map-row" role="row"><span role="cell">process</span><span role="cell">a loaded model</span></div>
+            <div class="map-row" role="row"><span role="cell">thread</span><span role="cell">a layer, a block</span></div>
+            <div class="map-row" role="row"><span role="cell">CPU cores</span><span role="cell">CPU cores and every accelerator</span></div>
+            <div class="map-row" role="row"><span role="cell">scheduler</span><span role="cell">which block runs where</span></div>
+            <div class="map-row" role="row"><span role="cell">physical page</span><span role="cell">a packed block in a slot</span></div>
+            <div class="map-row" role="row"><span role="cell">page fault</span><span role="cell">a page-in</span></div>
+            <div class="map-row" role="row"><span role="cell">executable</span><span role="cell">the <code>.jlm</code> container</span></div>
+            <div class="map-row" role="row"><span role="cell">system calls</span><span role="cell">OpenAI, Anthropic, Connect APIs</span></div>
+          </div>
+        </div>
+      </section>
+
       <section id="numbers" class="col sec" aria-labelledby="numbers-title">
         <div class="head">
           <div>
@@ -193,26 +214,6 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '')
         <Versus />
       </section>
 
-      <section class="col sec" aria-labelledby="analogy-title">
-        <div class="split">
-          <div>
-            <h2 class="h2" id="analogy-title">What an OS does for programs, jitllm does for models.</h2>
-            <p class="lede">It is one process. Inside it, models are the programs, their blocks are the threads, and every CPU core and accelerator on the machine is somewhere they can run.</p>
-            <p class="lede">Placement, paging and tuning are automatic, and every one of those decisions can be forced by the application.</p>
-          </div>
-          <div class="panel map" role="table" aria-label="Operating-system concepts and their jitllm counterparts">
-            <div class="map-row map-head" role="row"><span role="columnheader">Operating system</span><span role="columnheader">jitllm</span></div>
-            <div class="map-row" role="row"><span role="cell">process</span><span role="cell">a loaded model</span></div>
-            <div class="map-row" role="row"><span role="cell">thread</span><span role="cell">a layer, a block</span></div>
-            <div class="map-row" role="row"><span role="cell">CPU cores</span><span role="cell">CPU cores and every accelerator</span></div>
-            <div class="map-row" role="row"><span role="cell">scheduler</span><span role="cell">which block runs where</span></div>
-            <div class="map-row" role="row"><span role="cell">physical page</span><span role="cell">a packed block in a slot</span></div>
-            <div class="map-row" role="row"><span role="cell">page fault</span><span role="cell">a page-in</span></div>
-            <div class="map-row" role="row"><span role="cell">executable</span><span role="cell">the <code>.jlm</code> container</span></div>
-            <div class="map-row" role="row"><span role="cell">system calls</span><span role="cell">OpenAI, Anthropic, Connect APIs</span></div>
-          </div>
-        </div>
-      </section>
 
       <section id="principles" class="col sec">
         <div class="head">
