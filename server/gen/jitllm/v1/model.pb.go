@@ -21,6 +21,121 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type SetModelOptionsRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The model: its file name, with or without .jlm, an alias, or a loaded
+	// model's id.
+	Name          string   `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	AddAliases    []string `protobuf:"bytes,2,rep,name=add_aliases,json=addAliases,proto3" json:"add_aliases,omitempty"`
+	RemoveAliases []string `protobuf:"bytes,3,rep,name=remove_aliases,json=removeAliases,proto3" json:"remove_aliases,omitempty"`
+	// Unset leaves it as it is.
+	Enabled       *bool `protobuf:"varint,4,opt,name=enabled,proto3,oneof" json:"enabled,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetModelOptionsRequest) Reset() {
+	*x = SetModelOptionsRequest{}
+	mi := &file_jitllm_v1_model_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetModelOptionsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetModelOptionsRequest) ProtoMessage() {}
+
+func (x *SetModelOptionsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_jitllm_v1_model_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetModelOptionsRequest.ProtoReflect.Descriptor instead.
+func (*SetModelOptionsRequest) Descriptor() ([]byte, []int) {
+	return file_jitllm_v1_model_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *SetModelOptionsRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *SetModelOptionsRequest) GetAddAliases() []string {
+	if x != nil {
+		return x.AddAliases
+	}
+	return nil
+}
+
+func (x *SetModelOptionsRequest) GetRemoveAliases() []string {
+	if x != nil {
+		return x.RemoveAliases
+	}
+	return nil
+}
+
+func (x *SetModelOptionsRequest) GetEnabled() bool {
+	if x != nil && x.Enabled != nil {
+		return *x.Enabled
+	}
+	return false
+}
+
+type SetModelOptionsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	File          *ModelFile             `protobuf:"bytes,1,opt,name=file,proto3" json:"file,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetModelOptionsResponse) Reset() {
+	*x = SetModelOptionsResponse{}
+	mi := &file_jitllm_v1_model_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetModelOptionsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetModelOptionsResponse) ProtoMessage() {}
+
+func (x *SetModelOptionsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_jitllm_v1_model_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetModelOptionsResponse.ProtoReflect.Descriptor instead.
+func (*SetModelOptionsResponse) Descriptor() ([]byte, []int) {
+	return file_jitllm_v1_model_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *SetModelOptionsResponse) GetFile() *ModelFile {
+	if x != nil {
+		return x.File
+	}
+	return nil
+}
+
 // ModelFile is something on disk that has not necessarily been opened.
 type ModelFile struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -33,13 +148,21 @@ type ModelFile struct {
 	ContainerVersion uint32 `protobuf:"varint,5,opt,name=container_version,json=containerVersion,proto3" json:"container_version,omitempty"`
 	// Present when `is_container` is false: the command that would convert it.
 	ConvertCommand string `protobuf:"bytes,6,opt,name=convert_command,json=convertCommand,proto3" json:"convert_command,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Other names a request may use for this model, unique across the folder,
+	// kept in the models folder's jitllm-models.json.
+	Aliases []string `protobuf:"bytes,7,rep,name=aliases,proto3" json:"aliases,omitempty"`
+	// A disabled model is listed and never loaded on demand; an explicit
+	// LoadModel still loads it.
+	Disabled bool `protobuf:"varint,8,opt,name=disabled,proto3" json:"disabled,omitempty"`
+	// The id it is loaded under, when it is loaded.
+	ModelId       string `protobuf:"bytes,9,opt,name=model_id,json=modelId,proto3" json:"model_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ModelFile) Reset() {
 	*x = ModelFile{}
-	mi := &file_jitllm_v1_model_proto_msgTypes[0]
+	mi := &file_jitllm_v1_model_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -51,7 +174,7 @@ func (x *ModelFile) String() string {
 func (*ModelFile) ProtoMessage() {}
 
 func (x *ModelFile) ProtoReflect() protoreflect.Message {
-	mi := &file_jitllm_v1_model_proto_msgTypes[0]
+	mi := &file_jitllm_v1_model_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -64,7 +187,7 @@ func (x *ModelFile) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelFile.ProtoReflect.Descriptor instead.
 func (*ModelFile) Descriptor() ([]byte, []int) {
-	return file_jitllm_v1_model_proto_rawDescGZIP(), []int{0}
+	return file_jitllm_v1_model_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *ModelFile) GetPath() string {
@@ -105,6 +228,27 @@ func (x *ModelFile) GetContainerVersion() uint32 {
 func (x *ModelFile) GetConvertCommand() string {
 	if x != nil {
 		return x.ConvertCommand
+	}
+	return ""
+}
+
+func (x *ModelFile) GetAliases() []string {
+	if x != nil {
+		return x.Aliases
+	}
+	return nil
+}
+
+func (x *ModelFile) GetDisabled() bool {
+	if x != nil {
+		return x.Disabled
+	}
+	return false
+}
+
+func (x *ModelFile) GetModelId() string {
+	if x != nil {
+		return x.ModelId
 	}
 	return ""
 }
@@ -150,14 +294,16 @@ type ModelInfo struct {
 	Pooling string `protobuf:"bytes,22,opt,name=pooling,proto3" json:"pooling,omitempty"`
 	// True for an encoder (BERT, nomic-bert). It has no decoder session, so
 	// Generate and CreateSession refuse it and Embed is its only path.
-	Encoder       bool `protobuf:"varint,23,opt,name=encoder,proto3" json:"encoder,omitempty"`
+	Encoder bool `protobuf:"varint,23,opt,name=encoder,proto3" json:"encoder,omitempty"`
+	// The aliases its file carries in the models folder (ModelFile.aliases).
+	Aliases       []string `protobuf:"bytes,24,rep,name=aliases,proto3" json:"aliases,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ModelInfo) Reset() {
 	*x = ModelInfo{}
-	mi := &file_jitllm_v1_model_proto_msgTypes[1]
+	mi := &file_jitllm_v1_model_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -169,7 +315,7 @@ func (x *ModelInfo) String() string {
 func (*ModelInfo) ProtoMessage() {}
 
 func (x *ModelInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_jitllm_v1_model_proto_msgTypes[1]
+	mi := &file_jitllm_v1_model_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -182,7 +328,7 @@ func (x *ModelInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelInfo.ProtoReflect.Descriptor instead.
 func (*ModelInfo) Descriptor() ([]byte, []int) {
-	return file_jitllm_v1_model_proto_rawDescGZIP(), []int{1}
+	return file_jitllm_v1_model_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *ModelInfo) GetModelId() string {
@@ -346,6 +492,13 @@ func (x *ModelInfo) GetEncoder() bool {
 	return false
 }
 
+func (x *ModelInfo) GetAliases() []string {
+	if x != nil {
+		return x.Aliases
+	}
+	return nil
+}
+
 type ListModelsRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Directory to scan. Empty means the server's configured model directory.
@@ -358,7 +511,7 @@ type ListModelsRequest struct {
 
 func (x *ListModelsRequest) Reset() {
 	*x = ListModelsRequest{}
-	mi := &file_jitllm_v1_model_proto_msgTypes[2]
+	mi := &file_jitllm_v1_model_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -370,7 +523,7 @@ func (x *ListModelsRequest) String() string {
 func (*ListModelsRequest) ProtoMessage() {}
 
 func (x *ListModelsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_jitllm_v1_model_proto_msgTypes[2]
+	mi := &file_jitllm_v1_model_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -383,7 +536,7 @@ func (x *ListModelsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListModelsRequest.ProtoReflect.Descriptor instead.
 func (*ListModelsRequest) Descriptor() ([]byte, []int) {
-	return file_jitllm_v1_model_proto_rawDescGZIP(), []int{2}
+	return file_jitllm_v1_model_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *ListModelsRequest) GetDirectory() string {
@@ -411,7 +564,7 @@ type ListModelsResponse struct {
 
 func (x *ListModelsResponse) Reset() {
 	*x = ListModelsResponse{}
-	mi := &file_jitllm_v1_model_proto_msgTypes[3]
+	mi := &file_jitllm_v1_model_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -423,7 +576,7 @@ func (x *ListModelsResponse) String() string {
 func (*ListModelsResponse) ProtoMessage() {}
 
 func (x *ListModelsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_jitllm_v1_model_proto_msgTypes[3]
+	mi := &file_jitllm_v1_model_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -436,7 +589,7 @@ func (x *ListModelsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListModelsResponse.ProtoReflect.Descriptor instead.
 func (*ListModelsResponse) Descriptor() ([]byte, []int) {
-	return file_jitllm_v1_model_proto_rawDescGZIP(), []int{3}
+	return file_jitllm_v1_model_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *ListModelsResponse) GetFiles() []*ModelFile {
@@ -469,7 +622,7 @@ type GetModelRequest struct {
 
 func (x *GetModelRequest) Reset() {
 	*x = GetModelRequest{}
-	mi := &file_jitllm_v1_model_proto_msgTypes[4]
+	mi := &file_jitllm_v1_model_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -481,7 +634,7 @@ func (x *GetModelRequest) String() string {
 func (*GetModelRequest) ProtoMessage() {}
 
 func (x *GetModelRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_jitllm_v1_model_proto_msgTypes[4]
+	mi := &file_jitllm_v1_model_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -494,7 +647,7 @@ func (x *GetModelRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetModelRequest.ProtoReflect.Descriptor instead.
 func (*GetModelRequest) Descriptor() ([]byte, []int) {
-	return file_jitllm_v1_model_proto_rawDescGZIP(), []int{4}
+	return file_jitllm_v1_model_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *GetModelRequest) GetModelId() string {
@@ -513,7 +666,7 @@ type GetModelResponse struct {
 
 func (x *GetModelResponse) Reset() {
 	*x = GetModelResponse{}
-	mi := &file_jitllm_v1_model_proto_msgTypes[5]
+	mi := &file_jitllm_v1_model_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -525,7 +678,7 @@ func (x *GetModelResponse) String() string {
 func (*GetModelResponse) ProtoMessage() {}
 
 func (x *GetModelResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_jitllm_v1_model_proto_msgTypes[5]
+	mi := &file_jitllm_v1_model_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -538,7 +691,7 @@ func (x *GetModelResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetModelResponse.ProtoReflect.Descriptor instead.
 func (*GetModelResponse) Descriptor() ([]byte, []int) {
-	return file_jitllm_v1_model_proto_rawDescGZIP(), []int{5}
+	return file_jitllm_v1_model_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *GetModelResponse) GetModel() *ModelInfo {
@@ -573,7 +726,7 @@ type LoadModelRequest struct {
 
 func (x *LoadModelRequest) Reset() {
 	*x = LoadModelRequest{}
-	mi := &file_jitllm_v1_model_proto_msgTypes[6]
+	mi := &file_jitllm_v1_model_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -585,7 +738,7 @@ func (x *LoadModelRequest) String() string {
 func (*LoadModelRequest) ProtoMessage() {}
 
 func (x *LoadModelRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_jitllm_v1_model_proto_msgTypes[6]
+	mi := &file_jitllm_v1_model_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -598,7 +751,7 @@ func (x *LoadModelRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LoadModelRequest.ProtoReflect.Descriptor instead.
 func (*LoadModelRequest) Descriptor() ([]byte, []int) {
-	return file_jitllm_v1_model_proto_rawDescGZIP(), []int{6}
+	return file_jitllm_v1_model_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *LoadModelRequest) GetPath() string {
@@ -655,7 +808,7 @@ type LoadModelResponse struct {
 
 func (x *LoadModelResponse) Reset() {
 	*x = LoadModelResponse{}
-	mi := &file_jitllm_v1_model_proto_msgTypes[7]
+	mi := &file_jitllm_v1_model_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -667,7 +820,7 @@ func (x *LoadModelResponse) String() string {
 func (*LoadModelResponse) ProtoMessage() {}
 
 func (x *LoadModelResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_jitllm_v1_model_proto_msgTypes[7]
+	mi := &file_jitllm_v1_model_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -680,7 +833,7 @@ func (x *LoadModelResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LoadModelResponse.ProtoReflect.Descriptor instead.
 func (*LoadModelResponse) Descriptor() ([]byte, []int) {
-	return file_jitllm_v1_model_proto_rawDescGZIP(), []int{7}
+	return file_jitllm_v1_model_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *LoadModelResponse) GetModel() *ModelInfo {
@@ -709,7 +862,7 @@ type UnloadModelRequest struct {
 
 func (x *UnloadModelRequest) Reset() {
 	*x = UnloadModelRequest{}
-	mi := &file_jitllm_v1_model_proto_msgTypes[8]
+	mi := &file_jitllm_v1_model_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -721,7 +874,7 @@ func (x *UnloadModelRequest) String() string {
 func (*UnloadModelRequest) ProtoMessage() {}
 
 func (x *UnloadModelRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_jitllm_v1_model_proto_msgTypes[8]
+	mi := &file_jitllm_v1_model_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -734,7 +887,7 @@ func (x *UnloadModelRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnloadModelRequest.ProtoReflect.Descriptor instead.
 func (*UnloadModelRequest) Descriptor() ([]byte, []int) {
-	return file_jitllm_v1_model_proto_rawDescGZIP(), []int{8}
+	return file_jitllm_v1_model_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *UnloadModelRequest) GetModelId() string {
@@ -760,7 +913,7 @@ type UnloadModelResponse struct {
 
 func (x *UnloadModelResponse) Reset() {
 	*x = UnloadModelResponse{}
-	mi := &file_jitllm_v1_model_proto_msgTypes[9]
+	mi := &file_jitllm_v1_model_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -772,7 +925,7 @@ func (x *UnloadModelResponse) String() string {
 func (*UnloadModelResponse) ProtoMessage() {}
 
 func (x *UnloadModelResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_jitllm_v1_model_proto_msgTypes[9]
+	mi := &file_jitllm_v1_model_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -785,7 +938,7 @@ func (x *UnloadModelResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnloadModelResponse.ProtoReflect.Descriptor instead.
 func (*UnloadModelResponse) Descriptor() ([]byte, []int) {
-	return file_jitllm_v1_model_proto_rawDescGZIP(), []int{9}
+	return file_jitllm_v1_model_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *UnloadModelResponse) GetSessionsClosed() int32 {
@@ -812,7 +965,7 @@ type ConvertRequest struct {
 
 func (x *ConvertRequest) Reset() {
 	*x = ConvertRequest{}
-	mi := &file_jitllm_v1_model_proto_msgTypes[10]
+	mi := &file_jitllm_v1_model_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -824,7 +977,7 @@ func (x *ConvertRequest) String() string {
 func (*ConvertRequest) ProtoMessage() {}
 
 func (x *ConvertRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_jitllm_v1_model_proto_msgTypes[10]
+	mi := &file_jitllm_v1_model_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -837,7 +990,7 @@ func (x *ConvertRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConvertRequest.ProtoReflect.Descriptor instead.
 func (*ConvertRequest) Descriptor() ([]byte, []int) {
-	return file_jitllm_v1_model_proto_rawDescGZIP(), []int{10}
+	return file_jitllm_v1_model_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *ConvertRequest) GetSourcePath() string {
@@ -883,7 +1036,7 @@ type ConvertResponse struct {
 
 func (x *ConvertResponse) Reset() {
 	*x = ConvertResponse{}
-	mi := &file_jitllm_v1_model_proto_msgTypes[11]
+	mi := &file_jitllm_v1_model_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -895,7 +1048,7 @@ func (x *ConvertResponse) String() string {
 func (*ConvertResponse) ProtoMessage() {}
 
 func (x *ConvertResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_jitllm_v1_model_proto_msgTypes[11]
+	mi := &file_jitllm_v1_model_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -908,7 +1061,7 @@ func (x *ConvertResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConvertResponse.ProtoReflect.Descriptor instead.
 func (*ConvertResponse) Descriptor() ([]byte, []int) {
-	return file_jitllm_v1_model_proto_rawDescGZIP(), []int{11}
+	return file_jitllm_v1_model_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *ConvertResponse) GetPhase() string {
@@ -967,7 +1120,7 @@ type TokenizeRequest struct {
 
 func (x *TokenizeRequest) Reset() {
 	*x = TokenizeRequest{}
-	mi := &file_jitllm_v1_model_proto_msgTypes[12]
+	mi := &file_jitllm_v1_model_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -979,7 +1132,7 @@ func (x *TokenizeRequest) String() string {
 func (*TokenizeRequest) ProtoMessage() {}
 
 func (x *TokenizeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_jitllm_v1_model_proto_msgTypes[12]
+	mi := &file_jitllm_v1_model_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -992,7 +1145,7 @@ func (x *TokenizeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TokenizeRequest.ProtoReflect.Descriptor instead.
 func (*TokenizeRequest) Descriptor() ([]byte, []int) {
-	return file_jitllm_v1_model_proto_rawDescGZIP(), []int{12}
+	return file_jitllm_v1_model_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *TokenizeRequest) GetModelId() string {
@@ -1028,7 +1181,7 @@ type TokenizeResponse struct {
 
 func (x *TokenizeResponse) Reset() {
 	*x = TokenizeResponse{}
-	mi := &file_jitllm_v1_model_proto_msgTypes[13]
+	mi := &file_jitllm_v1_model_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1040,7 +1193,7 @@ func (x *TokenizeResponse) String() string {
 func (*TokenizeResponse) ProtoMessage() {}
 
 func (x *TokenizeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_jitllm_v1_model_proto_msgTypes[13]
+	mi := &file_jitllm_v1_model_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1053,7 +1206,7 @@ func (x *TokenizeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TokenizeResponse.ProtoReflect.Descriptor instead.
 func (*TokenizeResponse) Descriptor() ([]byte, []int) {
-	return file_jitllm_v1_model_proto_rawDescGZIP(), []int{13}
+	return file_jitllm_v1_model_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *TokenizeResponse) GetTokenIds() []int32 {
@@ -1080,7 +1233,7 @@ type DetokenizeRequest struct {
 
 func (x *DetokenizeRequest) Reset() {
 	*x = DetokenizeRequest{}
-	mi := &file_jitllm_v1_model_proto_msgTypes[14]
+	mi := &file_jitllm_v1_model_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1092,7 +1245,7 @@ func (x *DetokenizeRequest) String() string {
 func (*DetokenizeRequest) ProtoMessage() {}
 
 func (x *DetokenizeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_jitllm_v1_model_proto_msgTypes[14]
+	mi := &file_jitllm_v1_model_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1105,7 +1258,7 @@ func (x *DetokenizeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetokenizeRequest.ProtoReflect.Descriptor instead.
 func (*DetokenizeRequest) Descriptor() ([]byte, []int) {
-	return file_jitllm_v1_model_proto_rawDescGZIP(), []int{14}
+	return file_jitllm_v1_model_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *DetokenizeRequest) GetModelId() string {
@@ -1131,7 +1284,7 @@ type DetokenizeResponse struct {
 
 func (x *DetokenizeResponse) Reset() {
 	*x = DetokenizeResponse{}
-	mi := &file_jitllm_v1_model_proto_msgTypes[15]
+	mi := &file_jitllm_v1_model_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1143,7 +1296,7 @@ func (x *DetokenizeResponse) String() string {
 func (*DetokenizeResponse) ProtoMessage() {}
 
 func (x *DetokenizeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_jitllm_v1_model_proto_msgTypes[15]
+	mi := &file_jitllm_v1_model_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1156,7 +1309,7 @@ func (x *DetokenizeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetokenizeResponse.ProtoReflect.Descriptor instead.
 func (*DetokenizeResponse) Descriptor() ([]byte, []int) {
-	return file_jitllm_v1_model_proto_rawDescGZIP(), []int{15}
+	return file_jitllm_v1_model_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *DetokenizeResponse) GetText() string {
@@ -1182,7 +1335,7 @@ type ChatMessage struct {
 
 func (x *ChatMessage) Reset() {
 	*x = ChatMessage{}
-	mi := &file_jitllm_v1_model_proto_msgTypes[16]
+	mi := &file_jitllm_v1_model_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1194,7 +1347,7 @@ func (x *ChatMessage) String() string {
 func (*ChatMessage) ProtoMessage() {}
 
 func (x *ChatMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_jitllm_v1_model_proto_msgTypes[16]
+	mi := &file_jitllm_v1_model_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1207,7 +1360,7 @@ func (x *ChatMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ChatMessage.ProtoReflect.Descriptor instead.
 func (*ChatMessage) Descriptor() ([]byte, []int) {
-	return file_jitllm_v1_model_proto_rawDescGZIP(), []int{16}
+	return file_jitllm_v1_model_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *ChatMessage) GetRole() string {
@@ -1245,7 +1398,7 @@ type ChatImage struct {
 
 func (x *ChatImage) Reset() {
 	*x = ChatImage{}
-	mi := &file_jitllm_v1_model_proto_msgTypes[17]
+	mi := &file_jitllm_v1_model_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1257,7 +1410,7 @@ func (x *ChatImage) String() string {
 func (*ChatImage) ProtoMessage() {}
 
 func (x *ChatImage) ProtoReflect() protoreflect.Message {
-	mi := &file_jitllm_v1_model_proto_msgTypes[17]
+	mi := &file_jitllm_v1_model_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1270,7 +1423,7 @@ func (x *ChatImage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ChatImage.ProtoReflect.Descriptor instead.
 func (*ChatImage) Descriptor() ([]byte, []int) {
-	return file_jitllm_v1_model_proto_rawDescGZIP(), []int{17}
+	return file_jitllm_v1_model_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *ChatImage) GetData() []byte {
@@ -1300,7 +1453,7 @@ type ApplyChatTemplateRequest struct {
 
 func (x *ApplyChatTemplateRequest) Reset() {
 	*x = ApplyChatTemplateRequest{}
-	mi := &file_jitllm_v1_model_proto_msgTypes[18]
+	mi := &file_jitllm_v1_model_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1312,7 +1465,7 @@ func (x *ApplyChatTemplateRequest) String() string {
 func (*ApplyChatTemplateRequest) ProtoMessage() {}
 
 func (x *ApplyChatTemplateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_jitllm_v1_model_proto_msgTypes[18]
+	mi := &file_jitllm_v1_model_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1325,7 +1478,7 @@ func (x *ApplyChatTemplateRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApplyChatTemplateRequest.ProtoReflect.Descriptor instead.
 func (*ApplyChatTemplateRequest) Descriptor() ([]byte, []int) {
-	return file_jitllm_v1_model_proto_rawDescGZIP(), []int{18}
+	return file_jitllm_v1_model_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *ApplyChatTemplateRequest) GetModelId() string {
@@ -1366,7 +1519,7 @@ type ApplyChatTemplateResponse struct {
 
 func (x *ApplyChatTemplateResponse) Reset() {
 	*x = ApplyChatTemplateResponse{}
-	mi := &file_jitllm_v1_model_proto_msgTypes[19]
+	mi := &file_jitllm_v1_model_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1378,7 +1531,7 @@ func (x *ApplyChatTemplateResponse) String() string {
 func (*ApplyChatTemplateResponse) ProtoMessage() {}
 
 func (x *ApplyChatTemplateResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_jitllm_v1_model_proto_msgTypes[19]
+	mi := &file_jitllm_v1_model_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1391,7 +1544,7 @@ func (x *ApplyChatTemplateResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApplyChatTemplateResponse.ProtoReflect.Descriptor instead.
 func (*ApplyChatTemplateResponse) Descriptor() ([]byte, []int) {
-	return file_jitllm_v1_model_proto_rawDescGZIP(), []int{19}
+	return file_jitllm_v1_model_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *ApplyChatTemplateResponse) GetPrompt() string {
@@ -1412,14 +1565,27 @@ var File_jitllm_v1_model_proto protoreflect.FileDescriptor
 
 const file_jitllm_v1_model_proto_rawDesc = "" +
 	"\n" +
-	"\x15jitllm/v1/model.proto\x12\tjitllm.v1\x1a\x16jitllm/v1/common.proto\"\xd5\x01\n" +
+	"\x15jitllm/v1/model.proto\x12\tjitllm.v1\x1a\x16jitllm/v1/common.proto\"\x9f\x01\n" +
+	"\x16SetModelOptionsRequest\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1f\n" +
+	"\vadd_aliases\x18\x02 \x03(\tR\n" +
+	"addAliases\x12%\n" +
+	"\x0eremove_aliases\x18\x03 \x03(\tR\rremoveAliases\x12\x1d\n" +
+	"\aenabled\x18\x04 \x01(\bH\x00R\aenabled\x88\x01\x01B\n" +
+	"\n" +
+	"\b_enabled\"C\n" +
+	"\x17SetModelOptionsResponse\x12(\n" +
+	"\x04file\x18\x01 \x01(\v2\x14.jitllm.v1.ModelFileR\x04file\"\xa6\x02\n" +
 	"\tModelFile\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12'\n" +
 	"\x04size\x18\x03 \x01(\v2\x13.jitllm.v1.ByteSizeR\x04size\x12!\n" +
 	"\fis_container\x18\x04 \x01(\bR\visContainer\x12+\n" +
 	"\x11container_version\x18\x05 \x01(\rR\x10containerVersion\x12'\n" +
-	"\x0fconvert_command\x18\x06 \x01(\tR\x0econvertCommand\"\xef\x06\n" +
+	"\x0fconvert_command\x18\x06 \x01(\tR\x0econvertCommand\x12\x18\n" +
+	"\aaliases\x18\a \x03(\tR\aaliases\x12\x1a\n" +
+	"\bdisabled\x18\b \x01(\bR\bdisabled\x12\x19\n" +
+	"\bmodel_id\x18\t \x01(\tR\amodelId\"\x89\a\n" +
 	"\tModelInfo\x12\x19\n" +
 	"\bmodel_id\x18\x01 \x01(\tR\amodelId\x12\x12\n" +
 	"\x04path\x18\x02 \x01(\tR\x04path\x12\x12\n" +
@@ -1446,7 +1612,8 @@ const file_jitllm_v1_model_proto_rawDesc = "" +
 	"\rsession_count\x18\x14 \x01(\x05R\fsessionCount\x12,\n" +
 	"\x12default_device_ids\x18\x15 \x03(\tR\x10defaultDeviceIds\x12\x18\n" +
 	"\apooling\x18\x16 \x01(\tR\apooling\x12\x18\n" +
-	"\aencoder\x18\x17 \x01(\bR\aencoder\"R\n" +
+	"\aencoder\x18\x17 \x01(\bR\aencoder\x12\x18\n" +
+	"\aaliases\x18\x18 \x03(\tR\aaliases\"R\n" +
 	"\x11ListModelsRequest\x12\x1c\n" +
 	"\tdirectory\x18\x01 \x01(\tR\tdirectory\x12\x1f\n" +
 	"\vloaded_only\x18\x02 \x01(\bR\n" +
@@ -1523,7 +1690,7 @@ const file_jitllm_v1_model_proto_rawDesc = "" +
 	"\rtemplate_name\x18\x04 \x01(\tR\ftemplateName\"P\n" +
 	"\x19ApplyChatTemplateResponse\x12\x16\n" +
 	"\x06prompt\x18\x01 \x01(\tR\x06prompt\x12\x1b\n" +
-	"\ttoken_ids\x18\x02 \x03(\x05R\btokenIds2\xf8\x04\n" +
+	"\ttoken_ids\x18\x02 \x03(\x05R\btokenIds2\xd4\x05\n" +
 	"\fModelService\x12K\n" +
 	"\n" +
 	"ListModels\x12\x1c.jitllm.v1.ListModelsRequest\x1a\x1d.jitllm.v1.ListModelsResponse\"\x00\x12E\n" +
@@ -1534,7 +1701,8 @@ const file_jitllm_v1_model_proto_rawDesc = "" +
 	"\bTokenize\x12\x1a.jitllm.v1.TokenizeRequest\x1a\x1b.jitllm.v1.TokenizeResponse\"\x00\x12K\n" +
 	"\n" +
 	"Detokenize\x12\x1c.jitllm.v1.DetokenizeRequest\x1a\x1d.jitllm.v1.DetokenizeResponse\"\x00\x12`\n" +
-	"\x11ApplyChatTemplate\x12#.jitllm.v1.ApplyChatTemplateRequest\x1a$.jitllm.v1.ApplyChatTemplateResponse\"\x00B\x98\x01\n" +
+	"\x11ApplyChatTemplate\x12#.jitllm.v1.ApplyChatTemplateRequest\x1a$.jitllm.v1.ApplyChatTemplateResponse\"\x00\x12Z\n" +
+	"\x0fSetModelOptions\x12!.jitllm.v1.SetModelOptionsRequest\x1a\".jitllm.v1.SetModelOptionsResponse\"\x00B\x98\x01\n" +
 	"\rcom.jitllm.v1B\n" +
 	"ModelProtoP\x01Z6github.com/jitllm/jitllm/server/gen/jitllm/v1;jitllmv1\xa2\x02\x03JXX\xaa\x02\tJitllm.V1\xca\x02\tJitllm\\V1\xe2\x02\x15Jitllm\\V1\\GPBMetadata\xea\x02\n" +
 	"Jitllm::V1b\x06proto3"
@@ -1551,63 +1719,68 @@ func file_jitllm_v1_model_proto_rawDescGZIP() []byte {
 	return file_jitllm_v1_model_proto_rawDescData
 }
 
-var file_jitllm_v1_model_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
+var file_jitllm_v1_model_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
 var file_jitllm_v1_model_proto_goTypes = []any{
-	(*ModelFile)(nil),                 // 0: jitllm.v1.ModelFile
-	(*ModelInfo)(nil),                 // 1: jitllm.v1.ModelInfo
-	(*ListModelsRequest)(nil),         // 2: jitllm.v1.ListModelsRequest
-	(*ListModelsResponse)(nil),        // 3: jitllm.v1.ListModelsResponse
-	(*GetModelRequest)(nil),           // 4: jitllm.v1.GetModelRequest
-	(*GetModelResponse)(nil),          // 5: jitllm.v1.GetModelResponse
-	(*LoadModelRequest)(nil),          // 6: jitllm.v1.LoadModelRequest
-	(*LoadModelResponse)(nil),         // 7: jitllm.v1.LoadModelResponse
-	(*UnloadModelRequest)(nil),        // 8: jitllm.v1.UnloadModelRequest
-	(*UnloadModelResponse)(nil),       // 9: jitllm.v1.UnloadModelResponse
-	(*ConvertRequest)(nil),            // 10: jitllm.v1.ConvertRequest
-	(*ConvertResponse)(nil),           // 11: jitllm.v1.ConvertResponse
-	(*TokenizeRequest)(nil),           // 12: jitllm.v1.TokenizeRequest
-	(*TokenizeResponse)(nil),          // 13: jitllm.v1.TokenizeResponse
-	(*DetokenizeRequest)(nil),         // 14: jitllm.v1.DetokenizeRequest
-	(*DetokenizeResponse)(nil),        // 15: jitllm.v1.DetokenizeResponse
-	(*ChatMessage)(nil),               // 16: jitllm.v1.ChatMessage
-	(*ChatImage)(nil),                 // 17: jitllm.v1.ChatImage
-	(*ApplyChatTemplateRequest)(nil),  // 18: jitllm.v1.ApplyChatTemplateRequest
-	(*ApplyChatTemplateResponse)(nil), // 19: jitllm.v1.ApplyChatTemplateResponse
-	(*ByteSize)(nil),                  // 20: jitllm.v1.ByteSize
+	(*SetModelOptionsRequest)(nil),    // 0: jitllm.v1.SetModelOptionsRequest
+	(*SetModelOptionsResponse)(nil),   // 1: jitllm.v1.SetModelOptionsResponse
+	(*ModelFile)(nil),                 // 2: jitllm.v1.ModelFile
+	(*ModelInfo)(nil),                 // 3: jitllm.v1.ModelInfo
+	(*ListModelsRequest)(nil),         // 4: jitllm.v1.ListModelsRequest
+	(*ListModelsResponse)(nil),        // 5: jitllm.v1.ListModelsResponse
+	(*GetModelRequest)(nil),           // 6: jitllm.v1.GetModelRequest
+	(*GetModelResponse)(nil),          // 7: jitllm.v1.GetModelResponse
+	(*LoadModelRequest)(nil),          // 8: jitllm.v1.LoadModelRequest
+	(*LoadModelResponse)(nil),         // 9: jitllm.v1.LoadModelResponse
+	(*UnloadModelRequest)(nil),        // 10: jitllm.v1.UnloadModelRequest
+	(*UnloadModelResponse)(nil),       // 11: jitllm.v1.UnloadModelResponse
+	(*ConvertRequest)(nil),            // 12: jitllm.v1.ConvertRequest
+	(*ConvertResponse)(nil),           // 13: jitllm.v1.ConvertResponse
+	(*TokenizeRequest)(nil),           // 14: jitllm.v1.TokenizeRequest
+	(*TokenizeResponse)(nil),          // 15: jitllm.v1.TokenizeResponse
+	(*DetokenizeRequest)(nil),         // 16: jitllm.v1.DetokenizeRequest
+	(*DetokenizeResponse)(nil),        // 17: jitllm.v1.DetokenizeResponse
+	(*ChatMessage)(nil),               // 18: jitllm.v1.ChatMessage
+	(*ChatImage)(nil),                 // 19: jitllm.v1.ChatImage
+	(*ApplyChatTemplateRequest)(nil),  // 20: jitllm.v1.ApplyChatTemplateRequest
+	(*ApplyChatTemplateResponse)(nil), // 21: jitllm.v1.ApplyChatTemplateResponse
+	(*ByteSize)(nil),                  // 22: jitllm.v1.ByteSize
 }
 var file_jitllm_v1_model_proto_depIdxs = []int32{
-	20, // 0: jitllm.v1.ModelFile.size:type_name -> jitllm.v1.ByteSize
-	20, // 1: jitllm.v1.ModelInfo.page_size:type_name -> jitllm.v1.ByteSize
-	20, // 2: jitllm.v1.ModelInfo.vision_page_size:type_name -> jitllm.v1.ByteSize
-	20, // 3: jitllm.v1.ModelInfo.weight_bytes:type_name -> jitllm.v1.ByteSize
-	0,  // 4: jitllm.v1.ListModelsResponse.files:type_name -> jitllm.v1.ModelFile
-	1,  // 5: jitllm.v1.ListModelsResponse.loaded:type_name -> jitllm.v1.ModelInfo
-	1,  // 6: jitllm.v1.GetModelResponse.model:type_name -> jitllm.v1.ModelInfo
-	1,  // 7: jitllm.v1.LoadModelResponse.model:type_name -> jitllm.v1.ModelInfo
-	20, // 8: jitllm.v1.ConvertResponse.output_size:type_name -> jitllm.v1.ByteSize
-	17, // 9: jitllm.v1.ChatMessage.images:type_name -> jitllm.v1.ChatImage
-	16, // 10: jitllm.v1.ApplyChatTemplateRequest.messages:type_name -> jitllm.v1.ChatMessage
-	2,  // 11: jitllm.v1.ModelService.ListModels:input_type -> jitllm.v1.ListModelsRequest
-	4,  // 12: jitllm.v1.ModelService.GetModel:input_type -> jitllm.v1.GetModelRequest
-	6,  // 13: jitllm.v1.ModelService.LoadModel:input_type -> jitllm.v1.LoadModelRequest
-	8,  // 14: jitllm.v1.ModelService.UnloadModel:input_type -> jitllm.v1.UnloadModelRequest
-	10, // 15: jitllm.v1.ModelService.Convert:input_type -> jitllm.v1.ConvertRequest
-	12, // 16: jitllm.v1.ModelService.Tokenize:input_type -> jitllm.v1.TokenizeRequest
-	14, // 17: jitllm.v1.ModelService.Detokenize:input_type -> jitllm.v1.DetokenizeRequest
-	18, // 18: jitllm.v1.ModelService.ApplyChatTemplate:input_type -> jitllm.v1.ApplyChatTemplateRequest
-	3,  // 19: jitllm.v1.ModelService.ListModels:output_type -> jitllm.v1.ListModelsResponse
-	5,  // 20: jitllm.v1.ModelService.GetModel:output_type -> jitllm.v1.GetModelResponse
-	7,  // 21: jitllm.v1.ModelService.LoadModel:output_type -> jitllm.v1.LoadModelResponse
-	9,  // 22: jitllm.v1.ModelService.UnloadModel:output_type -> jitllm.v1.UnloadModelResponse
-	11, // 23: jitllm.v1.ModelService.Convert:output_type -> jitllm.v1.ConvertResponse
-	13, // 24: jitllm.v1.ModelService.Tokenize:output_type -> jitllm.v1.TokenizeResponse
-	15, // 25: jitllm.v1.ModelService.Detokenize:output_type -> jitllm.v1.DetokenizeResponse
-	19, // 26: jitllm.v1.ModelService.ApplyChatTemplate:output_type -> jitllm.v1.ApplyChatTemplateResponse
-	19, // [19:27] is the sub-list for method output_type
-	11, // [11:19] is the sub-list for method input_type
-	11, // [11:11] is the sub-list for extension type_name
-	11, // [11:11] is the sub-list for extension extendee
-	0,  // [0:11] is the sub-list for field type_name
+	2,  // 0: jitllm.v1.SetModelOptionsResponse.file:type_name -> jitllm.v1.ModelFile
+	22, // 1: jitllm.v1.ModelFile.size:type_name -> jitllm.v1.ByteSize
+	22, // 2: jitllm.v1.ModelInfo.page_size:type_name -> jitllm.v1.ByteSize
+	22, // 3: jitllm.v1.ModelInfo.vision_page_size:type_name -> jitllm.v1.ByteSize
+	22, // 4: jitllm.v1.ModelInfo.weight_bytes:type_name -> jitllm.v1.ByteSize
+	2,  // 5: jitllm.v1.ListModelsResponse.files:type_name -> jitllm.v1.ModelFile
+	3,  // 6: jitllm.v1.ListModelsResponse.loaded:type_name -> jitllm.v1.ModelInfo
+	3,  // 7: jitllm.v1.GetModelResponse.model:type_name -> jitllm.v1.ModelInfo
+	3,  // 8: jitllm.v1.LoadModelResponse.model:type_name -> jitllm.v1.ModelInfo
+	22, // 9: jitllm.v1.ConvertResponse.output_size:type_name -> jitllm.v1.ByteSize
+	19, // 10: jitllm.v1.ChatMessage.images:type_name -> jitllm.v1.ChatImage
+	18, // 11: jitllm.v1.ApplyChatTemplateRequest.messages:type_name -> jitllm.v1.ChatMessage
+	4,  // 12: jitllm.v1.ModelService.ListModels:input_type -> jitllm.v1.ListModelsRequest
+	6,  // 13: jitllm.v1.ModelService.GetModel:input_type -> jitllm.v1.GetModelRequest
+	8,  // 14: jitllm.v1.ModelService.LoadModel:input_type -> jitllm.v1.LoadModelRequest
+	10, // 15: jitllm.v1.ModelService.UnloadModel:input_type -> jitllm.v1.UnloadModelRequest
+	12, // 16: jitllm.v1.ModelService.Convert:input_type -> jitllm.v1.ConvertRequest
+	14, // 17: jitllm.v1.ModelService.Tokenize:input_type -> jitllm.v1.TokenizeRequest
+	16, // 18: jitllm.v1.ModelService.Detokenize:input_type -> jitllm.v1.DetokenizeRequest
+	20, // 19: jitllm.v1.ModelService.ApplyChatTemplate:input_type -> jitllm.v1.ApplyChatTemplateRequest
+	0,  // 20: jitllm.v1.ModelService.SetModelOptions:input_type -> jitllm.v1.SetModelOptionsRequest
+	5,  // 21: jitllm.v1.ModelService.ListModels:output_type -> jitllm.v1.ListModelsResponse
+	7,  // 22: jitllm.v1.ModelService.GetModel:output_type -> jitllm.v1.GetModelResponse
+	9,  // 23: jitllm.v1.ModelService.LoadModel:output_type -> jitllm.v1.LoadModelResponse
+	11, // 24: jitllm.v1.ModelService.UnloadModel:output_type -> jitllm.v1.UnloadModelResponse
+	13, // 25: jitllm.v1.ModelService.Convert:output_type -> jitllm.v1.ConvertResponse
+	15, // 26: jitllm.v1.ModelService.Tokenize:output_type -> jitllm.v1.TokenizeResponse
+	17, // 27: jitllm.v1.ModelService.Detokenize:output_type -> jitllm.v1.DetokenizeResponse
+	21, // 28: jitllm.v1.ModelService.ApplyChatTemplate:output_type -> jitllm.v1.ApplyChatTemplateResponse
+	1,  // 29: jitllm.v1.ModelService.SetModelOptions:output_type -> jitllm.v1.SetModelOptionsResponse
+	21, // [21:30] is the sub-list for method output_type
+	12, // [12:21] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_jitllm_v1_model_proto_init() }
@@ -1616,14 +1789,15 @@ func file_jitllm_v1_model_proto_init() {
 		return
 	}
 	file_jitllm_v1_common_proto_init()
-	file_jitllm_v1_model_proto_msgTypes[6].OneofWrappers = []any{}
+	file_jitllm_v1_model_proto_msgTypes[0].OneofWrappers = []any{}
+	file_jitllm_v1_model_proto_msgTypes[8].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_jitllm_v1_model_proto_rawDesc), len(file_jitllm_v1_model_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   20,
+			NumMessages:   22,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

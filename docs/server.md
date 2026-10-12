@@ -172,6 +172,33 @@ prompt store a Speculator does not use).
 | `stats` | engine counters, once or streamed (`-watch`) |
 | `service` | `install`, `uninstall`, `start`, `stop`, `status`: jitllmd as this person's background service |
 
+## Models by name, loaded on demand
+
+Every `.jlm` in the models folder (`-models`) is available by name: its file
+name, with or without `.jlm`, or an alias. A request naming one that is not
+loaded loads it, under its file name as its id, with `-devices` (auto by
+default), `-gpu-layers` and `-sessions`; the folder is read at each lookup,
+so a container converted into it is there for the next request. A model that
+does not fit pages (that is the design); a load that fails answers with the
+model, its size and the host budget it was opened against. `-on-demand=false`
+turns this off. `GET /v1/models` lists the loaded models and then the
+available ones (`"loaded": false`), each alias as an entry of its own.
+
+Aliases and enable/disable live in the folder's `jitllm-models.json`, so they
+survive a restart and move with the models:
+
+```sh
+jitllmd models -alias Qwen3-0.6B-Q8_0=qwen3,small   # several names, unique across the folder
+jitllmd models -unalias Qwen3-0.6B-Q8_0=small
+jitllmd models -disable qwen3   # listed, never loaded on demand; `models -load` still loads it
+jitllmd models -enable qwen3
+jitllmd models                  # loaded, then on disk with their aliases and state
+```
+
+The same is `ModelService.SetModelOptions` on the Connect API, and
+`ListModels` carries each file's `aliases`, `disabled` and loaded `model_id`.
+`jitllmd models -load` and `-unload` work as before.
+
 ## The service
 
 `jitllmd service install` runs `jitllmd serve -addr 127.0.0.1:8080 -models

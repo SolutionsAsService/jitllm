@@ -246,21 +246,38 @@ func (e *compat) openAIModels(w http.ResponseWriter, r *http.Request) {
 		// MaxModelLen is the context a request on this model gets, vLLM's
 		// field; a benchmark harness reads it to size its prompts.
 		MaxModelLen int `json:"max_model_len,omitempty"`
+		// Loaded and Aliases are jitllm's: a model in the models folder is
+		// listed before it is loaded, since naming it loads it, and each of
+		// its aliases is an entry too, so a client may pick any.
+		Loaded  bool     `json:"loaded"`
+		Aliases []string `json:"aliases,omitempty"`
 	}
 	out := struct {
 		Object string  `json:"object"`
 		Data   []entry `json:"data"`
 	}{Object: "list", Data: []entry{}}
-	for _, lm := range e.b.ListLoaded() {
-		out.Data = append(out.Data, entry{
-			ID: lm.ID, Object: "model", Created: lm.LoadedAt.Unix(), OwnedBy: "jitllm", MaxModelLen: lm.MaxModelLen,
-		})
-		if lm.Name != lm.ID && lm.Name != "" {
-			// The file name is an alias, so a client configured with the model
-			// name rather than the generated id still resolves.
-			out.Data = append(out.Data, entry{
-				ID: lm.Name, Object: "model", Created: lm.LoadedAt.Unix(), OwnedBy: "jitllm", MaxModelLen: lm.MaxModelLen,
-			})
+	seen := map[string]bool{}
+	add := func(m ModelSummary, id string) {
+		if id == "" || seen[id] {
+			return
+		}
+		seen[id] = true
+		var created int64
+		if m.Loaded {
+			created = m.LoadedAt.Unix()
+		}
+		out.Data = append(out.Data, entry{ID: id, Object: "model", Created: created, OwnedBy: "jitllm",
+			MaxModelLen: m.MaxModelLen, Loaded: m.Loaded, Aliases: m.Aliases})
+	}
+	for _, list := range [][]ModelSummary{e.b.ListLoaded(), e.b.ListAvailable()} {
+		for _, m := range list {
+			add(m, m.ID)
+			// The file name and the aliases name it too, so a client configured
+			// with either rather than the generated id still resolves.
+			add(m, m.Name)
+			for _, a := range m.Aliases {
+				add(m, a)
+			}
 		}
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -349,7 +366,7 @@ func (e *compat) openAIChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 	lpr.apply(&o)
 	if err := e.b.BindTarget(&o, req.JitllmSession, req.Model); err != nil {
-		oaFail(w, http.StatusNotFound, err.Error(), "invalid_request_error")
+		oaBindFail(w, err)
 		return
 	}
 	e.runOpenAI(w, r, o, req.Model, req.Stream, true)
@@ -441,7 +458,7 @@ func (e *compat) openAICompletions(w http.ResponseWriter, r *http.Request) {
 	}
 	lpr.apply(&o)
 	if err := e.b.BindTarget(&o, req.JitllmSession, req.Model); err != nil {
-		oaFail(w, http.StatusNotFound, err.Error(), "invalid_request_error")
+		oaBindFail(w, err)
 		return
 	}
 	if len(ps) > 1 {
@@ -894,6 +911,24 @@ func (e *Engine) BindTarget(o *GenerateOptions, sessionID, modelName string) err
 	}
 	o.ModelID, o.ModelName = lm.id, modelName
 	return nil
+}
+
+// oaBindFail answers a model or session the request could not be bound to: a
+// 404 for one that is not there, and by its kind otherwise -- a disabled
+// model is a 400, and a load on demand that failed is the server's.
+func oaBindFail(w http.ResponseWriter, err error) {
+	if bindByKind(err) {
+		oaFailErr(w, err)
+		return
+	}
+	oaFail(w, http.StatusNotFound, err.Error(), "invalid_request_error")
+}
+
+// bindByKind reports whether a bind failure carries its own status rather
+// than "not found".
+func bindByKind(err error) bool {
+	var le *LoadError
+	return errors.Is(err, ErrInvalid) || errors.As(err, &le)
 }
 
 func oaFail(w http.ResponseWriter, status int, msg, typ string) {

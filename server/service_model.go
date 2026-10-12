@@ -32,13 +32,7 @@ func (s *ModelService) ListModels(ctx context.Context, req *connect.Request[v1.L
 		}
 		out.Directory = dir
 		for _, f := range files {
-			mf := &v1.ModelFile{
-				Path:           f.Path,
-				Name:           f.Name,
-				Size:           pbBytes(f.Size),
-				IsContainer:    f.IsContainer,
-				ConvertCommand: f.ConvertCommand,
-			}
+			mf := pbModelFile(f)
 			if f.IsContainer {
 				// jlm.Open refuses any version but this build's, so a
 				// successful open proves the version. A container that fails
@@ -55,6 +49,32 @@ func (s *ModelService) ListModels(ctx context.Context, req *connect.Request[v1.L
 		}
 	}
 	return connect.NewResponse(out), nil
+}
+
+func pbModelFile(f ModelFileInfo) *v1.ModelFile {
+	return &v1.ModelFile{
+		Path:           f.Path,
+		Name:           f.Name,
+		Size:           pbBytes(f.Size),
+		IsContainer:    f.IsContainer,
+		ConvertCommand: f.ConvertCommand,
+		Aliases:        f.Aliases,
+		Disabled:       f.Disabled,
+		ModelId:        f.ModelID,
+	}
+}
+
+// SetModelOptions sets a container's aliases and whether it loads on demand.
+func (s *ModelService) SetModelOptions(ctx context.Context, req *connect.Request[v1.SetModelOptionsRequest]) (*connect.Response[v1.SetModelOptionsResponse], error) {
+	m := req.Msg
+	if m.Name == "" {
+		return nil, invalid("set model options: name is required")
+	}
+	f, err := s.E.SetModelOptions(m.Name, m.AddAliases, m.RemoveAliases, m.Enabled)
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&v1.SetModelOptionsResponse{File: pbModelFile(f)}), nil
 }
 
 // GetModel describes one loaded model.

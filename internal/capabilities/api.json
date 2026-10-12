@@ -729,7 +729,8 @@
         "Convert",
         "Tokenize",
         "Detokenize",
-        "ApplyChatTemplate"
+        "ApplyChatTemplate",
+        "SetModelOptions"
       ]
     },
     {

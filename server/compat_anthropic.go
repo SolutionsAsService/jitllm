@@ -275,6 +275,10 @@ func (e *compat) anthropicMessages(w http.ResponseWriter, r *http.Request) {
 		o.Sampling = sm
 	}
 	if err := e.b.BindTarget(&o, req.JitllmSession, req.Model); err != nil {
+		if bindByKind(err) {
+			anFailErr(w, err)
+			return
+		}
 		anFail(w, http.StatusNotFound, "not_found_error", err.Error())
 		return
 	}
