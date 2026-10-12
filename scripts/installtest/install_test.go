@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -17,6 +18,9 @@ import (
 // release's signed jitllm.app, not the bare binary, into ~/Applications when
 // /Applications is not writable.
 func TestDesktopOnMacInstallsTheApp(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("install.sh is the Linux and macOS installer; Windows has install.ps1")
+	}
 	for _, tool := range []string{"sh", "curl", "unzip"} {
 		if _, err := exec.LookPath(tool); err != nil {
 			t.Fatalf("%s is needed: %v", tool, err)
