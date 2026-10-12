@@ -7,11 +7,15 @@
 # Arguments name the programs to install: jitllm (the CLI), jitllmd (the
 # server), desktop (jitllm-desktop), tui (jitllm-tui), or all. With none it
 # installs jitllm and jitllmd. Each archive is checked against the release's
-# checksums.txt before anything is installed.
+# checksums.txt before anything is installed. On macOS the desktop app is the
+# signed jitllm.app bundle (the release's .app.zip), installed into
+# /Applications, or ~/Applications when /Applications is not writable.
 #
 #   JITLLM_VERSION      a release tag, such as v0.1.0 (default: the latest)
 #   JITLLM_INSTALL_DIR  where the binaries go (default: ~/.local/bin, or
 #                       /usr/local/bin when run as root)
+#   JITLLM_APPS_DIR     where jitllm.app goes on macOS (default: /Applications,
+#                       or ~/Applications when that is not writable)
 #   JITLLM_DOWNLOAD_URL where releases are fetched from (default: GitHub)
 set -eu
 
@@ -84,16 +88,39 @@ say "jitllm $tag for $os/$arch"
 fetch "$base/$tag/checksums.txt" "$tmp/checksums.txt" || die "no checksums.txt for $tag at $base/$tag"
 for p in $progs; do
 	archive=${p}_${version}_${os}_${arch}.tar.gz
+	[ "$os/$p" = darwin/jitllm-desktop ] && archive=jitllm_${version}_${os}_${arch}.app.zip
 	fetch "$base/$tag/$archive" "$tmp/$archive" || die "could not download $archive"
 	want=$(awk -v f="$archive" '$2 == f { print $1 }' "$tmp/checksums.txt")
 	[ -n "$want" ] || die "$archive is not in checksums.txt"
 	[ "$(sha256 "$tmp/$archive")" = "$want" ] || die "$archive does not match its checksum"
 	mkdir -p "$tmp/$p"
-	tar -xzf "$tmp/$archive" -C "$tmp/$p"
+	case $archive in
+	*.app.zip)
+		# ditto keeps the bundle's signature, stapled ticket and links.
+		if command -v ditto >/dev/null 2>&1; then
+			ditto -x -k "$tmp/$archive" "$tmp/$p"
+		else
+			unzip -q "$tmp/$archive" -d "$tmp/$p"
+		fi
+		[ -d "$tmp/$p/jitllm.app" ] || die "$archive holds no jitllm.app"
+		;;
+	*) tar -xzf "$tmp/$archive" -C "$tmp/$p" ;;
+	esac
 done
 
 mkdir -p "$dir"
 for p in $progs; do
+	if [ -d "$tmp/$p/jitllm.app" ]; then
+		apps=${JITLLM_APPS_DIR:-/Applications}
+		[ -w "$apps" ] || apps=$HOME/Applications
+		mkdir -p "$apps"
+		rm -rf "$apps/jitllm.app.new"
+		mv "$tmp/$p/jitllm.app" "$apps/jitllm.app.new"
+		rm -rf "$apps/jitllm.app"
+		mv "$apps/jitllm.app.new" "$apps/jitllm.app"
+		say "installed $apps/jitllm.app"
+		continue
+	fi
 	cp "$tmp/$p/$p" "$dir/$p.new"
 	chmod 755 "$dir/$p.new"
 	mv -f "$dir/$p.new" "$dir/$p"
