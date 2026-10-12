@@ -125,6 +125,72 @@ func TestActInKeepsThePrinciples(t *testing.T) {
 		seams = []int{half, half}
 		compare("paged")
 	})
+	t.Run("tuned", func(t *testing.T) {
+		// The shipping configuration: the split tuner and the prologue tuner
+		// both measure on this card (no cache, so nothing is read back), and
+		// ActInSites is left to them. The tuner must have decided every site
+		// key it found, the prologue must run exactly where it kept one, and
+		// the two arms -- one tier, so one set of splits, NoActFuse toggled
+		// between two fresh States -- must agree as the forced arms do.
+		g, err := tier.OpenWith(tier.WithDeviceTune(tier.TuneAuto))
+		if err != nil || g == nil {
+			t.Skipf("no GPU: %v", err)
+		}
+		defer g.Close()
+		seq := func() [][]float32 {
+			s := m.NewState(len(ids) + 3*per + 8)
+			defer s.Close()
+			if err := s.SetDevice(g); err != nil {
+				t.Fatal(err)
+			}
+			last, err := s.Prefill(ids)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var out [][]float32
+			for i := 0; i < 3*per; i++ {
+				out = append(out, append([]float32(nil), last...))
+				if last, err = s.Forward(argmaxID(last)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			return out
+		}
+		seq() // the retune, and with it the prologue tuner, runs here
+		st := g.Stats()
+		if st.ActInTimed == 0 {
+			t.Fatalf("the prologue tuner decided no site (%s)", g.Err())
+		}
+		before := st.ActInLaunches
+		on := seq()
+		ran := g.Stats().ActInLaunches - before
+		if (st.ActInKept > 0) != (ran > 0) {
+			t.Fatalf("the tuner kept %d of %d sites and the decode encoded %d prologue launches",
+				st.ActInKept, st.ActInTimed, ran)
+		}
+		g.NoActFuse = true
+		before = g.Stats().ActInLaunches
+		off := seq()
+		if n := g.Stats().ActInLaunches - before; n != 0 {
+			t.Fatalf("NoActFuse encoded %d operand prologues", n)
+		}
+		exact := strings.Contains(g.Name(), "[ptx]") && g.Devices() == 1
+		for i := range on {
+			var num, den float64
+			for j := range on[i] {
+				if exact && math.Float32bits(on[i][j]) != math.Float32bits(off[i][j]) {
+					t.Fatalf("step %d logit %d: tuned %v, two launches %v", i, j, on[i][j], off[i][j])
+				}
+				d := float64(on[i][j] - off[i][j])
+				num, den = num+d*d, den+float64(off[i][j])*float64(off[i][j])
+			}
+			if num > 1e-6*den || argmaxID(on[i]) != argmaxID(off[i]) {
+				t.Fatalf("step %d: NMSE %.3e, argmax %d vs %d", i, num/den, argmaxID(on[i]), argmaxID(off[i]))
+			}
+		}
+		t.Logf("the tuner kept %d of %d sites on %s; %d prologue launches over %d steps, matching the two-launch arm (exact %v)",
+			st.ActInKept, st.ActInTimed, g.Name(), ran, len(on), exact)
+	})
 	t.Run("alloc", func(t *testing.T) {
 		g := open(false)
 		defer g.Close()
