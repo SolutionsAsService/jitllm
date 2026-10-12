@@ -354,6 +354,10 @@ type Opts struct {
 	// CUDAPosted posts every CUDA device call to the device's owner goroutine
 	// instead of running it inline on the caller's thread.
 	CUDAPosted bool
+	// CUDAMaxRegs caps every CUDA kernel's registers per thread (.maxnreg),
+	// 0 leaving ptxas its own choice. It exists to force a spill: the
+	// register gate is run against it to show it fires.
+	CUDAMaxRegs int
 	// Metal is the Metal context's compile and wait choices.
 	Metal metal.Opts
 	// HIP is where ROCm is looked for. Zero searches the default places.
