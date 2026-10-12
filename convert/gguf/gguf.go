@@ -56,7 +56,7 @@ func openOne(path string, opts ...Option) (*meta.File, error) {
 	// refuse. See mapped.go.
 	registerMapping(b)
 	closeMapped := func() error { unregisterMapping(b); return closeFn() }
-	f, err := parse(b, path, closeMapped)
+	f, err := parse(b, b, path, closeMapped)
 	if err != nil {
 		closeMapped()
 		return nil, err
@@ -66,12 +66,16 @@ func openOne(path string, opts ...Option) (*meta.File, error) {
 
 // parse is Open without the mapping, so the fuzzer can hammer it directly on a
 // []byte. It must return an error — never panic — for every possible input.
-func parse(b []byte, path string, closeFn func() error) (f *meta.File, err error) {
+//
+// The header is read from b, a prefix of whole, which is the file: the two are
+// the same mapping for a local file, and for a streamed one (OpenAt) b is the
+// part of the file read so far.
+func parse(b, whole []byte, path string, closeFn func() error) (f *meta.File, err error) {
 	r := &meta.Reader{B: b}
 	if got := r.U32(); got != magic {
 		return nil, fmt.Errorf("gguf: %s: not a GGUF file (magic %#08x)", path, got)
 	}
-	f = &meta.File{Path: path, Version: r.U32(), Data: b, CloseFn: closeFn}
+	f = &meta.File{Path: path, Version: r.U32(), Data: whole, CloseFn: closeFn}
 	nTensors := r.U64()
 	nKV := r.U64()
 	if r.Err != nil {
@@ -166,8 +170,8 @@ func parse(b []byte, path string, closeFn func() error) (f *meta.File, err error
 
 	f.Reindex()
 	f.DataStart = alignUp(r.O, f.Alignment)
-	if f.DataStart > uint64(len(b)) {
-		return nil, fmt.Errorf("gguf: %s: data section starts at %d, past end of file %d", path, f.DataStart, len(b))
+	if f.DataStart > uint64(len(whole)) {
+		return nil, fmt.Errorf("gguf: %s: data section starts at %d, past end of file %d", path, f.DataStart, len(whole))
 	}
 	if err := validateTensorData(f); err != nil {
 		return nil, fmt.Errorf("gguf: %s: %w", path, err)

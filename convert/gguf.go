@@ -40,16 +40,33 @@ func FromGGUFs(src, mmproj, dst string, fp jlm.Fingerprint, opts ...Option) (*jl
 		return nil, err
 	}
 	defer f.Close()
+	var vf *meta.File
+	if mmproj != "" {
+		if vf, err = gguf.Open(mmproj); err != nil {
+			return nil, err
+		}
+		defer vf.Close()
+	}
+	s, err := buildGGUF(f, vf, src, mmproj, o)
+	if err != nil {
+		return nil, err
+	}
+	// Stamp which build wrote this: most of a container's content is converter
+	// decisions the format version cannot catch. See jlm.Fingerprint.Writer.
+	if fp.Writer == "" {
+		fp.Writer = jlm.WriterID()
+	}
+	return jlm.Write(dst, s, fp)
+}
+
+// buildGGUF is the container's source for a text model f and, when vf is
+// not nil, its vision tower, named src and mmproj in messages.
+func buildGGUF(f, vf *meta.File, src, mmproj string, o options) (*jlm.Source, error) {
 	s, err := sourceOf(f)
 	if err != nil {
 		return nil, err
 	}
-	if mmproj != "" {
-		vf, err := gguf.Open(mmproj)
-		if err != nil {
-			return nil, err
-		}
-		defer vf.Close()
+	if vf != nil {
 		if a := vf.Arch(); a != "clip" {
 			return nil, fmt.Errorf("convert: %s is architecture %q, not a vision tower", mmproj, a)
 		}
@@ -88,12 +105,7 @@ func FromGGUFs(src, mmproj, dst string, fp jlm.Fingerprint, opts ...Option) (*jl
 	if err := o.applyChatTemplate(s); err != nil {
 		return nil, err
 	}
-	// Stamp which build wrote this: most of a container's content is converter
-	// decisions the format version cannot catch. See jlm.Fingerprint.Writer.
-	if fp.Writer == "" {
-		fp.Writer = jlm.WriterID()
-	}
-	return jlm.Write(dst, s, fp)
+	return s, nil
 }
 
 // sourceOf translates a parsed source model into the container's own terms.
