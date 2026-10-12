@@ -1623,17 +1623,17 @@ type devShared struct {
 	// lastSub is when the device last started or finished a submission
 	// (unix ns): the background tuner waits for tuneQuiet past it.
 	lastSub   atomic.Int64
-	restrides map[[4]int]backend.Kernel     // kernels.Restride by shape; see copyKVAcrossStride
-	segKerns  map[string]backend.Kernel     // kernels.MatVecSegments by shapes; see fuseQKV
+	restrides map[[4]int]backend.Kernel // kernels.Restride by shape; see copyKVAcrossStride
+	segKerns  map[string]backend.Kernel // kernels.MatVecSegments by shapes; see fuseQKV
 	// actInWin is tuneActIn's verdict per operand-prologue site key: true where
 	// the prologue measured faster than the two launches on this card.
 	// actInTrial makes fuseActIn build every candidate for that measurement.
 	actInWin   map[string]bool
 	actInTrial bool
-	ragKerns  map[moeKernKey]backend.Kernel // a batched mixture's grouped matvecs (moegroup.go)
-	moeVolta  map[moeVoltaKey]moeVoltaMV    // their tensor-core twins; see voltaGroupedMV
-	ragK      map[ragKey]backend.Kernel     // a ragged step's matvecs; see ragMV
-	kshared   map[string]backend.Kernel     // scratch kernels by content; see compileShared
+	ragKerns   map[moeKernKey]backend.Kernel // a batched mixture's grouped matvecs (moegroup.go)
+	moeVolta   map[moeVoltaKey]moeVoltaMV    // their tensor-core twins; see voltaGroupedMV
+	ragK       map[ragKey]backend.Kernel     // a ragged step's matvecs; see ragMV
+	kshared    map[string]backend.Kernel     // scratch kernels by content; see compileShared
 	// convK, conv and convN are the convolutional blocks' kernels, their
 	// shared scratch and how many hold it (conv.go).
 	convK   map[convKey]backend.Kernel
