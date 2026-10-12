@@ -92,8 +92,10 @@ The same settings as the desktop app, in the same file: sampling, the seed, the 
 
 ## Which engine
 
-The right end of the bottom line always says which engine the app drives: `Embedded · API off`, or `Embedded · API on :8080` while it serves the API. The command palette (`ctrl+k`) lists it too, and opens Settings from it.
+Like the desktop app, the terminal app uses a `jitllmd` that answers at the service address first (the settings file's, the login service's `127.0.0.1:8080` by default) and runs its own engine only when none does. `--connect addr` connects to that address and nothing else; `--embedded` always runs the app's own engine.
 
-Turning the API on where a `jitllmd` already answers is refused, and the line names the address to connect to instead. Starting the app while a `jitllmd` runs says so as well: the two engines share the GPU's memory.
+The right end of the bottom line always says which: `Service · 127.0.0.1:8080 (jitllmd 0.9.0)`, `Embedded · API off` or `Embedded · API on :8080`. The command palette (`ctrl+k`) lists it too, and opens Settings from it. A service that stops answering turns the badge red with `not answering` and the palette offers to reconnect; the app never switches to an engine of its own.
+
+Turning the API on where a `jitllmd` already answers is refused, naming the `--connect` address instead, and running embedded beside a `jitllmd` says that the two share the GPU's memory.
 
 The screenshots on this page are the app running Qwen3-30B-A3B for real, in a 130-column terminal.

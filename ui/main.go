@@ -6,7 +6,6 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -19,7 +18,6 @@ import (
 	"github.com/gogpu/ui/desktop"
 
 	"github.com/jitllm/jitllm/common/config"
-	core "github.com/jitllm/jitllm/common/engine"
 	"github.com/jitllm/jitllm/common/crash"
 	"github.com/jitllm/jitllm/ui/app"
 	"github.com/jitllm/jitllm/ui/engine"
@@ -98,16 +96,10 @@ func main() {
 		eng.Live = true
 		register(sh, d)
 	} else {
-		eng := engine.New(sh)
-		// Asked before the API starts, or the probe would find the window itself.
-		if in, warning, ok := core.Beside(context.Background(), ""); ok {
-			sh.WarnBeside(in, warning)
-		}
-		sh.ServeAPI(eng.Server())
-		// Before the window closes, so a decode in flight is cancelled and the
-		// container and device are released rather than leaked past the window.
-		sh.OnShutdown(eng.Close)
-		register(sh, screen.Deps{Engine: eng})
+		// The engine setting decides: under Auto a jitllmd that answers is
+		// used and the window runs its own engine only when none does.
+		eng := engine.Start(sh)
+		register(sh, screen.Deps{Engine: eng.Driver()})
 		// The macOS app's first launch offers to put its jitllm and jitllmd
 		// on PATH; anywhere else it does nothing.
 		screen.OfferCLI(sh)

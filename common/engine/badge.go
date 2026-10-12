@@ -28,12 +28,14 @@ type Where struct {
 // off.
 func Badge(w Where, api string) string {
 	if w.Service {
-		s := "Service · " + w.Addr
+		// A lost service says so first, where a narrow badge still shows it.
+		s := "Service · "
+		if w.Lost {
+			s += "not answering · "
+		}
+		s += w.Addr
 		if w.Version != "" {
 			s += " (jitllmd " + w.Version + ")"
-		}
-		if w.Lost {
-			s += " · not answering"
 		}
 		return s
 	}

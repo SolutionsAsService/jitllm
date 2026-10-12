@@ -48,7 +48,7 @@ type page interface {
 // the frame clock and the spinner.
 type env struct {
 	f    *front
-	e    *engine.Engine
+	e    engine.Driver
 	cfg  *config.Config
 	dirs []string
 	keys *globalKeys
@@ -67,7 +67,16 @@ type env struct {
 // returns its status line. The API serves the terminal's own engine, and its
 // model folder is the first of the terminal's.
 func (env *env) syncAPI() string {
-	srv := env.e.Server()
+	emb, ok := env.e.(*engine.Engine)
+	if !ok {
+		// Connected: the service serves the API; this app runs no engine to
+		// serve one from.
+		if env.cfg.API {
+			return "the API is the service's, at " + env.where.Addr
+		}
+		return ""
+	}
+	srv := emb.Server()
 	if len(env.dirs) > 0 {
 		srv.SetModelDir(env.dirs[0])
 	}

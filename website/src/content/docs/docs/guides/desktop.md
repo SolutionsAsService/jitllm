@@ -60,9 +60,17 @@ GGUF and safetensors files in your model folders are listed with whether they fi
 
 ## Which engine
 
-The line under the logo always says which engine the window drives: `Embedded · API off` or `Embedded · API on :8080` for its own, with the API it serves. Click it to open Settings.
+The window drives one engine, and Settings > Engine chooses it:
 
-Turning the API on where a `jitllmd` already answers (the login service on `127.0.0.1:8080`, say) is refused: the window says which `jitllmd` holds the address and offers to connect to it, rather than starting a second engine beside it. Starting the window while a `jitllmd` runs says so too, since the two engines share the GPU's memory and each loads its own copy of a model.
+- **Auto** (the default) connects to a `jitllmd` that answers at the service address (the login service's `127.0.0.1:8080` unless you set another) and runs the window's own engine only when none does.
+- **Embedded** always runs the window's own engine, in its process.
+- **Service** connects to the address and nothing else.
+
+Apply switches at once, closing the models the engine in use holds. Connected, the model list, the memory map, block placement and chat run on the service: models load there by path, and the window is one more client of it. Two things stay the service's own: how memory is divided between its models (the priority toggle says so), and its API, which it already serves.
+
+The line under the logo always says which engine runs: `Service · 127.0.0.1:8080 (jitllmd 0.9.0)`, `Embedded · API off` or `Embedded · API on :8080`. Click it to open Settings. A service that stops answering is shown as a problem with a Reconnect button and the line says `not answering`; the window never switches to an engine of its own mid-session, and reconnects by itself when the service is back.
+
+Turning the API on where a `jitllmd` already answers is refused: the window says which `jitllmd` holds the address and offers to connect to it, rather than starting a second engine beside it. Running Embedded while a `jitllmd` runs says so too, since the two engines share the GPU's memory and each loads its own copy of a model. A `jitllmd` from a release with another API version is refused by name.
 
 Each open model on the Machine screen has an Unload button: unloading is how a model gives its memory back.
 

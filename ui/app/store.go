@@ -148,6 +148,10 @@ type Store struct {
 	APIServing state.Signal[string]
 	// Engine is which engine the window drives: its own or a jitllmd.
 	Engine state.Signal[core.Where]
+	// EngineMode and ServiceAddr are the engine setting (core.Mode*): what
+	// Settings applies, not what runs (Engine says that).
+	EngineMode  state.Signal[string]
+	ServiceAddr state.Signal[string]
 	// ModelDirs is the folders models are found in; the first is where
 	// downloads go. Write it through Shell.SetModelDirs, which keeps Cfg too.
 	ModelDirs state.Signal[[]string]
@@ -220,14 +224,16 @@ func NewStore() *Store {
 
 		Machine: state.NewSignal(MachineReport{}),
 
-		ShowTuning: state.NewSignal(true),
-		Loads:      state.NewSignal([]Loading(nil)),
-		KVCache:    state.NewSignal(true),
-		API:        state.NewSignal(false),
-		APIAddr:    state.NewSignal(""),
-		APIServing: state.NewSignal(""),
-		Engine:     state.NewSignal(core.Where{}),
-		ModelDirs:  state.NewSignal([]string(nil)),
+		ShowTuning:  state.NewSignal(true),
+		Loads:       state.NewSignal([]Loading(nil)),
+		KVCache:     state.NewSignal(true),
+		API:         state.NewSignal(false),
+		APIAddr:     state.NewSignal(""),
+		APIServing:  state.NewSignal(""),
+		Engine:      state.NewSignal(core.Where{}),
+		EngineMode:  state.NewSignal(""),
+		ServiceAddr: state.NewSignal(""),
+		ModelDirs:   state.NewSignal([]string(nil)),
 
 		Chats:   state.NewSignal([]ChatInfo{{}}),
 		ChatSel: state.NewSignal(0),

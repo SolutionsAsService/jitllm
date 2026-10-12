@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/jitllm/jitllm/common/crash"
+	core "github.com/jitllm/jitllm/common/engine"
 	"github.com/jitllm/jitllm/ui/app"
 	"github.com/jitllm/jitllm/ui/screen"
 )
@@ -114,7 +115,15 @@ func Scenarios() []Scenario {
 			}},
 		}},
 		{Name: "settings", Tab: app.TabSettings, Steps: []Step{
-			{Name: "page", Shows: []string{"Appearance", "Model folders", "Downloads are saved here"}},
+			{Name: "page", Shows: []string{"Engine", "Auto", "Service address", "Embedded · API off"}},
+			// The badge and the Engine card for a window connected to a jitllmd.
+			{Name: "connected", Do: func(sh *app.Shell, _ *Engine) {
+				sh.Store.EngineMode.Set(core.ModeService)
+				sh.Store.Engine.Set(core.Where{Service: true, Addr: "127.0.0.1:8080", Version: "0.9.0"})
+			}, Shows: []string{"Service · 127.0.0.1:8080 (jitllmd 0.9.0)"}},
+			{Name: "lost", Do: func(sh *app.Shell, _ *Engine) {
+				sh.Store.Engine.Set(core.Where{Service: true, Addr: "127.0.0.1:8080", Version: "0.9.0", Lost: true})
+			}, Shows: []string{"Service · not answering · 127.0.0.1:8080 (jitllmd 0.9.0)"}},
 		}},
 		{Name: "chats", Tab: app.TabSession, Steps: []Step{
 			{Name: "loaded", Do: load(Llama()), Want: loaded("Llama-3.2-1B-Instruct-Q4_K_M.jlm")},
