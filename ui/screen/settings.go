@@ -14,6 +14,8 @@ import (
 	"github.com/gogpu/ui/widget"
 
 	"github.com/jitllm/jitllm/common/config"
+	core "github.com/jitllm/jitllm/common/engine"
+	"github.com/jitllm/jitllm/internal/localserver"
 	"github.com/jitllm/jitllm/ui/app"
 	"github.com/jitllm/jitllm/ui/widgets"
 )
@@ -29,6 +31,8 @@ func Settings(sh *app.Shell) widget.Widget {
 
 	cards := []widget.Widget{
 		primitives.VBox(title, sub).Gap(p.Space.XS).CrossAlign(primitives.CrossAxisStretch),
+		// Which engine runs comes first: every other setting is that engine's.
+		card(sh, "Engine", engineSettings(sh)),
 		card(sh, "Appearance", appearance(sh)),
 		card(sh, "Model folders", modelFolders(sh)),
 		card(sh, "Loading models", nextLoad(sh)),
@@ -172,6 +176,68 @@ func chatSettings(sh *app.Shell) widget.Widget {
 		note(sh, "Keeps the work done on a prompt on disk, so the same start of a chat is not read again. Applies to the next model loaded."),
 		primitives.HBox(resetSampling),
 	).Gap(p.Space.S).CrossAlign(primitives.CrossAxisStretch)
+}
+
+// engineModes are the engine setting's choices, in the order shown.
+var engineModes = []struct{ mode, label string }{
+	{core.ModeAuto, "Auto"},
+	{core.ModeEmbedded, "Embedded"},
+	{core.ModeService, "Service"},
+}
+
+// engineSettings is which engine the window runs: a jitllmd it connects to,
+// or its own. A choice applies with Apply, since switching closes the models
+// the engine in use holds.
+func engineSettings(sh *app.Shell) widget.Widget {
+	p := sh.P
+	st := sh.Store
+	mode := func() string {
+		if m := st.EngineMode.Get(); m != "" {
+			return m
+		}
+		return core.ModeAuto
+	}
+	chips := make([]widget.Widget, 0, len(engineModes))
+	for _, m := range engineModes {
+		m := m
+		chips = append(chips, chip.New(
+			chip.Label(m.label),
+			chip.Selectable(true),
+			chip.SelectedReadonlySignal(state.NewComputed(func() bool { return mode() == m.mode }, st.EngineMode.AsReadonly())),
+			chip.OnClick(func() { st.EngineMode.Set(m.mode) }),
+			chip.PainterOpt(p.Chip),
+		))
+	}
+	addr := textfield.New(
+		textfield.ValueSignal(st.ServiceAddr),
+		textfield.Placeholder(localserver.DefaultAddr),
+		textfield.PainterOpt(p.TextField),
+	)
+	apply := button.New(
+		button.TextOpt("Apply"),
+		button.SizeOpt(button.Small),
+		button.VariantOpt(button.Outlined),
+		button.OnClick(func() { applyEngine(sh) }),
+		button.PainterOpt(p.Button),
+	)
+	return primitives.VBox(
+		label(sh, "Now"),
+		wrapped(sh, sh.Badge()),
+		primitives.HBox(append(chips, primitives.Expanded(primitives.Box()), apply)...).Gap(p.Space.S),
+		note(sh, "Auto connects to a jitllmd that answers at the address and runs this app's own engine only when none does. Service connects and nothing else; Embedded always runs its own."),
+		label(sh, "Service address"),
+		p.Field(addr),
+		note(sh, "Empty is the login service's address. Apply closes the models the engine in use holds."),
+	).Gap(p.Space.S).CrossAlign(primitives.CrossAxisStretch)
+}
+
+// applyEngine switches to what the setting chooses.
+func applyEngine(sh *app.Shell) {
+	if sh.ApplyEngine == nil {
+		sh.SetStatus("this window has one engine only")
+		return
+	}
+	sh.ApplyEngine()
 }
 
 // apiSettings turns on the API the app serves (Shell.ServeAPI).

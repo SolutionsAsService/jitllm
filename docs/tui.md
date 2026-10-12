@@ -11,7 +11,7 @@ or build it:
 
 ```sh
 (cd tui && go build -o ../jitllm-tui .)
-./jitllm-tui [-chat=true|false] [-device auto] [-ctx 8192] [-models DIR] [-mouse] [model.jlm]
+./jitllm-tui [-chat=true|false] [-device auto] [-ctx 8192] [-models DIR] [-mouse] [--connect ADDR | --embedded] [model.jlm]
 ```
 
 With no model it opens on the Models screen. Each flag overrides its setting
@@ -39,10 +39,17 @@ the keys the current screen takes.
 
 ## Which engine
 
-The right end of the bottom line always says which engine the app drives:
-`Embedded · API off`, or `Embedded · API on :8080` while it serves the API
-(Settings). Turning the API on where a `jitllmd` already answers is refused,
-naming the address to connect to instead, and starting the app beside a
+The app uses a `jitllmd` that answers at the service address first (the
+settings file's `service_addr`, the login service's `127.0.0.1:8080` by
+default) and runs its own engine only when none does. `--connect addr`
+connects to that address and nothing else; `--embedded` always runs its own.
+
+The right end of the bottom line always says which:
+`Service · 127.0.0.1:8080 (jitllmd 0.9.0)`, `Embedded · API off` or
+`Embedded · API on :8080`. A service that stops answering turns it red with
+`not answering` and the palette offers to reconnect; the app never switches to
+an engine of its own. Turning the API on where a `jitllmd` already answers is
+refused, naming the address to connect to, and running embedded beside a
 running `jitllmd` says that the two share the GPU's memory.
 
 ## Chat

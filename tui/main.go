@@ -1,9 +1,11 @@
 // Command tui is jitllm's terminal interface, driven through the same engine
 // and the same settings and chats as the window (common/...).
 //
-//	tui [-chat=true|false] [-device auto] [-ctx 8192] [-models dir] [-mouse] [model.jlm]
+//	tui [-chat=true|false] [-device auto] [-ctx 8192] [-models dir] [-mouse] [--connect addr | --embedded] [model.jlm]
 //
-// A flag overrides its setting for this run. With no model it opens on the
+// A flag overrides its setting for this run. The engine is a jitllmd that
+// answers at the configured address (the login service's by default) and the
+// app's own only when none does; --connect and --embedded force one. With no model it opens on the
 // models screen.
 package main
 
@@ -27,10 +29,19 @@ func main() {
 	ctx := flag.Int("ctx", cfg.MaxSeq, "context length")
 	dir := flag.String("models", "", "list this folder instead of the configured ones")
 	mouse := flag.Bool("mouse", false, "scroll with the mouse wheel (the terminal's own text selection then needs shift)")
+	connectTo := flag.String("connect", "", "connect to the jitllmd at this address and nothing else")
+	embedded := flag.Bool("embedded", false, "run this app's own engine, even where a jitllmd answers")
 	flag.Parse()
-	if flag.NArg() > 1 {
-		fmt.Fprintln(os.Stderr, "usage: tui [-chat=true|false] [-device auto] [-ctx 8192] [-models dir] [-mouse] [model.jlm]")
+	if flag.NArg() > 1 || (*connectTo != "" && *embedded) {
+		fmt.Fprintln(os.Stderr, "usage: tui [-chat=true|false] [-device auto] [-ctx 8192] [-models dir] [-mouse] [--connect addr | --embedded] [model.jlm]")
 		os.Exit(2)
+	}
+	mode, addr := cfg.Engine, cfg.ServiceAddr
+	switch {
+	case *connectTo != "":
+		mode, addr = engine.ModeService, *connectTo
+	case *embedded:
+		mode = engine.ModeEmbedded
 	}
 	dirs := cfg.ModelDirs
 	if *dir != "" {
@@ -40,14 +51,31 @@ func main() {
 
 	f := newFront()
 	f.st = newState(f, cfg.DeviceSpec, cfg.MaxSeq, cfg.Chat, !cfg.NoKVCache)
-	e := engine.New(f, f.st)
-	defer e.Close()
-
-	// Asked before the API starts (root.Init), or the probe would find this app.
-	if _, warning, ok := engine.Beside(context.Background(), ""); ok {
-		f.st.Status.Set(warning)
+	// Service first: under Auto a jitllmd that answers is used, and this app
+	// runs its own engine only when none does. Asked before the API starts
+	// (root.Init), or Auto would find this app.
+	ch := engine.Choose(context.Background(), mode, addr)
+	var r *root
+	var e engine.Driver
+	if ch.Conn != nil {
+		e = engine.NewRemote(f, f.st, ch.Conn, ch.Addr, func(w engine.Where) {
+			f.Post(func() {
+				if r != nil {
+					r.env.where = w
+				}
+			})
+		})
+	} else {
+		e = engine.New(f, f.st)
 	}
-	r := newRoot(f, e, cfg, dirs)
+	defer e.Close()
+	if ch.Warning != "" {
+		f.st.Status.Set(ch.Warning)
+	}
+	r = newRoot(f, e, cfg, dirs)
+	if rem, ok := e.(*engine.Remote); ok {
+		r.env.where = rem.Where()
+	}
 	defer func() {
 		if r.env.api != nil {
 			r.env.api.Close()

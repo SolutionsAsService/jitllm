@@ -492,7 +492,7 @@ slower than the hand splitters, so it is a test reference, not the engine.
 
 ## 22. The apps say which engine they run, and can connect to a service
 
-**Not started.** The desktop app and the TUI always run an engine of their own;
+**Built:** `common/engine`'s `Remote` (the connected engine), `Choose` (Auto, Embedded, Service) and `Badge`; the desktop's Settings > Engine and header badge, the TUI's `--connect` / `--embedded` and status-bar badge; the API refused on a held address. Before it, the desktop app and the TUI always ran an engine of their own;
 the desktop can also serve the API from it (`common/api`, `127.0.0.1:8080`),
 and the Mac app can install a login service, a separate `jitllmd` on the same
 address with its own models (`ui/install/agent.go`). A user can end up with two

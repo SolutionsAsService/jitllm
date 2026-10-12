@@ -2,10 +2,12 @@ module github.com/jitllm/jitllm/common
 
 go 1.26.0
 
-require github.com/jitllm/jitllm v0.0.0
+require (
+	connectrpc.com/connect v1.21.0
+	github.com/jitllm/jitllm v0.0.0
+)
 
 require (
-	connectrpc.com/connect v1.21.0 // indirect
 	golang.org/x/image v0.45.0 // indirect
 	golang.org/x/net v0.59.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
