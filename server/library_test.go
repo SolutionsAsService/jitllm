@@ -242,7 +242,17 @@ func TestAnUnknownModelNamesTheFolder(t *testing.T) {
 	dir := modelsFolder(t, "stories260K")
 	_, c := folderEngine(t, dir)
 	code, body := completeBy(t, c.url, "nope")
-	if code != http.StatusNotFound || !strings.Contains(body, dir) {
-		t.Fatalf("an unknown model: %d %s", code, body)
+	// The message as the client reads it: JSON-decoded, so a Windows path's
+	// backslashes are single again, and the folder as the engine names it.
+	var e struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(body), &e); err != nil {
+		t.Fatalf("an unknown model: %d %s: %v", code, body, err)
+	}
+	if code != http.StatusNotFound || !strings.Contains(e.Error.Message, filepath.Clean(dir)) {
+		t.Fatalf("an unknown model: %d %q, want a 404 naming %s", code, e.Error.Message, filepath.Clean(dir))
 	}
 }
