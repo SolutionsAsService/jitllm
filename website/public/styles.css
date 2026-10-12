@@ -195,6 +195,8 @@ p code, .desc code { color: var(--text); background: var(--surface-2); padding: 
 }
 .manifesto em { font-style: normal; color: var(--brand); }
 .manifesto .lede { margin-top: 2rem; font-size: 17px; }
+.manifesto .lede + .lede { margin-top: 1rem; }
+.hero p .hero-tag { margin-bottom: 0.35rem; color: var(--text); font-weight: 500; }
 
 .split { display: grid; gap: 2.5rem; }
 
@@ -459,3 +461,6 @@ p code, .desc code { color: var(--text); background: var(--surface-2); padding: 
 
 /* The five principles: one row of five on a wide screen. */
 @media (min-width: 1024px) { .models.principles { grid-template-columns: repeat(5, 1fr); } }
+/* Six engine points and five programs fill whole rows. */
+@media (min-width: 1100px) { .models.engine { grid-template-columns: repeat(3, 1fr); } }
+@media (min-width: 1024px) { .models.apps { grid-template-columns: repeat(5, 1fr); } }

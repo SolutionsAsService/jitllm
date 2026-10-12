@@ -11,11 +11,11 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '')
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>jitllm — an operating system for LLM inference</title>
-    <meta name="description" content="jitllm is an operating system for LLM inference. It compiles for the machine it runs on, schedules model blocks across every CPU core and GPU, and pages weights, experts and KV state through memory, on Linux, macOS and Windows, x86-64 and ARM64." />
+    <meta name="description" content="Your models. Your hardware. Full speed. jitllm is an operating system for LLM inference: JIT kernels that match your hardware, paging so big models still run, auto-tuning and layer orchestration, on Linux, macOS and Windows, x86-64 and ARM64." />
     <meta name="theme-color" content="#0e0e14" />
     <meta property="og:type" content="website" />
     <meta property="og:title" content="jitllm — an operating system for LLM inference" />
-    <meta property="og:description" content="Compiled for your machine, scheduled across every core and GPU, paged through memory. OpenAI and Anthropic APIs, one Go executable." />
+    <meta property="og:description" content="Your models. Your hardware. Full speed. JIT kernels that match your hardware, paging so big models still run, auto-tuning and layer orchestration." />
     <meta name="twitter:card" content="summary" />
     <link rel="icon" href={`${base}/favicon.svg`} type="image/svg+xml" />
     <script is:inline>
@@ -40,12 +40,13 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '')
           <span class="brand-mark" data-pixel="word" aria-hidden="true"></span>
         </a>
         <nav class="nav" aria-label="Primary">
-          <a href="#os">OS</a>
+          <a href="#os">Why</a>
           <a href="#numbers">Numbers</a>
-          <a href="#kernel">Kernel</a>
+          <a href="#engine">Engine</a>
           <a href="#jlm">.jlm</a>
           <a href="#install">Install</a>
-          <a href="#api">API</a>
+          <a href="#api">Server</a>
+          <a href="#agents">Agents</a>
           <a href="#models">Models</a>
           <a href={`${base}/docs/`}>Docs</a>
         </nav>
@@ -64,12 +65,13 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '')
       </div>
       <nav class="menu" id="menu" hidden aria-label="Mobile">
         <div class="col">
-          <a href="#os">OS</a>
+          <a href="#os">Why</a>
           <a href="#numbers">Numbers</a>
-          <a href="#kernel">Kernel</a>
+          <a href="#engine">Engine</a>
           <a href="#jlm">.jlm</a>
           <a href="#install">Install</a>
-          <a href="#api">API</a>
+          <a href="#api">Server</a>
+          <a href="#agents">Agents</a>
           <a href="#models">Models</a>
           <a href={`${base}/docs/`}>Docs</a>
           <a href="https://github.com/jitllm/jitllm">GitHub ↗</a>
@@ -88,9 +90,10 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '')
           </a>
           <div class="wordmark-slot" data-wordmark title="Click to change theme" aria-hidden="true"></div>
           <div class="hero-copy" data-quiet>
-            <h1 data-stagger style="--i: 1"><span class="sr-only">jitllm: </span>An operating system for LLM inference.</h1>
+            <h1 data-stagger style="--i: 1"><span class="sr-only">jitllm: </span>Your models. Your hardware. Full speed.</h1>
             <p data-stagger style="--i: 2">
-              <span>It compiles for the machine it lands on, schedules models across every core and GPU, and pages them through memory as demand changes.</span>
+              <span class="hero-tag">An operating system for LLM inference.</span>
+              <span>JIT kernels that match your hardware · paging so big models still run · auto-tuning &amp; layer orchestration</span>
             </p>
             <div class="hero-cta" data-stagger style="--i: 3">
               <a class="btn btn-fill" href="#install">
@@ -109,9 +112,12 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '')
       </section>
 
       <section id="os" class="col sec manifesto" aria-labelledby="manifesto-title">
-        <p class="eyebrow">An operating system for LLM inference</p>
-        <h2 id="manifesto-title">Inference should meet the computer <em>where it is.</em></h2>
-        <p class="lede">Today an inference engine is a program you fit the machine to: pick a backend, size the model to the card, restart to change anything. jitllm turns that around. It starts with the model and the machine, then compiles, places and pages the work for whatever is in front of it, and keeps doing so while it serves.</p>
+        <p class="eyebrow">Why jitllm</p>
+        <h2 id="manifesto-title">One binary you drop onto a machine <em>and start running models.</em></h2>
+        <p class="lede">Inference engines are bulky and rigid. There's a lot to set up, and even after you get a model running, getting the most out of your hardware is another job.</p>
+        <p class="lede">I wanted to build something easier to live with: one binary you can drop onto a machine and start running models. Something that does more of the work of figuring out the hardware itself.</p>
+        <p class="lede">The inspiration came from operating systems and JIT compilers, two things I've worked on a lot. An OS detects hardware, uses the right drivers, schedules processes, and manages memory. A JIT compiler generates code for the machine it's running on. jitllm brings those ideas together to make inference faster, easier to run, and more flexible.</p>
+        <p class="lede">That's why I call it an operating system for LLM inference. It detects your CPUs and GPUs, generates optimized kernels, and orchestrates model placement at runtime. Models larger than memory page from disk. Layers can move between devices while keeping their conversation state, so changing placement doesn't mean starting over.</p>
       </section>
 
       <section id="demo" class="band demo" aria-labelledby="demo-title">
@@ -277,6 +283,24 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '')
         </div>
       </section>
 
+      <section id="engine" class="col sec">
+        <div class="head">
+          <div>
+            <h2 class="h2">The engine</h2>
+            <p class="desc">What runs underneath every program jitllm ships.</p>
+          </div>
+          <a class="more" href={`${base}/docs/concepts/how-it-works/`}>How it works <span aria-hidden="true">→</span></a>
+        </div>
+        <ul class="models engine">
+          <li><b>Kernels for this machine</b><span>Every kernel is emitted at load for the model's shapes and weight formats: x86 (SSE, AVX2, AVX-512, VNNI) and Arm (NEON, dot-product) on the CPU, PTX for CUDA, SPIR-V for Vulkan, Metal shaders, and AMDGPU for ROCm (not yet tested on AMD hardware). No vendor math library, no interpreted fallback.</span></li>
+          <li><b>Layers move mid-conversation</b><span>Blocks relocate between the CPU and any GPU, or from one GPU to another, carrying their KV pages and recurrent state, and the answer stays the same.</span></li>
+          <li><b>Models bigger than memory</b><span>Disk, RAM and VRAM are one paged hierarchy: weights page in on demand (read with O_DIRECT, never mmap), every expert of a mixture is its own page, and KV history pages and streams through the card.</span></li>
+          <li><b>Held to the reference</b><span>57 graphs and 17 vision projectors: dense, mixture-of-experts, MLA, gated-delta and state-space hybrids, vision-language, embeddings and decision models, each gated against llama.cpp or the model's own transformers class.</span></li>
+          <li><b>No garbage on the hot path</b><span>A warm decode token allocates nothing on the Go heap, on the host and every GPU backend; weights and page frames live off the heap.</span></li>
+          <li><b>Faster tokens, same distribution</b><span>Speculative decoding with a model's own prediction head or prompt lookup, an int8 KV cache, prefix caching and shared prefixes across sessions.</span></li>
+        </ul>
+      </section>
+
       <section id="jlm" class="col sec">
         <div class="split">
           <div>
@@ -334,7 +358,7 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '')
         <div class="head">
           <div>
             <h2 class="h2">A desktop app on the same engine</h2>
-            <p class="desc">Chat, choose a model, convert it, and watch where every block of it sits. The engine runs inside the app's own process.</p>
+            <p class="desc">Model downloads, conversion, text and image chat, and a live view of where each block of the model sits, in one window. The engine runs inside the app's own process.</p>
           </div>
           <a class="more" href={`${base}/docs/guides/desktop/`}>The desktop app <span aria-hidden="true">→</span></a>
         </div>
@@ -367,7 +391,7 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '')
         <div class="head">
           <div>
             <h2 class="h2">And in a terminal</h2>
-            <p class="desc">The same screens over SSH, sharing the desktop app's settings and chats. Move the model's blocks between the CPU and the GPU with the arrow keys; the conversation keeps its history.</p>
+            <p class="desc">The same screens in a terminal, over SSH too, sharing the desktop app's settings and chats. The arrow keys move the model's blocks between the CPU and the GPU, and the conversation keeps its history across the move.</p>
           </div>
           <a class="more" href={`${base}/docs/guides/terminal/`}>The terminal app <span aria-hidden="true">→</span></a>
         </div>
@@ -392,12 +416,28 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '')
         </div>
       </section>
 
+      <section id="apps" class="col sec">
+        <div class="head">
+          <div>
+            <h2 class="h2">One engine, every way in</h2>
+            <p class="desc">Each program is one self-contained binary, for Linux, macOS and Windows on x86-64 and arm64. GPUs need only their driver.</p>
+          </div>
+        </div>
+        <ul class="models apps">
+          <li><b>Server</b><span><code>jitllmd</code>: many models and many sessions at once, behind OpenAI, Anthropic and Connect APIs.</span></li>
+          <li><b>CLI</b><span><code>jitllm</code>: convert GGUF or Hugging Face weights and run a model from the command line.</span></li>
+          <li><b>Desktop</b><span><code>jitllm-desktop</code>: downloads, conversion, chat and a live view of the blocks.</span></li>
+          <li><b>TUI</b><span><code>jitllm-tui</code>: the same screens in a terminal, over SSH too.</span></li>
+          <li><b>Embed</b><span>The engine as a Go library, inside your own program.</span></li>
+        </ul>
+      </section>
+
       <section id="api" class="band">
         <div class="col sec">
           <div class="head">
             <div>
-              <h2 class="h2">System calls your apps already make</h2>
-              <p class="desc">Applications reach the OS through APIs they already speak. Point a client at <code>http://127.0.0.1:8080/v1</code> and use the model's id as its name.</p>
+              <h2 class="h2">The server</h2>
+              <p class="desc">One binary, <code>jitllmd</code>, many models and many sessions at once. Applications reach it through APIs they already speak: point a client at <code>http://127.0.0.1:8080/v1</code> and use the model's id as its name.</p>
             </div>
             <a class="more" href={`${base}/docs/guides/serve/`}>API guide <span aria-hidden="true">→</span></a>
           </div>
@@ -405,19 +445,25 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '')
             <div class="panel api">
               <span class="num">OpenAI-compatible</span>
               <code class="route">POST /v1/chat/completions</code>
-              <p>Chat and completion endpoints, streamed, with tool calls through the model's own chat template, for any OpenAI client.</p>
+              <p>Chat, completions, embeddings, Batches and Files, streamed, with tool calls in each model's own format (24 families) and <code>tool_choice</code> enforced by constrained decoding.</p>
             </div>
             <div class="panel api">
               <span class="num">Anthropic-compatible</span>
               <code class="route">POST /v1/messages</code>
-              <p>The messages endpoint, streamed, with tool use, for clients written against Anthropic's API.</p>
+              <p>The messages endpoint, streamed, with tool use and pictures through <code>image</code> blocks on vision models, for clients written against Anthropic's API.</p>
             </div>
             <div class="panel api">
               <span class="num">Connect API</span>
               <code class="route">models · sessions · devices</code>
-              <p>Controls for model, session, device and placement, plus telemetry, when you want to steer the runtime.</p>
+              <p>A control plane: load and unload models, create, park and resume sessions, move blocks between devices, and <code>/metrics</code> for Prometheus.</p>
             </div>
           </div>
+          <ul class="models server">
+            <li><b>Continuous batching</b><span>On the CPU and the GPU, prompts fed in chunks beside running decodes, with KV-aware admission.</span></li>
+            <li><b>Fairness</b><span><code>-fairness 0-100</code> time-slices sessions through the card by parking them to the host and back, with per-request priority.</span></li>
+            <li><b>Structured output</b><span>From a JSON schema, plus log-probabilities and <code>n</code> choices from one prefill.</span></li>
+            <li><b>Decision answers</b><span>One question against fixed labels through <code>/v1/systemone</code>.</span></li>
+          </ul>
         </div>
       </section>
 
@@ -443,6 +489,52 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '')
           <li><b>Embeddings</b><span>BERT · nomic-bert · Qwen3-Embedding · EmbeddingGemma</span></li>
           <li><b>Formats</b><span>GGUF · Hugging Face safetensors → .jlm</span></li>
         </ul>
+      </section>
+
+      <section id="go" class="col sec">
+        <div class="split">
+          <div>
+            <h2 class="h2">Why Go?</h2>
+            <p class="lede">Most inference engines are written in C, C++ or Rust, and some of the best work is. The choice here is practical.</p>
+            <p class="lede">The hot paths are generated machine code either way; Go carries the parts around them (paging, placement, scheduling).</p>
+          </div>
+          <ul class="points">
+            <li><span class="pix sm" data-pixel="bolt" aria-hidden="true"></span><div><b>Made for writing a JIT</b><p>It is the language the author knows best for writing a JIT: emitting machine code, mapping it executable and calling into it.</p></div></li>
+            <li><span class="pix sm" data-pixel="chip" aria-hidden="true"></span><div><b>Portable</b><p>One toolchain cross-compiles every target, and with no cgo there is no C toolchain or vendor SDK per target.</p></div></li>
+            <li><span class="pix sm" data-pixel="probe" aria-hidden="true"></span><div><b>Fast to compile, fast to experiment</b><p>Most of this engine was found by trying an idea and measuring it.</p></div></li>
+            <li><span class="pix sm" data-pixel="box" aria-hidden="true"></span><div><b>Built for servers</b><p>Go's networking and synchronization let <code>jitllmd</code> serve many sessions at once, batch them in one step loop and time-slice them fairly, in one process with no framework. A warm decode token allocates nothing, so the collector never touches the hot path.</p></div></li>
+          </ul>
+        </div>
+      </section>
+
+      <section id="agents" class="band">
+        <div class="col sec">
+          <div class="head">
+            <div>
+              <h2 class="h2">Built for agents</h2>
+              <p class="desc">For the agent using jitllm, and for the agent changing it.</p>
+            </div>
+            <a class="more" href={`${base}/llms.txt`}>llms.txt <span aria-hidden="true">→</span></a>
+          </div>
+          <div class="three">
+            <div class="panel api">
+              <span class="num">Capabilities</span>
+              <code class="route">jitllm capabilities</code>
+              <p>What this build runs, generated from the code: architectures, quant types, backends, API fields and their refusals. Also at <code>GET /v1/capabilities</code>.</p>
+            </div>
+            <div class="panel api">
+              <span class="num">Doctor</span>
+              <code class="route">jitllm doctor -json</code>
+              <p>The host, its devices and a model's compatibility, each problem with a next action.</p>
+            </div>
+            <div class="panel api">
+              <span class="num">Recipes · llms.txt</span>
+              <code class="route">docs/recipes</code>
+              <p>Tested recipes from install to a running server, a connected client, tools, conversion, placement and diagnosis; <code>llms.txt</code> indexes the documentation.</p>
+            </div>
+          </div>
+          <p class="method">The OpenAI- and Anthropic-compatible APIs work with the SDKs and agent frameworks as they are, and a forced tool call is a call. For an agent changing jitllm, <a href="https://github.com/jitllm/jitllm/blob/main/AGENTS.md">AGENTS.md</a> holds the project's binding rules, the model list is generated from the converter, and the model-free suite reports a missing model or device as a skip, never as a pass.</p>
+        </div>
       </section>
     </main>
 
