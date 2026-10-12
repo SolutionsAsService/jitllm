@@ -19,8 +19,8 @@ import (
 	"github.com/gogpu/ui/desktop"
 
 	"github.com/jitllm/jitllm/common/config"
-	core "github.com/jitllm/jitllm/common/engine"
 	"github.com/jitllm/jitllm/common/crash"
+	core "github.com/jitllm/jitllm/common/engine"
 	"github.com/jitllm/jitllm/ui/app"
 	"github.com/jitllm/jitllm/ui/engine"
 	"github.com/jitllm/jitllm/ui/mock"

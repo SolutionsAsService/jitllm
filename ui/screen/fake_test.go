@@ -6,9 +6,9 @@ package screen
 type fakeEngine struct {
 	load   func(string)
 	unload func(string)
-	run  func(func()) bool
-	send func(ChatRequest)
-	stop func()
+	run    func(func()) bool
+	send   func(ChatRequest)
+	stop   func()
 }
 
 var _ Engine = (*fakeEngine)(nil)
@@ -18,7 +18,7 @@ func (f *fakeEngine) Load(p string) {
 		f.load(p)
 	}
 }
-func (f *fakeEngine) Use(string)       {}
+func (f *fakeEngine) Use(string) {}
 func (f *fakeEngine) Unload(p string) {
 	if f.unload != nil {
 		f.unload(p)
