@@ -14,6 +14,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -399,7 +400,13 @@ func benchmark(path string, topts []tok.Option) error {
 
 // chatSpec is -chat and -system together; nil is raw completion, which is the
 // default and what every board row measures.
-type chatSpec struct{ system string }
+//
+// repl is the interactive conversation `jitllm run model.jlm` holds when no
+// prompt is given and stdin is a terminal (repl.go).
+type chatSpec struct {
+	system string
+	repl   bool
+}
 
 func run(path, prompt string, n, depth int, devSpec string, gpuLayers int, vram, maxmem uint64, grow, tuneSeam, noFallback, relocate bool, sm *model.Sampler, imgPath string, topts []tok.Option, chat *chatSpec, kvCacheDir string, kvCacheMaxBytes, kvBudget uint64, place *model.Placement, specOpts []model.SpecOption) error {
 	if v := os.Getenv("JITLLM_N"); v != "" {
@@ -486,7 +493,13 @@ func run(path, prompt string, n, depth int, devSpec string, gpuLayers int, vram,
 	// -chat is opt-in. The default stays raw completion because every board
 	// row and the llama.cpp comparisons are completions of a bare prompt.
 	ids := m.Vocab.Encode(prompt, true)
-	if chat != nil {
+	replying := chat != nil && chat.repl
+	if replying {
+		if imgPath != "" || specOpts != nil || depth > 0 {
+			return fmt.Errorf("the interactive chat takes neither -image, -spec nor -depth; give a prompt to use them")
+		}
+		ids = nil
+	} else if chat != nil {
 		if !m.HasChatTemplate() {
 			return fmt.Errorf("-chat: %s carries no chat template; it is a base model.\n"+
 				"  Run it without -chat and it completes the prompt instead.", path)
@@ -565,7 +578,11 @@ func run(path, prompt string, n, depth int, devSpec string, gpuLayers int, vram,
 	// No -n: generate until the model ends its reply, in a session as long as
 	// the model's context, as the server's sessions are by default. KV pages
 	// are committed as the context grows, so the length costs nothing up front.
-	if n <= 0 {
+	replyCap := n
+	if replying {
+		// The conversation grows into the model's whole context.
+		n = m.Cfg.NCtx - 1
+	} else if n <= 0 {
 		if n = m.Cfg.NCtx - len(ids) - extra - 1; n <= 0 {
 			return fmt.Errorf("the prompt is %d positions and fills the model's context of %d", len(ids)+extra, m.Cfg.NCtx)
 		}
@@ -701,6 +718,12 @@ func run(path, prompt string, n, depth int, devSpec string, gpuLayers int, vram,
 
 	phRead(ph, dev, m)
 	ph.Mark("load")
+	if replying {
+		if err := repl(m, st, sm, chat.system, replyCap, kvCacheDir != "", os.Stdin, os.Stdout); err != nil {
+			return withDeviceErr(err, dev)
+		}
+		return nil
+	}
 
 	// -spec drafts with the model's own prediction block and verifies the
 	// drafts in one pass. The draft session attaches to the device the trunk
@@ -1444,14 +1467,30 @@ func runCmd(args []string) error {
 		return err
 	}
 	defer closeTok()
-	if fs.NArg() < 2 {
+	prompt := strings.Join(fs.Args()[1:], " ")
+	interactive := false
+	switch {
+	case fs.NArg() == 0:
 		usage()
+	case fs.NArg() == 1 && stdinIsTerminal():
+		// No prompt and a person at the keyboard: a conversation, through the
+		// model's own template (repl.go).
+		interactive = true
+	case fs.NArg() == 1:
+		// No prompt on the command line and stdin a pipe or file: that is it.
+		b, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return err
+		}
+		if prompt = strings.TrimRight(string(b), "\r\n"); prompt == "" {
+			usage()
+		}
 	}
 	sm := &model.Sampler{Temp: *temp, TopK: *topK, TopP: *topP, MinP: *minP,
 		RepeatPen: *repPen, RepeatLastN: *repN, Seed: *seed}
 	var cs *chatSpec
-	if *chat {
-		cs = &chatSpec{system: *system}
+	if *chat || interactive {
+		cs = &chatSpec{system: *system, repl: interactive}
 	} else if *system != "" {
 		return fmt.Errorf("-system needs -chat: without a template there is no system turn to put it in")
 	}
@@ -1488,7 +1527,7 @@ func runCmd(args []string) error {
 	} else if *placeStrict {
 		return fmt.Errorf("-placement-strict needs -placement")
 	}
-	return run(fs.Arg(0), strings.Join(fs.Args()[1:], " "), *n, *depth, *dev, *layers, *vram, *maxmem, *grow, *tuneSeam, *noFallback, *relocate, sm, *imgPath, topts, cs, *kvCache, *kvCacheMax, *kvBudget, place, specOpts)
+	return run(fs.Arg(0), prompt, *n, *depth, *dev, *layers, *vram, *maxmem, *grow, *tuneSeam, *noFallback, *relocate, sm, *imgPath, topts, cs, *kvCache, *kvCacheMax, *kvBudget, place, specOpts)
 }
 
 // tokenizerOption turns a -tokenizer path into the tok.Option it names, plus the
