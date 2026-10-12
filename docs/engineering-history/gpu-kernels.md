@@ -6091,5 +6091,17 @@ and the in-process A/B after it (JITLLM_GPU_TUNE=1, n=20, A/A first):
     T4 1B     A/A 1.0050 (2.0%)       1.0106 (2.2%), 1.0091 (2.3%)
     T4 8B     no site kept, both arms one launch sequence: 0.9920 (2.4%), 1.0016 (1.3%)
 
-The T4 8B A/A run did not complete (the process panicked before the row);
-with no site kept its two passes are themselves a same-sequence control.
+The T4 8B A/A run did not complete: `fuseActIn` keyed a site before its
+prologue compiled, so a site the T4 declined (`ErrGroupTooWide`) went to the
+tuner with no kernel to time. A key now goes only beside a built kernel, and
+the rows taken again with that build (A/A first, two passes):
+
+    V100 1B   A/A 0.9986 (3.0%)       1.0348 (2.7%), 1.0253 (2.3%)   3 of 5 sites kept
+    V100 8B   A/A 1.0031 (1.7%)       1.0042 (2.1%), 1.0071 (2.2%)   2 sites kept
+    T4 1B     A/A 1.0000 (2.7%)       1.0099 (2.5%), 1.0079 (1.9%)   1 of 5 kept
+    T4 8B     A/A 1.0021 (1.0%)       1.0008 (1.4%), 1.0022 (0.9%)   none kept
+
+The verdict on a marginal site moves between processes: the tuned model gate
+kept 3 of 5 on the same T4 where `verify` kept 1. Each process is held to
+what it chose (`TestActInKeepsThePrinciples/tuned`), and the rows read the
+shipping configuration either way.
