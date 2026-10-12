@@ -16,8 +16,8 @@ import (
 
 	"github.com/jitllm/jitllm/common/session"
 	"github.com/jitllm/jitllm/internal/localserver"
-	v1 "github.com/jitllm/jitllm/server/gen/jitllm/v1"
 	"github.com/jitllm/jitllm/server/client"
+	v1 "github.com/jitllm/jitllm/server/gen/jitllm/v1"
 )
 
 // Remote is the engine as a client of a jitllmd: the second implementation of

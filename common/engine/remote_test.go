@@ -124,7 +124,12 @@ func TestAutoPicksARunningJitllmd(t *testing.T) {
 	}
 
 	r.Load(modelPath)
-	pump(t, sh, 90*time.Second, "the model to load on the service", func() bool { if p := st.Problem.Get(); p.Seq != 0 { t.Fatalf("%s: %s", p.Title, p.Detail) }; return st.Loaded.Get() })
+	pump(t, sh, 90*time.Second, "the model to load on the service", func() bool {
+		if p := st.Problem.Get(); p.Seq != 0 {
+			t.Fatalf("%s: %s", p.Title, p.Detail)
+		}
+		return st.Loaded.Get()
+	})
 	pump(t, sh, 10*time.Second, "the models list", func() bool { return len(st.Models.Get()) == 1 })
 	m := st.Models.Get()[0]
 	if m.Path != modelPath || !m.Active || m.Blocks == 0 {
