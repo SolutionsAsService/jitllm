@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/jitllm/jitllm/convert/hf"
+	"github.com/jitllm/jitllm/internal/localserver"
 )
 
 // The command half of package hf: where a download lands, and which token pays
@@ -45,12 +46,13 @@ func localise(cl *hf.Client, arg, dir string) (string, error) {
 	return cl.Fetch(r, dir)
 }
 
-// defaultModelDir is where a download lands when -o did not say.
+// defaultModelDir is the models folder: where a download lands when -o did
+// not say, and where a bare name is looked for. It is the one every front end
+// and jitllmd read (localserver.ModelsDir: JITLLM_MODELS, or this system's
+// data folder), with its links followed (modelDirNear).
 func defaultModelDir() string {
-	if d := strings.TrimSpace(os.Getenv("JITLLM_MODELS")); d != "" {
-		return d
-	}
-	return modelDirNear("models")
+	return modelDirNear(localserver.ModelsDir(strings.TrimSpace(os.Getenv("JITLLM_MODELS")),
+		os.Getenv("XDG_DATA_HOME")))
 }
 
 // modelDirNear picks the directory a download should land in, given the

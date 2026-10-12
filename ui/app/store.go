@@ -7,6 +7,7 @@ import (
 
 	"github.com/jitllm/jitllm/common/catalog"
 	"github.com/jitllm/jitllm/common/crash"
+	core "github.com/jitllm/jitllm/common/engine"
 	"github.com/jitllm/jitllm/common/session"
 )
 
@@ -142,6 +143,11 @@ type Store struct {
 	// API is whether the app serves jitllm's API, on APIAddr (ServeAPI).
 	API     state.Signal[bool]
 	APIAddr state.Signal[string]
+	// APIServing is the address the API listens on now, empty while it is
+	// off or was refused: the setting is a wish, this is what happened.
+	APIServing state.Signal[string]
+	// Engine is which engine the window drives: its own or a jitllmd.
+	Engine state.Signal[core.Where]
 	// ModelDirs is the folders models are found in; the first is where
 	// downloads go. Write it through Shell.SetModelDirs, which keeps Cfg too.
 	ModelDirs state.Signal[[]string]
@@ -219,6 +225,8 @@ func NewStore() *Store {
 		KVCache:    state.NewSignal(true),
 		API:        state.NewSignal(false),
 		APIAddr:    state.NewSignal(""),
+		APIServing: state.NewSignal(""),
+		Engine:     state.NewSignal(core.Where{}),
 		ModelDirs:  state.NewSignal([]string(nil)),
 
 		Chats:   state.NewSignal([]ChatInfo{{}}),

@@ -371,6 +371,12 @@ type State struct {
 	// devRowChunks counts prompt chunks the device refused whole and ran
 	// again a row at a time (prefillSrc's per-row retry). See DeviceRowChunks.
 	devRowChunks int
+	// tailRowChunks counts few-row prompt chunks run as one ragged step
+	// (tailrows.go). See TailRowChunks.
+	tailRowChunks int
+	// tailPos is a ragged tail step's positions, kept so the step allocates
+	// nothing once grown.
+	tailPos []int
 	// relocate hands the device's highest block to the host when its history
 	// cannot grow, rather than letting the token fail. See SetRelocate.
 	relocate     bool
@@ -2115,6 +2121,11 @@ func (s *State) DeviceDemotions() int { return s.devDemoted }
 // time, and its logits are then the row-by-row arm's, whatever the batched
 // kernels computed.
 func (s *State) DeviceRowChunks() int { return s.devRowChunks }
+
+// TailRowChunks is how many few-row prompt chunks this session ran on the
+// device as one ragged step of their rows rather than as a batched chunk
+// (tailrows.go).
+func (s *State) TailRowChunks() int { return s.tailRowChunks }
 
 // SetRelocate chooses what happens when the device cannot grow its attention
 // history to the next position: hand its highest block to the host and ask

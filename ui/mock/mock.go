@@ -320,6 +320,39 @@ func (e *Engine) activate(m *Model) {
 	})
 }
 
+// Unload closes a fixture. Closing the active one leaves nothing in chat.
+func (e *Engine) Unload(path string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.called("Unload %s", path)
+	m := e.lookup(path)
+	if m == nil {
+		return
+	}
+	e.open = slices.DeleteFunc(e.open, func(o *Model) bool { return o == m })
+	if e.active == m {
+		e.active = nil
+	}
+	models := make([]app.LoadedModel, len(e.open))
+	for i, o := range e.open {
+		models[i] = app.LoadedModel{Path: o.Entry.Path, Name: o.Entry.Name, Arch: o.Entry.Arch,
+			Blocks: int(o.Entry.NLayer), Colour: i, Active: o == e.active, Grant: o.Alloc.HostBudget}
+	}
+	active := e.active != nil
+	e.sh.Post(func() {
+		st := e.sh.Store
+		st.Models.Set(models)
+		if !active {
+			st.Active.Set("")
+			st.Loaded.Set(false)
+			st.ModelPath.Set("")
+			st.BlockMap.Set(nil)
+			st.Alloc.Set(app.Allocation{})
+		}
+		e.sh.SetStatus("closed " + m.Entry.Name)
+	})
+}
+
 // SetPriority records the choice; the fixtures' budgets do not move.
 func (e *Engine) SetPriority(on bool) {
 	e.mu.Lock()

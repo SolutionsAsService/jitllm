@@ -37,6 +37,14 @@ the keys the current screen takes.
 
 ![The Engine screen: 1 of 48 blocks on the GPU, the decode rate over time, memory and the pager](../website/public/shots/tui-engine.png)
 
+## Which engine
+
+The right end of the bottom line always says which engine the app drives:
+`Embedded · API off`, or `Embedded · API on :8080` while it serves the API
+(Settings). Turning the API on where a `jitllmd` already answers is refused,
+naming the address to connect to instead, and starting the app beside a
+running `jitllmd` says that the two share the GPU's memory.
+
 ## Chat
 
 `enter` sends, `ctrl+j` or `alt+enter` adds a line, `↑` `↓` walk the prompt

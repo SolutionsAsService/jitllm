@@ -35,6 +35,7 @@ import (
 
 	"github.com/jitllm/jitllm/engine/model"
 	"github.com/jitllm/jitllm/internal/cmd/goheap"
+	"github.com/jitllm/jitllm/internal/localserver"
 	"github.com/jitllm/jitllm/jit/gpu/tier"
 	"github.com/jitllm/jitllm/server"
 )
@@ -129,13 +130,11 @@ one at /v1/messages. The client verbs above use the first of the three.
 `)
 }
 
-// defaultModels is -models' default: JITLLM_MODELS, the variable `jitllm
-// fetch` and `jitllm convert` read, or ./models.
+// defaultModels is -models' default: the models folder `jitllm convert`
+// writes into and every front end reads (JITLLM_MODELS, or this system's
+// data folder; see localserver.ModelsDir).
 func defaultModels() string {
-	if d := os.Getenv("JITLLM_MODELS"); d != "" {
-		return d
-	}
-	return "models"
+	return localserver.ModelsDir(strings.TrimSpace(os.Getenv("JITLLM_MODELS")), os.Getenv("XDG_DATA_HOME"))
 }
 
 func serve(args []string) {

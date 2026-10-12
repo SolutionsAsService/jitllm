@@ -11,7 +11,8 @@ import (
 )
 
 // TestFlashPrefillMatchesThreeKernels prefills a two-chunk prompt on the device
-// with the chunk's attention as one kernel (kernels.FlashPrefill70) and with
+// with the chunk's attention as one kernel (kernels.FlashPrefill70, or
+// FlashPrefill80 and its m16n8k8 twin where the card has m16n8) and with
 // the scores/softmax/accumulate trio it replaces (tier.Config.NoFlashPrefill),
 // and holds the two to each other and the flash arm to the host.
 //
@@ -52,7 +53,7 @@ func flashPrefillMatches(t *testing.T, name string) {
 	want = append([]float32(nil), want...)
 	host.Close()
 
-	run := func(noFlash bool) ([]float32, int) {
+	run := func(noFlash bool) ([]float32, int, int) {
 		g, err := tier.OpenWith(tier.WithDeviceTune(tier.TuneOff), tier.WithConfig(func(c *tier.Config) { c.NoFlashPrefill = noFlash }))
 		if err != nil || g == nil {
 			noDevice(t, "device", err)
@@ -71,10 +72,10 @@ func flashPrefillMatches(t *testing.T, name string) {
 		if st.DeviceDemotions() != 0 {
 			t.Fatalf("the device demoted: %s", g.Err())
 		}
-		return append([]float32(nil), lg...), g.Stats().FlashPrefills
+		return append([]float32(nil), lg...), g.Stats().FlashPrefills, g.Stats().FlashPrefill80
 	}
-	trio, trioN := run(true)
-	flash, flashN := run(false)
+	trio, trioN, _ := run(true)
+	flash, flashN, flash80 := run(false)
 	if flashN == 0 && trioN == 0 {
 		t.Skip("this device builds no one-kernel prompt attention: there is no arm to compare")
 	}
@@ -101,6 +102,6 @@ func flashPrefillMatches(t *testing.T, name string) {
 	if Greedy(flash) != Greedy(trio) || Greedy(flash) != Greedy(want) {
 		t.Fatalf("argmax: flash %d, three kernels %d, host %d", Greedy(flash), Greedy(trio), Greedy(want))
 	}
-	t.Logf("%d flash launches; logits NMSE %.3e against the three kernels, %.3e against the host (three kernels: %.3e)",
-		flashN, a, h, nmse(trio, want))
+	t.Logf("%d flash launches (%d of them FlashPrefill80, m16n8k16 or sm_75's m16n8k8); logits NMSE %.3e against the three kernels, %.3e against the host (three kernels: %.3e)",
+		flashN, flash80, a, h, nmse(trio, want))
 }
