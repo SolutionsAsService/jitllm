@@ -63,3 +63,30 @@ func TestChatTitleNamesAPicture(t *testing.T) {
 		t.Fatalf("title %q", got)
 	}
 }
+
+// The chat a reply is written into is followed through New and Delete, and
+// its turns are written while it is parked.
+func TestChatListFollowsTheWritingChat(t *testing.T) {
+	l := NewChatList()
+	l.Show(0)
+	l.Park([]Turn{{Role: RoleUser, Text: "q"}, {Role: RoleAssistant}}, "")
+	l.MarkWriting()
+	if !l.WritingShown() || l.SetWritingTurn(1, Turn{Text: "x"}) {
+		t.Fatal("the chat on screen is written by the front end, not the list")
+	}
+	l.Show(l.New(""))
+	if w, ok := l.Writing(); !ok || w != 1 || l.WritingShown() {
+		t.Fatalf("after New the writing chat is %d, %v", w, ok)
+	}
+	if !l.SetWritingTurn(1, Turn{Role: RoleAssistant, Text: "a"}) || l.Chats[1].Turns[1].Text != "a" || len(l.Chats[0].Turns) != 0 {
+		t.Fatalf("the reply landed as %+v", l.Chats)
+	}
+	l.Delete(0)
+	if w, ok := l.Writing(); !ok || w != 0 {
+		t.Fatalf("after deleting the chat before it, the writing chat is %d, %v", w, ok)
+	}
+	l.Delete(0)
+	if _, ok := l.Writing(); ok {
+		t.Fatal("a deleted chat is still written into")
+	}
+}

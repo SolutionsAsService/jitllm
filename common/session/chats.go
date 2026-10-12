@@ -53,6 +53,44 @@ type ChatList struct {
 	Chats []Chat
 	// Cur is the chat on screen, or -1 while none is.
 	Cur int
+	// writing is one more than the index of the chat a reply is being written
+	// into, 0 when none is. It follows its chat through New and Delete, so the
+	// reply lands in the chat that asked even after the screen moves on.
+	writing int
+}
+
+// MarkWriting records the current chat as the one the next reply is written
+// into.
+func (l *ChatList) MarkWriting() { l.writing = l.Cur + 1 }
+
+// Writing is the chat a reply is being written into, false when none is.
+func (l *ChatList) Writing() (int, bool) {
+	if l.writing <= 0 || l.writing > len(l.Chats) {
+		return 0, false
+	}
+	return l.writing - 1, true
+}
+
+// WritingShown says whether the chat a reply is written into is on screen.
+func (l *ChatList) WritingShown() bool {
+	i, ok := l.Writing()
+	return ok && i == l.Cur
+}
+
+// SetWritingTurn replaces turn i of the chat a reply is written into, when it
+// is parked. The chat on screen holds its turns with the front end, which
+// writes them itself; this reports false then, and for no such turn.
+func (l *ChatList) SetWritingTurn(i int, t Turn) bool {
+	w, ok := l.Writing()
+	if !ok || w == l.Cur {
+		return false
+	}
+	c := &l.Chats[w]
+	if i < 0 || i >= len(c.Turns) {
+		return false
+	}
+	c.Turns[i] = t
+	return true
 }
 
 // NewChatList is one empty chat, not yet shown.
@@ -96,6 +134,9 @@ func (l *ChatList) New(model string) int {
 	}
 	l.Chats = append([]Chat{{Model: model}}, l.Chats...)
 	l.Cur++
+	if l.writing > 0 {
+		l.writing++
+	}
 	return 0
 }
 
@@ -115,6 +156,12 @@ func (l *ChatList) Delete(i int) (int, bool) {
 		return 0, false
 	}
 	l.Chats = append(l.Chats[:i], l.Chats[i+1:]...)
+	switch w := l.writing - 1; {
+	case w == i:
+		l.writing = 0
+	case w > i:
+		l.writing--
+	}
 	if len(l.Chats) == 0 {
 		l.Chats = []Chat{{}}
 	}

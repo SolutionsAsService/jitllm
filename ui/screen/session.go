@@ -164,6 +164,7 @@ func sessionSend(sh *app.Shell, o SessionOptions) {
 	st.SetChatModel(st.ModelPath.Get())
 	st.AppendTurn(app.Turn{Role: app.RoleUser, Text: text, Images: imgs})
 	reply := st.AppendTurn(app.Turn{Role: app.RoleAssistant})
+	st.MarkReply()
 	st.Draft.Set("")
 	st.Attach.Set(nil)
 	// Clear both halves of the live bubble, or the new turn shows the previous

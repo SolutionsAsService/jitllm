@@ -228,13 +228,9 @@ func (s *Shell) chatList(colors widgets.NavColors, size float32) widget.Widget {
 	})
 }
 
-// chatAction switches conversations and shows the chat. Not while a reply is
-// streaming: it is written into the transcript on screen, by index.
+// chatAction switches conversations and shows the chat. A reply being
+// written goes on into the chat that asked for it (Store.SetTurn).
 func (s *Shell) chatAction(do func()) {
-	if s.Store.Streaming.Get() {
-		s.SetStatus("a reply is being written: stop it before changing chats")
-		return
-	}
 	do()
 	s.GoSession()
 }

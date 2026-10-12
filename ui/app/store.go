@@ -246,8 +246,16 @@ func (s *Store) AppendTurn(t Turn) int {
 // SetTurn replaces one turn in place -- how a streamed assistant bubble is
 // finalised once its text is complete. It does NOT publish a new count,
 // because the count did not change; call [Store.Touch] if a repaint is needed.
+//
+// A reply goes to the chat that asked for it: while another chat is on screen,
+// the turn is written into that chat where it is parked.
 func (s *Store) SetTurn(i int, t Turn) {
 	s.mu.Lock()
+	if s.chats.SetWritingTurn(i, t) {
+		s.mu.Unlock()
+		s.publishChats()
+		return
+	}
 	if i >= 0 && i < len(s.turns) {
 		s.turns[i] = t
 	}
@@ -339,6 +347,32 @@ func (s *Store) ThinkOpen(i int) state.Signal[bool] {
 	sig := state.NewSignal(s.ShowThinking.Get())
 	s.thinkOpen[i] = sig
 	return sig
+}
+
+// SetReplyThinkOpen opens or folds the reasoning of the reply in flight, turn
+// i of the chat that asked for it; nothing while another chat is on screen.
+func (s *Store) SetReplyThinkOpen(i int, open bool) {
+	if s.ReplyShown() {
+		s.ThinkOpen(i).Set(open)
+	}
+}
+
+// MarkReply records the chat on screen as the one the next reply is written
+// into. Call it as the reply's turn is appended.
+func (s *Store) MarkReply() {
+	s.mu.Lock()
+	s.chats.MarkWriting()
+	s.mu.Unlock()
+}
+
+// ReplyShown says whether the stream belongs to the chat on screen: no reply
+// has been written into another chat. Only then does the transcript's live
+// bubble read Stream.
+func (s *Store) ReplyShown() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	_, writing := s.chats.Writing()
+	return !writing || s.chats.WritingShown()
 }
 
 // SetAllThinkOpen is the "Reasoning" chip: it moves the default and every
