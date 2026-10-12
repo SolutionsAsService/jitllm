@@ -19,6 +19,7 @@ const (
 	flash70Form   flashForm = iota // FlashPrefill70, m8n8k4
 	flashTileForm                  // FlashPrefillTile, Metal's simdgroup matrices
 	flash80Form                    // FlashPrefill80, m16n8k16
+	flash80K8Form                  // FlashPrefill80K8, m16n8k8 (sm_75)
 )
 
 // formOf is the form a tile flag names: the tile, else sm_70's.
@@ -33,8 +34,12 @@ func formOf(tile bool) flashForm {
 // its launch.
 func flashPrefillBuild(t *testing.T, fs kernels.FlashPrefill70Shape, form flashForm) (*ir.Kernel, int, int) {
 	t.Helper()
-	if form == flash80Form {
-		k, err := kernels.FlashPrefill80(fs)
+	if form == flash80Form || form == flash80K8Form {
+		build := kernels.FlashPrefill80
+		if form == flash80K8Form {
+			build = kernels.FlashPrefill80K8
+		}
+		k, err := build(fs)
 		if err != nil {
 			t.Fatal(err)
 		}

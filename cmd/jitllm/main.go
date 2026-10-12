@@ -1582,6 +1582,11 @@ func loadOpts(t []tok.Option, budget uint64) []model.Option {
 	if os.Getenv("JITLLM_SH_OVERLAP") == "0" {
 		o = append(o, model.WithSharedOverlap(false))
 	}
+	// JITLLM_TAIL_ROWS=0 runs a prompt's few-row chunk batched rather than as
+	// a ragged step of its rows (model.WithTailRows).
+	if os.Getenv("JITLLM_TAIL_ROWS") == "0" {
+		o = append(o, model.WithTailRows(false))
+	}
 	if n := numaNodes(); n != nil {
 		o = append(o, model.WithInterleave(n))
 	}
