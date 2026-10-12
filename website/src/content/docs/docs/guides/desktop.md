@@ -58,6 +58,14 @@ Where the model is: which blocks run on each GPU and which on the host, the seam
 
 GGUF and safetensors files in your model folders are listed with whether they fit. Pick one, add a vision tower's `mmproj` if it has one, and it becomes a `.jlm` that appears under Models. See [Convert models](/docs/guides/convert/) for what conversion does.
 
+## Which engine
+
+The line under the logo always says which engine the window drives: `Embedded · API off` or `Embedded · API on :8080` for its own, with the API it serves. Click it to open Settings.
+
+Turning the API on where a `jitllmd` already answers (the login service on `127.0.0.1:8080`, say) is refused: the window says which `jitllmd` holds the address and offers to connect to it, rather than starting a second engine beside it. Starting the window while a `jitllmd` runs says so too, since the two engines share the GPU's memory and each loads its own copy of a model.
+
+Each open model on the Machine screen has an Unload button: unloading is how a model gives its memory back.
+
 ## Mock mode
 
 `jitllm-desktop -mock` runs the app against fixtures: no model, no GPU, every screen populated.

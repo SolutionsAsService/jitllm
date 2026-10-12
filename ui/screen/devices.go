@@ -162,6 +162,16 @@ func stat(sh *app.Shell, icon widgets.Icon, label string, value, note state.Read
 		Background(p.Colors.SurfaceContainer)
 }
 
+// unloadModel closes path in the attached engine.
+func unloadModel(sh *app.Shell, path string) {
+	eng := depsOf(sh).Engine
+	if eng == nil || path == "" {
+		sh.Store.Status.Set("no engine is attached: see screen.Attach")
+		return
+	}
+	eng.Unload(path)
+}
+
 // openModels is every model held open, what host memory each holds, and the
 // policy that divides it. Several open models share one budget; one runs.
 func openModels(sh *app.Shell) widget.Widget {
@@ -203,6 +213,8 @@ func openModels(sh *app.Shell) widget.Widget {
 				return widgets.Status{Label: "In chat", Dot: p.Colors.Primary}
 			}, active), p.Muted(), p.Type.BodySmall.FontSize)).PaddingTop(4)),
 			primitives.Box(primitives.Text("").ContentSignal(held).FontSize(p.Type.BodySmall.FontSize).Color(p.Text())).PaddingTop(4),
+			// Unloading is the only way to give a model's memory back.
+			widgets.NewIconButton(widgets.IconTrash, "Unload", func() { unloadModel(sh, at().Path) }, iconColors(sh)),
 		).Gap(p.Space.S + p.Space.XS)
 	})
 	rows := []widget.Widget{list}

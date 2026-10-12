@@ -21,6 +21,9 @@ type Engine interface {
 	Load(path string)
 	// Use makes an already-open model the active one.
 	Use(path string)
+	// Unload closes one open model and gives back what it held; closing the
+	// one in chat leaves nothing running.
+	Unload(path string)
 	// SetPriority switches memory between load order and following the active
 	// model.
 	SetPriority(on bool)
