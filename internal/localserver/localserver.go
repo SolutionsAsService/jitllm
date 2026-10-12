@@ -10,6 +10,7 @@ package localserver
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -76,10 +77,36 @@ func SearchDirs(primary string) []string {
 	return out
 }
 
+// APIVersion is the control plane's compatibility version, reported by
+// jitllmd (ServerInfo.api_version, and server_api in /v1/capabilities). It
+// changes only when a field changes meaning or goes away; adding one does not.
+// A client refuses a server whose number differs from the one it was built
+// with.
+const APIVersion = 1
+
 // Info is what a probe learned about a running service.
 type Info struct {
-	Addr    string
-	Version string
+	Addr       string
+	Version    string
+	APIVersion int
+}
+
+// ErrIncompatible is a jitllmd that answers but speaks another API version. A
+// client says so and stops rather than starting a second engine beside it.
+var ErrIncompatible = errors.New("incompatible jitllmd")
+
+// Compatible is nil when a server reporting api may be used by this build,
+// and otherwise says what to do about it. Zero is a server from before the
+// number existed, which is read as 1.
+func Compatible(api int) error {
+	if api == 0 {
+		api = 1
+	}
+	if api != APIVersion {
+		return fmt.Errorf("%w: the running jitllmd speaks API version %d and this program %d; "+
+			"upgrade both to the same release", ErrIncompatible, api, APIVersion)
+	}
+	return nil
 }
 
 // BaseURL turns an address (host:port, :port, or a URL) into the URL a client
@@ -114,17 +141,18 @@ func Probe(ctx context.Context, addr string) (Info, error) {
 		return Info{}, fmt.Errorf("%s: /v1/capabilities answered %s, not a jitllmd", addr, resp.Status)
 	}
 	var m struct {
-		Schema int `json:"schema"`
-		Build  *struct {
+		Schema    int `json:"schema"`
+		ServerAPI int `json:"server_api"`
+		Build     *struct {
 			Version string `json:"version"`
 		} `json:"build"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&m); err != nil || m.Schema == 0 {
 		return Info{}, fmt.Errorf("%s: /v1/capabilities is not a jitllm manifest", addr)
 	}
-	in := Info{Addr: addr}
+	in := Info{Addr: addr, APIVersion: m.ServerAPI}
 	if m.Build != nil {
 		in.Version = m.Build.Version
 	}
-	return in, nil
+	return in, Compatible(m.ServerAPI)
 }

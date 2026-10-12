@@ -91,6 +91,7 @@ func printServerInfo(w io.Writer, i *v1.ServerInfo) {
 	fmt.Fprintf(w, "jitllmd %s   up %s   %d model(s), %d session(s)   backends %s\n",
 		i.GetVersion(), (time.Duration(i.GetUptimeMillis()) * time.Millisecond).Round(time.Second),
 		i.GetLoadedModels(), i.GetOpenSessions(), backends)
+	fmt.Fprintf(w, "build    %s %s/%s   api %d\n", i.GetRevision(), i.GetOs(), i.GetArch(), i.GetApiVersion())
 	fmt.Fprintf(w, "models   %s\n", i.GetModelDirectory())
 }
 
