@@ -44,52 +44,63 @@ func (g *devTier) fuseActIn(l *layer) {
 		pf = 0
 	}
 	norm.Prefetch, quant.Prefetch = pf, pf
+	// A site runs the prologue where the caller forced it (ActInSites) or
+	// where tuneActIn measured it faster than the two launches on this card;
+	// actInTrial builds every candidate for that measurement.
 	sites := g.ActInSites
-	if sites == 0 {
-		sites = actInDefault
-	}
-	if sites&actInQKV != 0 && l.qkv != nil && actInPays(l.qkvBlocks, l.mvq.k) {
-		var segs []kernels.MatVecShape
-		for _, m := range []mv{l.mvq, l.mvk, l.mvv} {
-			segs = append(segs, kernels.MatVecShape{Center: g.center, T: m.q, K: m.k, Rows: m.rows, Bias: m.bias != nil})
+	on := func(site int, key string) bool {
+		if sites != 0 {
+			return sites&site != 0
 		}
-		l.qkvIn = g.segInKernel(segs, l.mvq.split, l.mvq.group, norm)
+		return site&actInMeasured != 0 && (g.actInTrial || g.actInWin[key])
 	}
 	plain := func(m mv) bool {
-		if m.kern == nil || m.slots != 0 || m.groups != 0 || m.threads != 0 || m.act != nil {
-			return false
-		}
-		w := 128
-		if m.group {
-			w = kernels.GroupSplitWidth(m.split)
-		}
-		return actInPays((m.rows*max(m.split, 1)/max(m.rowt, 1)+w-1)/w, m.k)
+		return m.kern != nil && m.slots == 0 && m.groups == 0 && m.threads == 0 && m.act == nil
 	}
 	shape := func(m mv, in kernels.ActIn) kernels.MatVecShape {
 		return kernels.MatVecShape{Center: g.center, T: m.q, K: m.k, Rows: m.rows, Split: m.split,
 			GroupSplit: m.group, Rowt: max(m.rowt, 1), Bias: m.bias != nil, In: in}
 	}
-	// q, k and v one launch each, where they are not one launch together.
-	if sites&actInQKV != 0 && l.qkv == nil && plain(l.mvq) && plain(l.mvk) && plain(l.mvv) {
-		l.mvq.kernIn, l.mvk.kernIn, l.mvv.kernIn = g.inKernel(shape(l.mvq, norm)), g.inKernel(shape(l.mvk, norm)),
-			g.inKernel(shape(l.mvv, norm))
-		if l.mvq.kernIn == nil || l.mvk.kernIn == nil || l.mvv.kernIn == nil {
-			l.mvq.kernIn, l.mvk.kernIn, l.mvv.kernIn = nil, nil, nil
+	l.actInKeys = [4]string{}
+	if l.qkv != nil {
+		var segs []kernels.MatVecShape
+		for _, m := range []mv{l.mvq, l.mvk, l.mvv} {
+			segs = append(segs, kernels.MatVecShape{Center: g.center, T: m.q, K: m.k, Rows: m.rows, Bias: m.bias != nil})
+		}
+		key := fmt.Sprintf("qkv/%v/%d/%v", segs, l.mvq.split, l.mvq.group)
+		if on(actInQKV, key) {
+			l.qkvIn, l.actInKeys[0] = g.segInKernel(segs, l.mvq.split, l.mvq.group, norm), key
 		}
 	}
-	res := func(m mv, in kernels.ActIn) backend.Kernel {
+	// q, k and v one launch each, where they are not one launch together.
+	if l.qkv == nil && plain(l.mvq) && plain(l.mvk) && plain(l.mvv) {
+		key := fmt.Sprintf("qkvs/%v/%v/%v", shape(l.mvq, norm), shape(l.mvk, norm), shape(l.mvv, norm))
+		if on(actInQKV, key) {
+			l.mvq.kernIn, l.mvk.kernIn, l.mvv.kernIn = g.inKernel(shape(l.mvq, norm)), g.inKernel(shape(l.mvk, norm)),
+				g.inKernel(shape(l.mvv, norm))
+			l.actInKeys[0] = key
+			if l.mvq.kernIn == nil || l.mvk.kernIn == nil || l.mvv.kernIn == nil {
+				l.mvq.kernIn, l.mvk.kernIn, l.mvv.kernIn, l.actInKeys[0] = nil, nil, nil, ""
+			}
+		}
+	}
+	res := func(m mv, in kernels.ActIn) (kernels.MatVecShape, bool) {
 		if !plain(m) || m.res == nil || m.bias != nil {
-			return nil
+			return kernels.MatVecShape{}, false
 		}
 		s := shape(m, in)
 		s.Bias = true
-		return g.inKernel(s)
+		return s, true
 	}
-	if sites&actInO != 0 {
-		l.mvo.resIn = res(l.mvo, quant)
+	if s, ok := res(l.mvo, quant); ok {
+		if key := fmt.Sprintf("o/%v", s); on(actInO, key) {
+			l.mvo.resIn, l.actInKeys[1] = g.inKernel(s), key
+		}
 	}
-	if sites&actInDown != 0 && l.mvu.gated != nil {
-		l.mvd.resIn = res(l.mvd, quant)
+	if s, ok := res(l.mvd, quant); ok && l.mvu.gated != nil {
+		if key := fmt.Sprintf("d/%v", s); on(actInDown, key) {
+			l.mvd.resIn, l.actInKeys[2] = g.inKernel(s), key
+		}
 	}
 	if sites&actInGateUp == 0 || ungatedFFN(p) || !plain(l.mvg) || !plain(l.mvu) || l.mvg.bias != nil || l.mvu.bias != nil {
 		return
@@ -104,22 +115,14 @@ func (g *devTier) fuseActIn(l *layer) {
 		// No gated up: up writes its row, and down forms act(gate)*up as it
 		// quantizes (QuantizeAct's arithmetic).
 		l.mvu.kernIn = g.inKernel(shape(l.mvu, norm))
-		l.mvd.resActIn = res(l.mvd, kernels.ActIn{On: true, Gated: true, Act: p.Act, Window: win, Prefetch: pf})
+		if s, ok := res(l.mvd, kernels.ActIn{On: true, Gated: true, Act: p.Act, Window: win, Prefetch: pf}); ok {
+			l.mvd.resActIn = g.inKernel(s)
+		}
 	}
 	if l.mvg.kernIn == nil || (l.mvu.gatedIn == nil && l.mvu.kernIn == nil) {
 		l.mvg.kernIn, l.mvu.gatedIn, l.mvu.kernIn = nil, nil, nil
 	}
 }
-
-// actInPays is the policy for which matvecs take the prologue: every
-// workgroup builds the operand, so its cost grows with groups*k. Measured on
-// a V100 (decode tok/s against the two launches): Llama-3.2-1B's q/k/v (96
-// groups, k 2048), attention output (64, 2048) and down (64, 8192) win;
-// its gate and up (256, 2048) lose 3%; Llama-3.1-8B's attention output
-// (128, 4096) is even and its down (128, 14336) loses 4%. A per-device
-// measurement would replace these two numbers (the split tuner times the
-// plain kernels only).
-func actInPays(groups, k int) bool { return groups <= 128 && groups*k <= 512<<10 }
 
 // The operand-prologue sites (Config.ActInSites).
 const (
@@ -127,10 +130,10 @@ const (
 	actInO
 	actInGateUp
 	actInDown
-	// Gate and up are not in the default: their 256 workgroups each
-	// normalising the row cost more than the norm launch (V100,
-	// Llama-3.2-1B: sites 11 read 557 tok/s, 15 read 541, the two launches 535).
-	actInDefault = actInQKV | actInO | actInDown
+	// actInMeasured is the sites tuneActIn decides; gate and up only run
+	// the prologue where the caller forces them (two launches replace one
+	// norm, which lost on every card measured).
+	actInMeasured = actInQKV | actInO | actInDown
 )
 
 // inKernel is an ActIn matvec from the device-wide cache (idKerns, keyed by

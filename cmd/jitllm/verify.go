@@ -853,8 +853,13 @@ func abRun(m *model.Model, g *tier.GPU, which string, n, rounds, depth int) {
 		// Long enough for the split tuner to settle: the prologue is built
 		// only for the splits it pays at (tier.actInMaxGroups).
 		step(max(n, 64))
-		if g.Stats().ActInLaunches == 0 {
+		switch st := g.Stats(); {
+		case st.ActInLaunches == 0 && st.ActInTimed == 0:
 			panic(fmt.Errorf("this device built no operand prologue; there is nothing to compare (%s)", g.Err()))
+		case st.ActInLaunches == 0:
+			// The tuner kept no site here: the two arms are one launch
+			// sequence, and the row is what shipping costs on this card.
+			fmt.Printf("the tuner kept none of %d sites on this device\n", st.ActInTimed)
 		}
 		a = bench.Case{Name: "operand by its own launch", Fn: func(it int) { g.NoActFuse = true; step(it) }}
 		b = bench.Case{Name: "operand in the matvec prologue", Fn: func(it int) { g.NoActFuse = false; step(it) }}
@@ -881,8 +886,8 @@ func abRun(m *model.Model, g *tier.GPU, which string, n, rounds, depth int) {
 	}
 	if which == "fuse" || which == "actfuse" {
 		st := g.Stats()
-		fmt.Printf("%d captures; %d operand-prologue launches encoded, replacing %d\n",
-			st.Captures, st.ActInLaunches, st.ActInSaved)
+		fmt.Printf("%d captures; %d operand-prologue launches encoded, replacing %d; %d of %d sites kept by the tuner\n",
+			st.Captures, st.ActInLaunches, st.ActInSaved, st.ActInKept, st.ActInTimed)
 	}
 	if which == "graph" {
 		fmt.Printf("%d captures over the whole A/B\n", g.Stats().Captures)

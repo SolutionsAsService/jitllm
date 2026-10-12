@@ -568,6 +568,9 @@ func (g *devTier) retuneDecode() {
 		}
 		g.dropGraph()
 	}
+	// After the splits settle: the operand prologue is timed at the split
+	// each matvec now runs.
+	g.tuneActIn()
 }
 
 // splitCands is every split up to max that divides nb activation blocks,

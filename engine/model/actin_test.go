@@ -33,6 +33,7 @@ func TestActInKeepsThePrinciples(t *testing.T) {
 	open := func(noAct bool) *tier.GPU {
 		g, err := tier.OpenWith(tier.WithDeviceTune(tier.TuneOff), tier.WithConfig(func(c *tier.Config) {
 			c.NoActFuse, c.ForceGroupSplit = noAct, true
+			c.ActInSites = 11 // forced: TuneOff runs no prologue tuner
 		}))
 		if err != nil || g == nil {
 			t.Skipf("no GPU: %v", err)

@@ -845,6 +845,9 @@ type Stats struct {
 	// ActInDeclined counts prologue kernels the device would not launch at
 	// their width (backend.ErrGroupTooWide): those shapes keep two launches.
 	ActInDeclined int
+	// ActInTimed and ActInKept count the sites tuneActIn decided on this card
+	// (from the cache or a trial) and the ones where the prologue won.
+	ActInTimed, ActInKept int
 	// PagedLaunches counts encoded paged-attention launches: the check that a
 	// paged run read its history through the pool.
 	PagedLaunches int
@@ -1183,6 +1186,8 @@ func (s *Stats) add(o Stats) {
 	s.ActInLaunches += o.ActInLaunches
 	s.ActInSaved += o.ActInSaved
 	s.ActInDeclined += o.ActInDeclined
+	s.ActInTimed += o.ActInTimed
+	s.ActInKept += o.ActInKept
 	s.PagedLaunches += o.PagedLaunches
 	s.PagedPrefillLaunches += o.PagedPrefillLaunches
 	s.PagedStagedLaunches += o.PagedStagedLaunches
@@ -1620,6 +1625,11 @@ type devShared struct {
 	lastSub   atomic.Int64
 	restrides map[[4]int]backend.Kernel     // kernels.Restride by shape; see copyKVAcrossStride
 	segKerns  map[string]backend.Kernel     // kernels.MatVecSegments by shapes; see fuseQKV
+	// actInWin is tuneActIn's verdict per operand-prologue site key: true where
+	// the prologue measured faster than the two launches on this card.
+	// actInTrial makes fuseActIn build every candidate for that measurement.
+	actInWin   map[string]bool
+	actInTrial bool
 	ragKerns  map[moeKernKey]backend.Kernel // a batched mixture's grouped matvecs (moegroup.go)
 	moeVolta  map[moeVoltaKey]moeVoltaMV    // their tensor-core twins; see voltaGroupedMV
 	ragK      map[ragKey]backend.Kernel     // a ragged step's matvecs; see ragMV

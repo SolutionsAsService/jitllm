@@ -87,6 +87,9 @@ func TestFusedDecodeMatchesPerOp(t *testing.T) {
 							// In-group splits in both arms: the operand prologue is
 							// built only where few workgroups share a row (actInPays).
 							c.NoFuse, c.ForceGroupSplit = noFuse, true
+							// Forced: TuneOff runs no prologue tuner. 11 is q/k/v,
+							// the attention output and down.
+							c.ActInSites = 11
 						}))
 					if err != nil || g == nil {
 						t.Skipf("no GPU: %v", err)

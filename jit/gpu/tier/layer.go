@@ -199,6 +199,9 @@ type layer struct {
 	qkvBias         [3]bool // which segments the kernel takes a bias for
 	// qkvIn is qkv normalising and quantizing its own operand (fuseActIn).
 	qkvIn backend.Kernel
+	// actInKeys names the operand-prologue site each of q/k/v, the attention
+	// output and down took (fuseActIn), for tuneActIn to group blocks by.
+	actInKeys [4]string
 	// mlaQK is MLA's query projection (q, or q_a under a q LoRA) and kv_a in
 	// one launch, and shGU the shared expert's gate and up: two matvecs over
 	// one activation each, built by fuseQKV like qkv. nil where declined.
