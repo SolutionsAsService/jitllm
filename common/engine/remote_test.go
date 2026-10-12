@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -34,7 +35,7 @@ func buildJitllmd(t *testing.T) string {
 			jitllmdErr = err
 			return
 		}
-		jitllmdBin = filepath.Join(dir, "jitllmd")
+		jitllmdBin = filepath.Join(dir, "jitllmd"+exeSuffix())
 		cmd := exec.Command("go", "build", "-o", jitllmdBin, "./cmd/jitllmd")
 		cmd.Dir = filepath.Join("..", "..", "server")
 		if out, err := cmd.CombinedOutput(); err != nil {
@@ -237,4 +238,13 @@ func TestServiceModeWithNoServiceIsLost(t *testing.T) {
 	if w := r.Where(); !w.Lost || w.Addr != addr {
 		t.Fatalf("where %+v", w)
 	}
+}
+
+// exeSuffix is the platform's executable suffix: go build -o names the file
+// as given, and Windows runs only one ending in .exe.
+func exeSuffix() string {
+	if runtime.GOOS == "windows" {
+		return ".exe"
+	}
+	return ""
 }

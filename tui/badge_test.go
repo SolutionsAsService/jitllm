@@ -5,6 +5,7 @@ import (
 	"net"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -86,7 +87,7 @@ func TestTheStatusBarFollowsAConnectedService(t *testing.T) {
 	}
 	addr := ln.Addr().String()
 	ln.Close()
-	bin := filepath.Join(t.TempDir(), "jitllmd")
+	bin := filepath.Join(t.TempDir(), "jitllmd"+exeSuffix())
 	build := exec.Command("go", "build", "-o", bin, "./cmd/jitllmd")
 	build.Dir = filepath.Join("..", "server")
 	if out, err := build.CombinedOutput(); err != nil {
@@ -132,4 +133,13 @@ func TestTheStatusBarFollowsAConnectedService(t *testing.T) {
 	if _, ok := r.env.e.(*engine.Remote); !ok {
 		t.Error("the app left the service")
 	}
+}
+
+// exeSuffix is the platform's executable suffix: go build -o names the file
+// as given, and Windows runs only one ending in .exe.
+func exeSuffix() string {
+	if runtime.GOOS == "windows" {
+		return ".exe"
+	}
+	return ""
 }

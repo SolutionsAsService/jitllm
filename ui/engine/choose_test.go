@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -32,7 +33,7 @@ func freeAddr(t *testing.T) string {
 // startJitllmd builds and serves jitllmd at addr until the test ends.
 func startJitllmd(t *testing.T, addr string) (stop func()) {
 	t.Helper()
-	bin := filepath.Join(t.TempDir(), "jitllmd")
+	bin := filepath.Join(t.TempDir(), "jitllmd"+exeSuffix())
 	build := exec.Command("go", "build", "-o", bin, "./cmd/jitllmd")
 	build.Dir = filepath.Join("..", "..", "server")
 	if out, err := build.CombinedOutput(); err != nil {
@@ -139,4 +140,13 @@ func TestConnectSwitchesToTheService(t *testing.T) {
 	if sh.Store.EngineMode.Get() != core.ModeService || sh.Store.ServiceAddr.Get() != addr {
 		t.Errorf("the setting is %q at %q", sh.Store.EngineMode.Get(), sh.Store.ServiceAddr.Get())
 	}
+}
+
+// exeSuffix is the platform's executable suffix: go build -o names the file
+// as given, and Windows runs only one ending in .exe.
+func exeSuffix() string {
+	if runtime.GOOS == "windows" {
+		return ".exe"
+	}
+	return ""
 }
