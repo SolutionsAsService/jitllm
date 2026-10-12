@@ -217,3 +217,46 @@ func stripANSI(s string) string {
 	}
 	return b.String()
 }
+
+// Two loaded models both read "loaded" on the models page and in the chat's
+// sidebar, and the palette offers each an explicit unload.
+func TestTwoLoadedModelsAreBothLoaded(t *testing.T) {
+	r := newTestRoot(t)
+	dir := r.env.dirs[0]
+	a, b := filepath.Join(dir, "a.jlm"), filepath.Join(dir, "b.jlm")
+	for _, p := range []string{a, b} {
+		if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r.env.f.st.Models.Set([]session.LoadedModel{
+		{Path: a, Name: "a.jlm", Arch: "llama", Blocks: 2},
+		{Path: b, Name: "b.jlm", Arch: "llama", Blocks: 2, Colour: 1, Active: true},
+	})
+	r.env.f.st.Active.Set(b)
+	r.pages[scrModels].(*modelsPage).scan()
+	r.setScreen(scrModels)
+	v := stripANSI(r.View())
+	if n := strings.Count(v, "● loaded"); n != 2 {
+		t.Errorf("%d rows read \"● loaded\", want 2:\n%s", n, v)
+	}
+	for _, w := range []string{"● active", "○ open", "2 open"} {
+		if strings.Contains(v, w) {
+			t.Errorf("the models page still says %q", w)
+		}
+	}
+	side := stripANSI(sidebar(r.env, 40, 30))
+	if n := strings.Count(side, "●"); n != 2 {
+		t.Errorf("the sidebar marks %d models loaded, want 2:\n%s", n, side)
+	}
+	var titles []string
+	for _, a := range actions(r) {
+		titles = append(titles, a.title)
+	}
+	all := strings.Join(titles, "|")
+	for _, w := range []string{"Unload a", "Unload b", "Chat with a"} {
+		if !strings.Contains(all, w) {
+			t.Errorf("the palette has no %q: %s", w, all)
+		}
+	}
+}

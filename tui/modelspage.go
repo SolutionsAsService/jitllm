@@ -45,11 +45,7 @@ func (r row) Render(w io.Writer, l list.Model, i int, li list.Item) {
 	for _, lm := range r.env.f.st.Models.Get() {
 		if lm.Path == it.Path {
 			dot := lipgloss.NewStyle().Foreground(colourOf(lm.Colour, modelColours))
-			if lm.Active {
-				tag = dot.Render("● active")
-			} else {
-				tag = dot.Render("○ open")
-			}
+			tag = dot.Render("● " + strings.ToLower(session.Loaded))
 		}
 	}
 	quant := catalog.QuantFromName(it.Name)
@@ -67,7 +63,7 @@ type probedMsg struct{ e catalog.Entry }
 type modelsKeys struct{ Load, Close, Filter key.Binding }
 
 // modelsPage is every model in the configured folders: open one, switch to
-// it, close it, or convert a source into a container.
+// it, unload it, or convert a source into a container.
 type modelsPage struct {
 	env  *env
 	keys modelsKeys
@@ -91,7 +87,7 @@ func newModelsPage(env *env) *modelsPage {
 	l.Styles.NoItems = sDim.PaddingLeft(2)
 	p := &modelsPage{
 		env:     env,
-		keys:    modelsKeys{Load: bind("enter", "load · convert"), Close: bind("ctrl+x", "close model"), Filter: bind("type", "filter", "/")},
+		keys:    modelsKeys{Load: bind("enter", "load · convert"), Close: bind("ctrl+x", "unload model"), Filter: bind("type", "filter", "/")},
 		list:    l,
 		probed:  map[string]catalog.Entry{},
 		probing: map[string]bool{},
@@ -172,7 +168,7 @@ func (p *modelsPage) Update(msg tea.Msg) tea.Cmd {
 				case key.Matches(msg, p.keys.Close):
 					if isOpen(p.env, it.Path) {
 						p.env.e.Unload(it.Path)
-						return notify("closed " + it.Name)
+						return notify("unloaded " + it.Name)
 					}
 					return nil
 				}
@@ -214,7 +210,7 @@ func (p *modelsPage) open(it item) tea.Cmd {
 func (p *modelsPage) View() string {
 	title := fmt.Sprintf("models · %d", len(p.list.Items()))
 	if n := len(p.env.f.st.Models.Get()); n > 0 {
-		title += fmt.Sprintf(" · %d open", n)
+		title += fmt.Sprintf(" · %d loaded", n)
 	}
 	left := panel(title, p.list.View(), p.listW, p.h, cBrand)
 	rw, _ := inner(p.w-p.listW, p.h)
@@ -280,7 +276,7 @@ func details(e catalog.Entry, probed bool, w int) string {
 	case e.Stale:
 		b.WriteString("\n\n" + sMuted.Render("enter rebuilds it for this version"))
 	default:
-		b.WriteString("\n\n" + sDim.Render("enter loads it · ctrl+x closes it"))
+		b.WriteString("\n\n" + sDim.Render("enter loads it · ctrl+x unloads it"))
 	}
 	return b.String()
 }

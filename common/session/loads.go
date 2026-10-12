@@ -49,3 +49,20 @@ func EndLoad(loads Value[[]Loading], path string) {
 		}
 	}
 }
+
+// Loaded is the one state a loaded model has. Several models are loaded at
+// once and every one is usable: the chat talks to one of them, the API to any
+// of them, and loading another leaves them all loaded. Only an unload removes
+// one, so the front ends say "Loaded" for each and never rank one above the
+// others.
+const Loaded = "Loaded"
+
+// LoadState is Loaded for a model in models and "" for one that is not.
+func LoadState(models []LoadedModel, path string) string {
+	for _, lm := range models {
+		if lm.Path == path {
+			return Loaded
+		}
+	}
+	return ""
+}

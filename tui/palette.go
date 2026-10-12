@@ -83,9 +83,9 @@ func actions(r *root) []action {
 		name := strings.TrimSuffix(lm.Name, ".jlm")
 		path := lm.Path
 		if !lm.Active {
-			as = append(as, action{"model", "Switch to " + name, "", func(*root) tea.Cmd { return load(path) }})
+			as = append(as, action{"model", "Chat with " + name, "", func(*root) tea.Cmd { return load(path) }})
 		}
-		as = append(as, action{"model", "Close " + name, "", func(r *root) tea.Cmd { r.env.e.Unload(path); return nil }})
+		as = append(as, action{"model", "Unload " + name, "", func(r *root) tea.Cmd { r.env.e.Unload(path); return nil }})
 	}
 	if n := len(st.BlockMap.Get()); n > 0 {
 		as = append(as,
