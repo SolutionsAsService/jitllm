@@ -185,6 +185,31 @@ func TestChatsKeepTheirTurns(t *testing.T) {
 	}
 }
 
+// macOS takes ctrl+arrows for Mission Control, so Option (alt) arrows switch
+// chats too, and the help says so.
+func TestOptionArrowsSwitchChatsAndAreInTheHelp(t *testing.T) {
+	r := newTestRoot(t)
+	r.env.f.appendTurn(session.Turn{Role: session.RoleUser, Text: "first chat"})
+	r.chat.newChat()
+	r.setScreen(scrChat)
+	r.Update(tea.KeyMsg{Type: tea.KeyDown, Alt: true})
+	if turns, _, _ := r.env.f.snapshot(); len(turns) != 1 || turns[0].Text != "first chat" {
+		t.Fatalf("alt+down shows %v", turns)
+	}
+	r.Update(tea.KeyMsg{Type: tea.KeyUp, Alt: true})
+	if n := r.env.f.turnCount(); n != 0 {
+		t.Fatalf("alt+up back to the new chat shows %d turns", n)
+	}
+	var prev, next bool
+	for _, b := range r.chat.Help() {
+		prev = prev || b.Help().Key == "ctrl/⌥+↑"
+		next = next || b.Help().Key == "ctrl/⌥+↓"
+	}
+	if !prev || !next {
+		t.Fatal("the help does not show the Option bindings")
+	}
+}
+
 // A finished turn is rendered once: a second refresh reuses it.
 func TestAFinishedTurnIsRenderedOnce(t *testing.T) {
 	r := newTestRoot(t)

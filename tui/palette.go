@@ -62,8 +62,8 @@ func actions(r *root) []action {
 		{"go", "Engine cockpit", "f4", go2(scrEngine)},
 		{"go", "Settings", "f5", go2(scrSettings)},
 		{"chat", "New chat", "ctrl+n", func(r *root) tea.Cmd { return tea.Batch(r.chat.newChat(), show(scrChat)) }},
-		{"chat", "Previous chat", "ctrl+↑", func(r *root) tea.Cmd { return tea.Batch(r.chat.step(-1), show(scrChat)) }},
-		{"chat", "Next chat", "ctrl+↓", func(r *root) tea.Cmd { return tea.Batch(r.chat.step(1), show(scrChat)) }},
+		{"chat", "Previous chat", "ctrl/⌥+↑", func(r *root) tea.Cmd { return tea.Batch(r.chat.step(-1), show(scrChat)) }},
+		{"chat", "Next chat", "ctrl/⌥+↓", func(r *root) tea.Cmd { return tea.Batch(r.chat.step(1), show(scrChat)) }},
 		{"chat", "Delete this chat", "/delete", func(r *root) tea.Cmd { return tea.Batch(r.chat.deleteChat(), show(scrChat)) }},
 		{"chat", "Copy last reply", "ctrl+y", func(r *root) tea.Cmd { return r.chat.copyReply() }},
 		{"chat", "Show or fold reasoning", "ctrl+t", func(r *root) tea.Cmd {
