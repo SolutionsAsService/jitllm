@@ -133,6 +133,18 @@ func PagedCopyRows(n, rows, page, width, col int, f16 bool) (*ir.Kernel, error) 
 	pRow := b.Param("pRow", ir.U32)
 	flat := b.Min(ir.U32, b.Add(ir.U32, b.Mul(ir.U32, b.CTAID(), b.NTID()), b.TID()),
 		b.Const(ir.U32, int64(per*rows-1)))
+	pagedCopyBody(b, n, page, width, col, f16, pSrc, pDst, pTab, pRow, flat)
+	return b.Done(), nil
+}
+
+// pagedCopyBody is PagedCopyRows after its thread index (clamped by the
+// caller): one element, or one packed f16 word, of a source row into its
+// position's row of the pool.
+func pagedCopyBody(b *ir.Builder, n, page, width, col int, f16 bool, pSrc, pDst, pTab, pRow, flat ir.Value) {
+	per := n
+	if f16 {
+		per = n / 2
+	}
 	i := b.Rem(ir.U32, flat, b.Const(ir.U32, int64(per)))
 	row := b.Div(ir.U32, flat, b.Const(ir.U32, int64(per)))
 	pid, off := pagedWrite(b, pTab, pRow, row, page)
@@ -141,12 +153,11 @@ func PagedCopyRows(n, rows, page, width, col int, f16 bool) (*ir.Kernel, error) 
 		b.Const(ir.U32, int64(width))), b.Const(ir.U32, int64(col)))
 	if !f16 {
 		b.Store(pDst, b.Add(ir.U32, at, i), b.Load(ir.F32, pSrc, flat, 0), 0)
-		return b.Done(), nil
+		return
 	}
 	src := b.Add(ir.U32, b.Mul(ir.U32, row, b.Const(ir.U32, int64(n))), b.Mul(ir.U32, i, b.Const(ir.U32, 2)))
 	w := b.PackF16(b.Load(ir.F32, pSrc, src, 0), b.Load(ir.F32, pSrc, src, 1))
 	b.Store(pDst, b.Add(ir.U32, b.Shr(ir.U32, at, b.Const(ir.U32, 1)), i), b.Bitcast(ir.F32, w), 0)
-	return b.Done(), nil
 }
 
 // PagedRoPERowsT is RoPERowsT into a paged K pool: the rotated pair lands at
@@ -171,6 +182,16 @@ func PagedRoPERowsT(nHeads, headDim, nRot int, neox bool, rows, page int) (*ir.K
 	pRow := b.Param("pRow", ir.U32)
 	u := func(x int) ir.Value { return b.Const(ir.U32, int64(x)) }
 	flat := b.Min(ir.U32, b.Add(ir.U32, b.Mul(ir.U32, b.CTAID(), b.NTID()), b.TID()), u(nHeads*pairs*rows-1))
+	pagedRopeBody(b, nHeads, headDim, nRot, neox, page, pSrc, pCS, pDst, pTab, pRow, flat)
+	return b.Done(), nil
+}
+
+// pagedRopeBody is PagedRoPERowsT after its thread index (clamped by the
+// caller): one rotated pair of k into its position in the transposed pool.
+func pagedRopeBody(b *ir.Builder, nHeads, headDim, nRot int, neox bool, page int,
+	pSrc, pCS, pDst, pTab, pRow, flat ir.Value) {
+	pairs := nRot / 2
+	u := func(x int) ir.Value { return b.Const(ir.U32, int64(x)) }
 	t := b.Rem(ir.U32, flat, u(nHeads*pairs))
 	row := b.Div(ir.U32, flat, u(nHeads*pairs))
 	p := b.Rem(ir.U32, t, u(pairs))
@@ -194,7 +215,6 @@ func PagedRoPERowsT(nHeads, headDim, nRot int, neox bool, rows, page int) (*ir.K
 		b.Add(ir.U32, b.Mul(ir.U32, base, u(page)), off))
 	b.Store(pDst, out, b.Sub(ir.F32, b.Mul(ir.F32, x0, c), b.Mul(ir.F32, x1, s)), 0)
 	b.Store(pDst, out, b.Add(ir.F32, b.Mul(ir.F32, x0, s), b.Mul(ir.F32, x1, c)), int64(stride*page))
-	return b.Done(), nil
 }
 
 // PagedCopyRowsTF16 is PagedCopyRowsT into a binary16 K pool

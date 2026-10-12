@@ -73,6 +73,16 @@ func ropeRows(nHeads, headDim, nRot int, neox, split bool, rows, dstStride int) 
 	pDst := b.Param("pDst", ir.F32)
 	flat := b.Min(ir.U32, b.Add(ir.U32, b.Mul(ir.U32, b.CTAID(), b.NTID()), b.TID()),
 		b.Const(ir.U32, int64(nHeads*pairs*rows-1)))
+	ropeBody(b, nHeads, headDim, nRot, neox, split, rows, dstStride, pSrc, pCS, pOff, pDst, flat)
+	return b.Done(), nil
+}
+
+// ropeBody is ropeRows after its thread index: the pair flat (clamped by the
+// caller) of row-major q rotated from pSrc into pDst. RoPEQKVPaged runs it
+// beside the paged K and V writers.
+func ropeBody(b *ir.Builder, nHeads, headDim, nRot int, neox, split bool, rows, dstStride int,
+	pSrc, pCS, pOff, pDst, flat ir.Value) {
+	pairs := nRot / 2
 	t, row := flat, ir.Value(0)
 	if rows > 1 {
 		perRow := b.Const(ir.U32, int64(nHeads*pairs))
@@ -127,7 +137,6 @@ func ropeRows(nHeads, headDim, nRot int, neox, split bool, rows, dstStride int) 
 	}
 	b.Store(pDst, out, b.Sub(ir.F32, b.Mul(ir.F32, x0, c), b.Mul(ir.F32, x1, s)), 0)
 	b.Store(pDst, out, b.Add(ir.F32, b.Mul(ir.F32, x0, s2), b.Mul(ir.F32, x1, c2)), outStride)
-	return b.Done(), nil
 }
 
 // CopyAt writes n floats into a destination at a runtime element offset, which

@@ -42,6 +42,11 @@ type pagedScratch struct {
 	// copyK is set where K reaches the pool unrotated or partly rotated (the
 	// rope writes only the dimensions it rotates); ropeK where it rotates.
 	copyK, ropeK, copyV backend.Kernel
+	// ropeQKV is the three decode writers as one launch
+	// (kernels.RoPEQKVPaged): q's rotation, k's into the pool, v's copy.
+	// nil where the block's rotary is not the plain one it fuses (partial,
+	// split, MSA's extra key head) or Config.NoFuse is set.
+	ropeQKV backend.Kernel
 	// copyLat and copyPE are MLA's writers: the normed latent at the row's
 	// head and the rotated key after it, the rotation done into kpeRot at
 	// rotOff's per-row offsets first (the rotary kernels write no pages).
@@ -198,6 +203,15 @@ func (g *devTier) initPagedScratch(bs *blockScratch) error {
 	if err := comp(&pg.copyV, k, err); err != nil {
 		return err
 	}
+	if pg.ropeK != nil && pg.copyK == nil && !p.MSA() && vw == kvDim && !p.QKNormPost && !g.NoFuse {
+		// Built beside the three it fuses, which stay: the per-op path is
+		// the reference and the A/B arm, and a layer the fused form does not
+		// fit (an unrotated one, a KV-sharing one) still takes them.
+		k, err := kernels.RoPEQKVPaged(p.NHead, p.NKVHead, p.HeadDim, p.NRot, p.RopeNeox, rows, P, g.KVF16)
+		if err := comp(&pg.ropeQKV, k, err); err != nil {
+			return err
+		}
+	}
 	s := kernels.FlashShape{Heads: p.NHead, KVHeads: p.NKVHead, Dim: p.HeadDim, Rows: rows,
 		Scale: g.scoreScale(p), Softcap: p.AttnSoftcap, F16: g.KVF16, Sink: p.AttnSinks,
 		Page: P, KImm: g.dev.API() == "msl", Warps: g.FlashWarps}
@@ -327,7 +341,7 @@ func freePaged(pg *pagedScratch) {
 	if pg == nil {
 		return
 	}
-	for _, k := range []backend.Kernel{pg.copyK, pg.ropeK, pg.copyV, pg.copyLat, pg.copyPE} {
+	for _, k := range []backend.Kernel{pg.copyK, pg.ropeK, pg.copyV, pg.copyLat, pg.copyPE, pg.ropeQKV} {
 		if k != nil {
 			closeKern(k)
 		}

@@ -107,6 +107,11 @@ func deviceStats(d nn.Device) string {
 			s += " -- refused: " + st.TileWhy
 		}
 	}
+	// Whether the decode replayed a captured graph or issued its launches one
+	// by one: the same tokens either way, a different per-token cost.
+	if st.Captures > 0 {
+		s += fmt.Sprintf(", %d graph capture(s)", st.Captures)
+	}
 	if st.RagGroupMV > 0 {
 		s += fmt.Sprintf(", %d few-sequence decode matvecs", st.RagGroupMV)
 	}
