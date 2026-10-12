@@ -489,3 +489,29 @@ hand-codes matchers, and that is what this copied.
 A spike compared `dlclark/regexp2`, adjusted for those behaviours, with HF
 tokenizers on 50 patterns and 20,000 strings each: 0 differences, but 7-17x
 slower than the hand splitters, so it is a test reference, not the engine.
+
+## 22. The apps say which engine they run, and can connect to a service
+
+**Not started.** The desktop app and the TUI always run an engine of their own;
+the desktop can also serve the API from it (`common/api`, `127.0.0.1:8080`),
+and the Mac app can install a login service, a separate `jitllmd` on the same
+address with its own models (`ui/install/agent.go`). A user can end up with two
+engines on one machine, sharing its GPU memory and RAM and wanting one port,
+and nothing in either app says which one it is talking to.
+
+- **One engine setting:** Auto (connect to a `jitllmd` that answers at the
+  configured or the login service's address, otherwise run embedded), Embedded,
+  or Service at an address; a desktop setting, and `--embedded` /
+  `--connect addr` in the TUI.
+- **Connected mode:** the app as a client of `jitllmd`'s control plane
+  (models, sessions, placement, stats, chat), as a second implementation of
+  the engine interface the screens already use (`ui/screen/deps.go`), so the
+  model list, memory map, block placement and chat behave the same against a
+  service. A lost connection is shown as a problem, never a silent fall back to
+  embedded.
+- **Always visible:** a badge in the desktop header and the TUI status bar --
+  `Embedded · API off`, `Embedded · API on :8080`, `Service · 127.0.0.1:8080
+  (jitllmd <version>)` -- that opens the setting.
+- **No silent second engine:** turning the API on where the login service
+  already holds the address is refused with an offer to connect; starting
+  embedded beside a running service says the two share the GPU's memory.
