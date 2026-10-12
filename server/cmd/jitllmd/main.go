@@ -56,6 +56,7 @@ func verbs() []verb {
 		{"sessions", cmdSessions, "create, list, describe, reset and close sessions"},
 		{"place", cmdPlace, "read and move the CPU/device block seam, and the pager budget"},
 		{"stats", cmdStats, "engine counters, once or streamed"},
+		{"service", cmdService, "install, uninstall, start, stop or check jitllmd as this person's background service"},
 	}
 }
 

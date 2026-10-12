@@ -17,6 +17,10 @@
 #   JITLLM_APPS_DIR     where jitllm.app goes on macOS (default: /Applications,
 #                       or ~/Applications when that is not writable)
 #   JITLLM_DOWNLOAD_URL where releases are fetched from (default: GitHub)
+#   JITLLM_NO_SERVICE   set to skip the service, as --no-service does
+#
+# On Linux, installing jitllmd also installs it as a systemd user service on
+# 127.0.0.1:8080 (`jitllmd service install`); --no-service skips that.
 set -eu
 
 repo=jitllm/jitllm
@@ -49,10 +53,11 @@ arm64 | aarch64) arch=arm64 ;;
 *) die "$(uname -m) is not a release architecture (amd64, arm64)" ;;
 esac
 
-[ $# -gt 0 ] || set -- jitllm jitllmd
+service=${JITLLM_NO_SERVICE:+no}
 progs=
 for p in "$@"; do
 	case $p in
+	--no-service) service=no ;;
 	all) progs="$progs jitllm jitllmd jitllm-desktop jitllm-tui" ;;
 	jitllm | cli) progs="$progs jitllm" ;;
 	jitllmd | server) progs="$progs jitllmd" ;;
@@ -61,6 +66,7 @@ for p in "$@"; do
 	*) die "unknown program $p (jitllm, jitllmd, desktop, tui, all)" ;;
 	esac
 done
+[ -n "$progs" ] || progs="jitllm jitllmd"
 
 tag=${JITLLM_VERSION:-}
 if [ -z "$tag" ]; then
@@ -131,3 +137,16 @@ case ":$PATH:" in
 *":$dir:"*) ;;
 *) say "$dir is not on your PATH; add it, e.g. export PATH=\"$dir:\$PATH\"" ;;
 esac
+
+# On Linux, jitllmd runs as this person's systemd user service on
+# 127.0.0.1:8080, as the Mac app and the Windows installer start it at login.
+# --no-service or JITLLM_NO_SERVICE=1 skips it; `jitllmd service install`
+# does it later. As root there is no person's session to start it in.
+case " $progs " in *" jitllmd "*) has_server=yes ;; *) has_server=no ;; esac
+if [ "$os" = linux ] && [ "$has_server" = yes ] && [ "$service" != no ] && [ "$(id -u)" != 0 ]; then
+	if command -v systemctl >/dev/null 2>&1 && systemctl --user show-environment >/dev/null 2>&1; then
+		"$dir/jitllmd" service install || say "the service did not start; see jitllmd service status"
+	else
+		say "no systemd user session here: start the server with jitllmd serve"
+	fi
+fi
