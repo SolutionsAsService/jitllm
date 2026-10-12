@@ -422,10 +422,11 @@ func sessionTurnFooter(t app.Turn) string {
 }
 
 // isLiveTurn says whether row i is the bubble a generation is filling: the
-// last turn, and an assistant one. It is a function so a test can gate it;
+// last turn, an assistant one, in the chat the reply is written into -- any
+// other chat's last reply is its own text, not the stream. It is a function so a test can gate it;
 // getting it wrong means the answer silently never appears.
 func isLiveTurn(st *app.Store, i int) bool {
-	return st.Turn(i).Role == app.RoleAssistant && i == st.Turns.Get()-1
+	return st.Turn(i).Role == app.RoleAssistant && i == st.Turns.Get()-1 && st.ReplyShown()
 }
 
 // thinkingSection is the model's reasoning, collapsed because it is usually

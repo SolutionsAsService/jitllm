@@ -35,8 +35,12 @@ func (s *Store) show(i int) {
 	s.mu.Unlock()
 	s.Draft.Set(c.Draft)
 	s.Attach.Set(nil)
-	s.Stream.Set("")
-	s.StreamThink.Set("")
+	// A reply in flight keeps its stream: it belongs to the chat that asked,
+	// which reads it again when shown.
+	if !s.Streaming.Get() {
+		s.Stream.Set("")
+		s.StreamThink.Set("")
+	}
 	s.Turns.Set(len(c.Turns))
 	s.Shown.Set(s.Shown.Get() + 1)
 	s.publishChats()

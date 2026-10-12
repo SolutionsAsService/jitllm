@@ -149,6 +149,50 @@ func Scenarios() []Scenario {
 					return loaded("Llama-3.2-1B-Instruct-Q4_K_M.jlm")(sh)
 				}},
 		}},
+		{Name: "switch-streaming", Tab: app.TabSession, Steps: []Step{
+			{Name: "loaded", Do: load(Llama()), Want: loaded("Llama-3.2-1B-Instruct-Q4_K_M.jlm")},
+			{Name: "asked", Do: func(sh *app.Shell, e *Engine) {
+				ask("What is the capital of France?")(sh, e)
+				steps(4)(sh, e)
+			}, Want: streaming},
+			// Another chat while the reply is being written: it stays empty, and
+			// the reply goes on into the chat that asked.
+			{Name: "other-chat", Do: func(sh *app.Shell, e *Engine) {
+				sh.Store.NewChat()
+				steps(8)(sh, e)
+			}, Want: func(sh *app.Shell) string {
+				if n := sh.Store.Turns.Get(); n != 0 || sh.Store.ChatSel.Get() != 0 {
+					return fmt.Sprintf("the new chat shows %d turn(s) at %d", n, sh.Store.ChatSel.Get())
+				}
+				return streaming(sh)
+			}},
+			{Name: "back-streaming", Do: func(sh *app.Shell, e *Engine) {
+				sh.Store.SelectChat(1)
+				steps(4)(sh, e)
+			}, Shows: []string{"What is the capital of France?"},
+				Want: func(sh *app.Shell) string {
+					if n := sh.Store.Turns.Get(); n != 2 {
+						return fmt.Sprintf("the asking chat came back with %d turn(s), want 2", n)
+					}
+					return streaming(sh)
+				}},
+			{Name: "away-finished", Do: func(sh *app.Shell, e *Engine) {
+				sh.Store.SelectChat(0)
+				finish(sh, e)
+			}, Want: func(sh *app.Shell) string {
+				if n := sh.Store.Turns.Get(); n != 0 {
+					return fmt.Sprintf("the other chat holds %d turn(s) after the reply finished, want 0", n)
+				}
+				return ""
+			}},
+			{Name: "back-replied", Do: func(sh *app.Shell, _ *Engine) { sh.Store.SelectChat(1) },
+				Want: func(sh *app.Shell) string {
+					if got := sh.Store.Turn(1).Text; got != strings.Join(strings.Fields(Llama().Reply), " ") {
+						return fmt.Sprintf("the asking chat's reply is %q, want the whole reply", got)
+					}
+					return replied(sh)
+				}},
+		}},
 		{Name: "loading", Tab: app.TabSession, Steps: []Step{
 			{Name: "reading", Do: func(sh *app.Shell, e *Engine) {
 				e.Hold = true

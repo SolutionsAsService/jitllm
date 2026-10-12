@@ -431,7 +431,7 @@ func (e *Engine) Step() bool {
 		st.StreamThink.Set(think)
 		st.DecodeTokS.Set(39.61)
 		if opened {
-			st.ThinkOpen(reply).Set(true)
+			st.SetReplyThinkOpen(reply, true)
 		}
 		st.Touch()
 	})

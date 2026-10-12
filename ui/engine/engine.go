@@ -33,7 +33,7 @@ func (f front) OfferReconvert(path string) { screen.OfferReconvert(f.Shell, path
 
 func (f front) SetTurn(i int, t session.Turn) { f.Store.SetTurn(i, t) }
 
-func (f front) SetThinkOpen(i int, open bool) { f.Store.ThinkOpen(i).Set(open) }
+func (f front) SetThinkOpen(i int, open bool) { f.Store.SetReplyThinkOpen(i, open) }
 
 // StateOf is the engine's view of st: the same signals, so a write from the
 // worker is a signal write, which the Store's concurrency contract allows.
