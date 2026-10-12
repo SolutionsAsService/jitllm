@@ -89,7 +89,7 @@ func Toggle(cur *Server, on bool, addr string, e *server.Engine) (s *Server, msg
 		}
 		return nil, "API off", held
 	}
-	if in, err := localserver.Probe(context.Background(), addr); err == nil {
+	if in, err := localserver.Probe(context.Background(), addr); err == nil || errors.Is(err, localserver.ErrIncompatible) {
 		return nil, Refusal(in), in
 	}
 	s, err := Start(addr, e)

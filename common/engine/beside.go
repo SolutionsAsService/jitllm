@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 
 	"github.com/jitllm/jitllm/internal/localserver"
 )
@@ -14,8 +15,9 @@ func Beside(ctx context.Context, addr string) (in localserver.Info, warning stri
 	if addr == "" {
 		addr = localserver.DefaultAddr
 	}
+	// An incompatible jitllmd is still a second engine on the GPU.
 	in, err := localserver.Probe(ctx, addr)
-	if err != nil {
+	if err != nil && !errors.Is(err, localserver.ErrIncompatible) {
 		return in, "", false
 	}
 	return in, SharesMemory(in), true
