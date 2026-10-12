@@ -92,13 +92,13 @@ func (s Service) File() string {
 		// A launchd path, so slash-separated wherever this is built.
 		return path.Join(s.Home, "Library", "LaunchAgents", s.name()+".plist")
 	case "windows":
-		return filepath.Join(s.windowsDir(), "jitllmd-login.vbs")
+		return winJoin(s.windowsDir(), "jitllmd-login.vbs")
 	}
 	cfg := s.ConfigHome
-	if cfg == "" || !filepath.IsAbs(cfg) {
-		cfg = filepath.Join(s.Home, ".config")
+	if cfg == "" || !path.IsAbs(cfg) {
+		cfg = path.Join(s.Home, ".config")
 	}
-	return filepath.Join(cfg, "systemd", "user", s.name()+".service")
+	return path.Join(cfg, "systemd", "user", s.name()+".service")
 }
 
 // Log is where the service's output goes. On Linux it is the journal, and
@@ -108,18 +108,28 @@ func (s Service) Log() string {
 	case "darwin":
 		return path.Join(s.Home, "Library", "Logs", "jitllm", "jitllmd.log")
 	case "windows":
-		return filepath.Join(s.windowsDir(), "jitllmd.log")
+		return winJoin(s.windowsDir(), "jitllmd.log")
 	}
 	return "journalctl --user -u " + s.name()
+}
+
+// winJoin joins Windows path elements with backslashes, on any host: the
+// service's paths are in its target system's spelling, not this host's.
+func winJoin(elem ...string) string {
+	out := strings.TrimRight(elem[0], `\/`)
+	for _, e := range elem[1:] {
+		out += `\` + strings.Trim(e, `\/`)
+	}
+	return out
 }
 
 // windowsDir is %LOCALAPPDATA%\jitllm, beside the models folder.
 func (s Service) windowsDir() string {
 	l := s.LocalAppData
 	if l == "" {
-		l = filepath.Join(s.Home, "AppData", "Local")
+		l = winJoin(s.Home, "AppData", "Local")
 	}
-	return filepath.Join(l, "jitllm")
+	return winJoin(l, "jitllm")
 }
 
 // Installed reports whether the service's file is in place.

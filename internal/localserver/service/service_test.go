@@ -67,7 +67,7 @@ func TestWindowsScriptStartsHidden(t *testing.T) {
 	s := Service{GOOS: "windows", Home: `C:\Users\p`, LocalAppData: `C:\Users\p\AppData\Local`}
 	v := s.Render(Args(`C:\Program Files\jitllm\jitllmd.exe`, `C:\Users\p\AppData\Local\jitllm\models`, ""))
 	want := `CreateObject("WScript.Shell").Run "cmd /c """"C:\Program Files\jitllm\jitllmd.exe"" ""serve"" ""-addr"" ""127.0.0.1:8080"" ""-models"" ""C:\Users\p\AppData\Local\jitllm\models"" >> ""C:\Users\p\AppData\Local\jitllm\jitllmd.log"" 2>&1""", 0, False` + "\r\n"
-	if filepath.Separator == '\\' && v != want {
+	if v != want {
 		t.Errorf("script\n%s\nwant\n%s", v, want)
 	}
 	if !strings.Contains(v, `", 0, False`) || !strings.Contains(v, `""serve""`) {
