@@ -25,7 +25,8 @@ import (
 //	staged  the scores, the softmax and the accumulate: the tier's tiles --
 //	        m16n8k16 scores where the device has them, m8n8k4 on sm_70, the
 //	        FMA tile elsewhere; the paged arm adds its merge
-//	flash   FlashPrefill70 on sm_70, FlashPrefillTile on Metal
+//	flash   FlashPrefill70 on sm_70, FlashPrefillTile where the device lowers
+//	        the collective tiles (Metal, sm_75+)
 //
 // Each arm owns `layers` histories and a launch reads the next, so K and V
 // come from DRAM. The contiguous K is transposed at stride n+1, as the tier's;
@@ -34,7 +35,8 @@ import (
 //
 //	JITLLM_PAGED_API, _DEV, _MODEL, _PAGE  as TestPagedAttentionAB
 //	JITLLM_PAGED_DEPTH=4096   one context depth (the chunk's last key)
-//	JITLLM_PAGED_PKERN=staged|flash       one path
+//	JITLLM_PAGED_PKERN=staged|flash|vs    one path; vs is paged staged (A)
+//	                          against the paged one-kernel form (B)
 //	JITLLM_PAGED_CHUNK=256    the staged paged arm's keys a split
 //	JITLLM_PAGED_FSPLITS=0    the paged flash arm's key splits
 //	JITLLM_PAGED_PART=scores|softmax|acc  one kernel of the staged arms (the
@@ -70,11 +72,12 @@ func TestPagedPrefillAB(t *testing.T) {
 		}
 		volta := len(mmaDevices(t, []backend.Device{d}, ir.MMAVolta)) > 0 && strings.Contains(d.Name(), "sm_70")
 		mma16 := len(mmaDevices(t, []backend.Device{d}, ir.MMAShape{M: 16, N: 8, K: 16, Kind: ir.MMAF16})) > 0
-		for _, kern := range []string{"staged", "flash"} {
+		tiles, _ := backend.LowersTile(d, tile8f32)
+		for _, kern := range []string{"staged", "flash", "vs"} {
 			if k := os.Getenv("JITLLM_PAGED_PKERN"); k != "" && k != kern {
 				continue
 			}
-			if kern == "flash" && !volta && d.API() != "msl" {
+			if kern != "staged" && !volta && !tiles {
 				continue
 			}
 			for _, m := range models {
@@ -162,8 +165,10 @@ func prefillAB(t *testing.T, d backend.Device, kern string, volta, mma16 bool, h
 	on := func(p string) bool { return part == "" || part == p }
 	var contig, paged prefillArm
 	var what string
-	switch kern {
-	case "staged":
+	// vs pits the paged staged form (arm A) against the paged one-kernel
+	// form (arm B) on one device: the tier's choice between them.
+	var stagedPaged prefillArm
+	if kern == "staged" || kern == "vs" {
 		sstride := (n + 64 + 3) &^ 3
 		chunk, passW := 256, 4096
 		fmt.Sscanf(os.Getenv("JITLLM_PAGED_CHUNK"), "%d", &chunk)
@@ -299,7 +304,9 @@ func prefillAB(t *testing.T, d backend.Device, kern string, volta, mma16 bool, h
 			}
 			return e
 		}
-	case "flash":
+		stagedPaged = paged
+	}
+	if kern == "flash" || kern == "vs" {
 		if dim != 64 && dim != 128 {
 			t.Skip("FlashPrefill70 takes head widths 64 and 128")
 		}
@@ -308,7 +315,7 @@ func prefillAB(t *testing.T, d backend.Device, kern string, volta, mma16 bool, h
 		cf := kernels.FlashPrefill70Shape{Heads: heads, KVHeads: nkv, Dim: dim, Rows: R, KStride: n + 1, Scale: scale}
 		pf := cf
 		pf.KStride, pf.Page, pf.Splits = 0, page, splits
-		tile := d.API() == "msl"
+		tile := !volta
 		kc, cG, cW := flashPrefillBuild(t, cf, formOf(tile))
 		kp, pG, pW := flashPrefillBuild(t, pf, formOf(tile))
 		fc, fp := compile(kc, nil), compile(kp, nil)
@@ -329,6 +336,10 @@ func prefillAB(t *testing.T, d backend.Device, kern string, volta, mma16 bool, h
 				e = se.Launch(merge, (R*heads*dim+127)/128, 128, dst, out)
 			}
 			return e
+		}
+		if kern == "vs" {
+			contig = stagedPaged
+			what = "paged staged (A) vs paged " + kc.Name + " (B)"
 		}
 	}
 	arm := func(f prefillArm) func(int) {

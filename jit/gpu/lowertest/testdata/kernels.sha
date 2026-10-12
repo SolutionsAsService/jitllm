@@ -120,6 +120,9 @@ softmax-sink-scalar 2d163aa5f4223971
 softmax-sink-warp 6a3bc3ce30d55774
 splitdeltagates 3ff73af4f85d8309
 splitheadgate dfb71910bd63d62e
+subgroup/f32 c97c1ade162db55d
+subgroup/i32 47af9c3eaf4c3e58
+subgroup/u32 abdef96fcc953dc2
 unpack-q4k/256x2048 de9e38d337f46b83
 unpack-q4k/28672x8192 0e23d3e060628f1b
 xielu 97c95f784dacfc6c

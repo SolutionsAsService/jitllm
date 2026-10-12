@@ -81,8 +81,21 @@ const (
 	// this module already declares, so no extension is needed -- only the
 	// capability.
 	opGroupNonUniformShuffleXor = 346
-	opExtInstImport             = 11
-	opExtInst                   = 12
+	// The rest of the subgroup collectives (ir/subgroup.go), all core in
+	// SPIR-V 1.3: an indexed shuffle, and the arithmetic reductions, which
+	// take a GroupOperation literal (Reduce) before the value.
+	opGroupNonUniformShuffle = 345
+	opGroupNonUniformIAdd    = 349
+	opGroupNonUniformFAdd    = 350
+	opGroupNonUniformSMin    = 353
+	opGroupNonUniformUMin    = 354
+	opGroupNonUniformFMin    = 355
+	opGroupNonUniformSMax    = 356
+	opGroupNonUniformUMax    = 357
+	opGroupNonUniformFMax    = 358
+	groupOperationReduce     = 0
+	opExtInstImport          = 11
+	opExtInst                = 12
 )
 
 const (
@@ -92,6 +105,9 @@ const (
 	capDotProductInput4x8BitPacked = 6017
 	capGroupNonUniform             = 61
 	capGroupNonUniformShuffle      = 65
+	capGroupNonUniformArithmetic   = 63
+	builtInSubgroupSize            = 36
+	builtInSubgroupLocalInvocation = 41
 	scopeSubgroup                  = 3
 	execModeLocalSize              = 17
 	execModelGLCompute             = 5

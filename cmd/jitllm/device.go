@@ -101,7 +101,7 @@ func deviceStats(d nn.Device) string {
 		s += fmt.Sprintf(", rowt %d tiled / %d plain", st.RowtTiles, st.RowtPlain)
 	}
 	if st.TileMV > 0 || st.TileWhy != "" {
-		s += fmt.Sprintf(", %d simdgroup-matrix prompt matvecs (%d f16 conversions, %d quantizes skipped)",
+		s += fmt.Sprintf(", %d collective-tile prompt matvecs (%d f16 conversions, %d quantizes skipped)",
 			st.TileMV, st.ActF16Launches, st.QuantSkipped)
 		if st.TileWhy != "" {
 			s += " -- refused: " + st.TileWhy

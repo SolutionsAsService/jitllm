@@ -1,7 +1,6 @@
-//go:build darwin && arm64
-
-// GemmTile is Metal's alone (tier.tileMV asks for it on msl by name), so this
-// gate is built only where a Metal device can exist.
+// The collective-tile prompt path (kernels.GemmTile, kernels.FlashPrefillTile)
+// runs wherever a device lowers the ir tile ops (tier.tilesOK): Metal's
+// simdgroup_matrix, and mma.sync on sm_75 and later.
 
 package model
 
@@ -12,17 +11,21 @@ import (
 	"testing"
 
 	"github.com/jitllm/jitllm/internal/testmodels"
+	"github.com/jitllm/jitllm/jit/gpu/kernels"
 	"github.com/jitllm/jitllm/jit/gpu/tier"
 )
 
-// TestTilePrefillMatchesTheHost prefills real models on Metal with every block
-// placed, through kernels.GemmTile (binary16 tiles on simdgroup_matrix), and
-// holds the prompt's logits AND the decode that reads the chunk's KV to the
-// host.
+// TestTilePrefillMatchesTheHost prefills real models with every block placed,
+// through the collective tiles -- kernels.GemmTile for the matvecs and
+// kernels.FlashPrefillTile for attention -- and holds the prompt's logits AND
+// the decode that reads the chunk's KV to the host.
 //
 // The models cover the formats and features the tile must carry: Q4_K/Q6_K,
 // Q3_K/Q4_K/Q5_K/Q6_K, biased q/k/v, Q4_0/Q8_0 and a mixture. Stats().TileMV
-// is the selection check, since the dp4a twin also answers correctly.
+// is the selection check, since the dp4a twin also answers correctly. CUDA
+// runs its own m16n8 GEMMs and FlashPrefill80 ahead of the tiles, so the gate
+// pins PreferTiles, the arm that selects the tiles there and changes nothing
+// on Metal.
 //
 // The host uses int8 activations and the tile binary16, so the bar is NMSE
 // under 2e-2 and an argmax that agrees or is a tie (tieMargin).
@@ -30,16 +33,10 @@ func TestTilePrefillMatchesTheHost(t *testing.T) {
 	// One tier per model: a tier's block scratch is built from the first
 	// model offered to it.
 	open := func(t *testing.T) *tier.GPU {
-		g, err := tier.OpenWith(tier.WithAPI("msl"), tier.WithDeviceTune(tier.TuneOff))
+		g, err := tier.OpenWith(tier.WithDeviceTune(tier.TuneOff),
+			tier.WithConfig(func(c *tier.Config) { c.PreferTiles = true }))
 		if err != nil || g == nil {
-			t.Skipf("no Metal device: %v", err)
-		}
-		// WithAPI falls back to another backend when the named one is absent,
-		// and only MSL builds the tile (tier.tileMV): elsewhere this is not
-		// the gate.
-		if !strings.Contains(g.Name(), "[msl]") {
-			g.Close()
-			t.Skipf("the device is %s; GemmTile is Metal's", g.Name())
+			t.Skipf("no GPU: %v", err)
 		}
 		return g
 	}
@@ -123,11 +120,24 @@ func TestTilePrefillMatchesTheHost(t *testing.T) {
 			// the tile switched off still prints the dp4a arm's numbers.
 			st := g.Stats()
 			if st.TileMV == 0 {
-				t.Fatalf("no GemmTile was built (refused: %q): the dp4a twin answered", st.TileWhy)
+				if strings.Contains(g.Name(), "[msl]") || strings.Contains(g.Name(), "[ptx]") {
+					t.Fatalf("no GemmTile was built on %s (refused: %q): the dp4a twin answered", g.Name(), st.TileWhy)
+				}
+				t.Skipf("%s does not lower the collective tiles: %s", g.Name(), st.TileWhy)
 			}
-			// 200 tokens are a 224-row chunk, which no 64-token block divides:
-			// the widest block runs over 192 and a tail launch over 32.
-			if st.TileTail == 0 {
+			// FlashTileFor's 32-row blocking exists up to head width 128;
+			// wider heads (gemma's 256) keep the three-kernel attention.
+			// And only where the device multiplies float32 tiles: sm_75 has
+			// the f16 tiles GemmTile needs and not these (tf32 is sm_80).
+			sm75 := strings.Contains(g.Name(), "(sm_75)")
+			if ft, ok := kernels.FlashTileFor(int(m.Cfg.HeadDim)); ok && ft.SG >= 4 && !sm75 && st.FlashPrefills == 0 {
+				t.Fatalf("no one-kernel prompt attention ran (%d tile matvecs): FlashPrefillTile was not selected", st.TileMV)
+			}
+			// 200 tokens are a 224-row chunk on Metal, which no 64-token block
+			// divides: the widest block runs over 192 and a tail launch over
+			// 32. A device that runs the prompt in an exact grain width
+			// (ExactPrompts) may not need one.
+			if st.TileTail == 0 && st.ExactPrompts == 0 {
 				t.Fatalf("no GemmTile ran as a wide block plus a tail (%d tile matvecs)", st.TileMV)
 			}
 			// A mixture's experts are the grouped GemmTile, counted apart.

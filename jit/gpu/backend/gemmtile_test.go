@@ -28,49 +28,61 @@ var gemmTileCases = []struct {
 	{64, 1024, 128, kernels.TileGemm{MT: 2, NT: 4, WM: 2, WN: 2, KB: 2}, true},
 }
 
-// TestGemmTileMatchesTheReference holds Metal's staged simdgroup_matrix GEMM
-// to the float64 reference and to the dp4a kernel it replaces, on every format
-// that has a binary16 dequant. Only MSL lowers the collective tile ops from
-// workgroup memory; anywhere else a refusal is the expected answer, and on MSL
-// a refusal is a broken kernel.
+// TestGemmTileMatchesTheReference holds the staged collective-tile GEMM to the
+// float64 reference and to the dp4a kernel it replaces, on every format that
+// has a binary16 dequant. A device that lowers an 8x8 tile from workgroup
+// memory (backend.LowersTile: Metal's simdgroup_matrix, PTX's mma.sync) must
+// build every case; anywhere else a refusal is the expected answer.
 func TestGemmTileMatchesTheReference(t *testing.T) {
 	gpuLock(t)
 	devs := backend.Open()
 	if len(devs) == 0 {
 		t.Skip("no GPU backend on this host")
 	}
-	ran, split := 0, 0
+	ran, split, tall := 0, 0, 0
 	for _, d := range devs {
 		defer d.Close()
+		// The 16-row tiles (TileGemm.Tall) where the device lowers them.
+		talls := []bool{false}
+		if ok, _ := backend.LowersTile(d, tile16x8); ok {
+			talls = append(talls, true)
+		}
 		for _, q := range []kernels.Quant{kernels.Q4_K, kernels.Q6_K, kernels.Q8_0, kernels.Q5_K,
 			kernels.Q4_0, kernels.Q5_0, kernels.Q3_K, kernels.Q5_1} {
 			for _, sh := range gemmTileCases {
-				sub, _, _, _ := kernels.Layout(q)
-				tl := sh.tl
-				tl.KB = max(tl.KB*32/sub, 1)
-				s := kernels.MatVecShape{T: q, K: sh.k, Rows: sh.rows, NTok: sh.ntok, Bias: sh.bias}
-				kk, err := kernels.GemmTile(s, tl)
-				if err != nil {
-					t.Fatalf("%v %+v: %v", q, sh, err)
-				}
-				kern, err := d.Compile(kk)
-				if err != nil {
-					if d.API() == "msl" {
-						t.Fatalf("%s %v %+v: %v", d.API(), q, sh, err)
+				for _, isTall := range talls {
+					sub, _, _, _ := kernels.Layout(q)
+					tl := sh.tl
+					tl.KB = max(tl.KB*32/sub, 1)
+					tl.Tall = isTall
+					s := kernels.MatVecShape{T: q, K: sh.k, Rows: sh.rows, NTok: sh.ntok, Bias: sh.bias}
+					kk, err := kernels.GemmTile(s, tl)
+					if err != nil {
+						t.Fatalf("%v %+v: %v", q, sh, err)
 					}
-					t.Logf("%s: %v", d.API(), err)
-					break
+					kern, err := d.Compile(kk)
+					if err != nil {
+						if ok, _ := backend.LowersTile(d, tile8); ok {
+							t.Fatalf("%s %v %+v: %v", d.API(), q, sh, err)
+						}
+						t.Logf("%s: %v", d.API(), err)
+						break
+					}
+					ran++
+					if strings.Contains(kk.Name, "_p") {
+						split++
+					}
+					if isTall {
+						tall++
+					}
+					mma70Case(t, d, kern, s, fmt.Sprintf("gemmtile %+v", tl),
+						kernels.GemmTileGroups(s, tl), tl.Threads(), true)
+					kern.Close()
 				}
-				ran++
-				if strings.Contains(kk.Name, "_p") {
-					split++
-				}
-				mma70Case(t, d, kern, s, fmt.Sprintf("gemmtile %+v", tl),
-					kernels.GemmTileGroups(s, tl), tl.Threads(), true)
-				kern.Close()
 			}
 		}
 	}
+	t.Logf("%d cases, %d of them on 16-row tiles", ran, tall)
 	if ran == 0 {
 		t.Skip("no backend lowers the collective tile GEMM here")
 	}
@@ -118,7 +130,7 @@ func TestGemmTileGroupedMatchesPerExpert(t *testing.T) {
 				}
 				kern, err := d.Compile(kk)
 				if err != nil {
-					if d.API() == "msl" {
+					if ok, _ := backend.LowersTile(d, tile8); ok {
 						t.Fatalf("%s %v %+v: %v", d.API(), q, c.tl, err)
 					}
 					t.Logf("%s: %v", d.API(), err)
@@ -175,7 +187,7 @@ func TestGemmTileSpeed(t *testing.T) {
 	gpuLock(t)
 	for _, d := range backend.Open() {
 		defer d.Close()
-		if d.API() != "msl" {
+		if ok, _ := backend.LowersTile(d, tile8); !ok {
 			continue
 		}
 		for _, sh := range shapes {

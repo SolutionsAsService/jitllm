@@ -367,6 +367,14 @@ func (k *Kernel) laneDependent(v Value, seen map[Value]bool) (bool, string) {
 		return true, "tid"
 	case OpShuffleXor:
 		return true, "shuffle.xor"
+	case OpShuffle:
+		return true, "shuffle"
+	case OpLaneID:
+		return true, "laneid"
+	case OpSubgroupReduce, OpSubgroupBroadcast:
+		// Every lane of the subgroup receives the same value, whatever the
+		// lanes held going in: that is what the two collectives are for.
+		return false, ""
 	}
 	for _, a := range o.Args {
 		if d, why := k.laneDependent(a, seen); d {

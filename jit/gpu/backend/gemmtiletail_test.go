@@ -19,7 +19,7 @@ func TestGemmTileTailCoversThePrompt(t *testing.T) {
 	ran := 0
 	for _, d := range backend.Open() {
 		defer d.Close()
-		if d.API() != "msl" {
+		if ok, _ := backend.LowersTile(d, tile8); !ok {
 			continue
 		}
 		for _, q := range []kernels.Quant{kernels.Q4_K, kernels.Q6_K, kernels.Q8_0, kernels.Q4_0} {

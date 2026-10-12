@@ -175,6 +175,17 @@ const (
 	// and MSL spell it as shifts. It serves the SC stream's 12-bit pairs that
 	// straddle two words (kernels.scStreamPair).
 	OpFunnel
+	// The subgroup collectives: see subgroup.go. OpSubgroupReduce combines
+	// Args[0] across the 32 lanes and leaves the result in every lane (Imm is
+	// the ReduceOp); OpSubgroupBroadcast reads Args[0] from lane Args[1], a
+	// subgroup-uniform value; OpShuffle reads it from lane Args[1] & 31, which
+	// may differ per lane; OpLaneID is the lane's index in its subgroup and
+	// OpSubgroupSize the subgroup's width.
+	OpSubgroupReduce
+	OpSubgroupBroadcast
+	OpShuffle
+	OpLaneID
+	OpSubgroupSize
 	nKind
 )
 
@@ -188,6 +199,7 @@ var kindName = [nKind]string{
 	"select", "loop", "endloop", "phi", "shuffle.xor", "shared", "barrier", "mma", "mma.get",
 	"tile.load", "tile.splat", "tile.mma", "tile.store", "sub.f16x2", "fma.f16x2",
 	"loadv", "loadv.get", "storev", "funnel",
+	"subgroup.reduce", "subgroup.broadcast", "shuffle", "laneid", "subgroup.size",
 }
 
 func (k Kind) String() string { return kindName[k] }
@@ -245,7 +257,11 @@ const SubgroupLanes = 32
 // across exactly one subgroup. OpShared and OpBarrier are workgroup-scoped and
 // do not.
 func WidthDependent(k Kind) bool {
-	return k == OpShuffleXor || k == OpMMA || IsTileOp(k)
+	switch k {
+	case OpShuffleXor, OpMMA, OpSubgroupReduce, OpSubgroupBroadcast, OpShuffle, OpLaneID:
+		return true
+	}
+	return IsTileOp(k)
 }
 
 // Builder constructs a Kernel. Values are handed out, never named by the
@@ -537,6 +553,10 @@ func (k *Kernel) Validate() error {
 			}
 			if depth < 0 {
 				return fmt.Errorf("ir: op %d: EndLoop without Loop", i)
+			}
+		case OpSubgroupReduce, OpSubgroupBroadcast, OpShuffle, OpLaneID, OpSubgroupSize:
+			if err := k.validateSubgroup(i, o); err != nil {
+				return err
 			}
 		case OpShuffleXor:
 			// A mask below 32 cannot leave the aligned 32-lane block.

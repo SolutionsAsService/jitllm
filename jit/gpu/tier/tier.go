@@ -186,6 +186,12 @@ type Config struct {
 	// prompt at 0.75 and 0.91 of llama.cpp where this one read 0.67 and 0.78
 	// (gpu-kernels.md "The sm_80+ prompt"). The A/B arm.
 	PreferGemmInt8 bool
+	// PreferTiles puts the collective-tile prompt kernels (kernels.GemmTile,
+	// kernels.FlashPrefillTile) ahead of a backend's own -- the m16n8 GEMMs
+	// and FlashPrefill80 on CUDA -- wherever the device lowers the tiles. Off
+	// by default: it is the arm that gates and measures the IR path on a card
+	// that has a faster special case.
+	PreferTiles bool
 	// NoTileTail keeps GemmTile to one blocking that divides the whole prompt
 	// rather than the widest block plus a tail launch (tileMV): the A/B arm
 	// and the bisection switch.
@@ -1678,6 +1684,14 @@ type devShared struct {
 	mmaOff bool
 	// tileOff records that this device refused kernels.GemmTile; see tileMV.
 	tileOff bool
+	// tileCap is the collective-tile probe (tilesOK): 0 not yet asked, 1 the
+	// device lowers the 8x8 f16 tile GemmTile and FlashPrefillTile multiply
+	// in, -1 it does not.
+	tileCap int8
+	// tileTallCap is tileTall's probe, in tileCap's terms.
+	tileTallCap int8
+	// tileF32Cap is tileF32's probe, in tileCap's terms.
+	tileF32Cap int8
 	// voltaMoE is the grouped tensor-core mixture's probe (voltaOn): 0 not yet
 	// asked, 1 this device runs it, -1 it does not.
 	voltaMoE int8

@@ -16,16 +16,16 @@ import (
 // the MMA sweeps, which would hide any real skip.
 //
 // ir.OpMMA is the fragment form (per-lane layout from MMAShape.Frags) and is
-// ptx-only by design. spirv and msl reach their matrix units through the
-// collective tile ops (opaque tiles loaded with a stride), a different
-// contract. No backend lowers both, so a kernel that wants a matrix unit on
-// every card needs both ops and a choice between them.
+// ptx-only by design. The collective tile ops (opaque tiles loaded with a
+// stride) lower on all three: spirv to cooperative matrices, msl to
+// simdgroup_matrix, ptx to mma.sync over 8x8 atoms (ptx/tile.go). So a tile
+// kernel reaches every card's matrix unit; the fragment form stays PTX's.
 var (
 	mmaImplemented = []string{"ptx"}
 	mmaDeclined    = []string{"spirv", "msl"}
 
-	tileImplemented = []string{"spirv", "msl"}
-	tileDeclined    = []string{"ptx"}
+	tileImplemented = []string{"spirv", "msl", "ptx"}
+	tileDeclined    = []string{}
 )
 
 // mmaProbe is the smallest kernel that contains an OpMMA: one tile, results
@@ -137,13 +137,16 @@ func TestTileCoversExactlyWhatItClaims(t *testing.T) {
 	//	       the driver refuses what it did not enumerate (not visible here).
 	//	msl    the shape is a template parameter and simdgroup_matrix is 8x8
 	//	       only, so the lowering refuses 16x8x16 itself.
+	//	ptx    any side a multiple of 8, binary16 or float32 (three tf32
+	//	       products) operands; an int8 tile is refused.
 	for _, c := range []struct {
 		m, n, k int
 		elem    ir.TileElem
 		lowers  []string // the backends whose LOWERING accepts this shape
 	}{
-		{16, 8, 16, ir.TileF16, []string{"spirv"}},
-		{8, 8, 8, ir.TileF32, []string{"spirv", "msl"}},
+		{16, 8, 16, ir.TileF16, []string{"spirv", "ptx"}},
+		{8, 8, 8, ir.TileF32, []string{"spirv", "msl", "ptx"}},
+		{16, 8, 32, ir.TileS8, []string{"spirv"}},
 	} {
 		k, err := kernels.TileProbe(c.m, c.n, c.k, 2, c.elem)
 		if err != nil {

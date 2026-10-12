@@ -878,13 +878,15 @@ var tileGemms = []kernels.TileGemm{
 // conversion it reads; false where the device does not lower it or no tile
 // divides the shape, and the next twin is asked.
 //
-// Only Metal lowers this form, so it is gated on the API rather than probed by
-// a refused compile per shape on every other device. A Metal refusal is
-// recorded once (tileOff): it is a property of the device, not the shape.
+// Whether the device lowers the collective tiles at all is asked once
+// (tilesOK) rather than by a refused compile per shape, and a refusal of a
+// built kernel is recorded once (tileOff): a property of the device, not the
+// shape. Where the device has the integer matrix instruction (MatVecMMA), that
+// runs first and this is not reached.
 func (g *devTier) tileMV(m mv, ntok int) (mv, bool) {
 	// A build reached from inside a submission takes g.mu (subLock).
 	defer g.subUnlock(g.subLock())
-	if g.tileOff || g.NoVolta || g.dev.API() != "msl" || m.slots > 0 || !kernels.Volta70OK(m.q) {
+	if g.NoVolta || m.slots > 0 || !kernels.Volta70OK(m.q) || !g.tilesOK() {
 		return mv{}, false
 	}
 	sub, _, _, _ := kernels.Layout(m.q)
@@ -927,8 +929,10 @@ func (g *devTier) tileMV(m mv, ntok int) (mv, bool) {
 		}
 		return a, a != nil && g.sizeF16(ntok*m.k*2)
 	}
+	tall := g.tileTall()
 	for wi, tl := range tileGemms {
 		tl.KB = max(32/sub, 1)
+		tl.Tall = tall && tl.MT%2 == 0
 		if m.rows%tl.Rows() != 0 {
 			continue
 		}
@@ -946,6 +950,7 @@ func (g *devTier) tileMV(m mv, ntok int) (mv, bool) {
 		if rest > 0 {
 			for _, tt := range tileGemms[wi+1:] {
 				tt.KB, tt.TokOff = tl.KB, lead
+				tt.Tall = tall && tt.MT%2 == 0
 				if m.rows%tt.Rows() != 0 || rest%tt.Toks() != 0 {
 					continue
 				}

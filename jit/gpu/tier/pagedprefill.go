@@ -139,19 +139,26 @@ func (g *devTier) initPagedPrefill(bs *blockScratch) error {
 	// The flash forms and the m16n8k16 scores read no latent row (MLA): the
 	// FMA tiles and sm_70's pair do.
 	if !g.NoFlashPrefill && !p.MLA() {
-		switch {
-		case g.dev.API() == "msl" && !g.tileOff:
+		tile := func() {
 			if t, ok := kernels.FlashTileFor(hd); ok && t.SG >= 4 && rows%t.Rows() == 0 && 32%t.TK == 0 {
 				if pf.flash = comp(kernels.FlashPrefillTile(fs, t)); pf.flash != nil {
 					pf.fGroups, pf.fWidth = kernels.FlashPrefillTileGroups(fs, t), t.Threads()
 				}
 			}
+		}
+		switch {
+		case g.PreferTiles && g.tileF32():
+			tile()
 		case !g.kb.noAttnMMA && g.f16GemmK() == 16 && kernels.FlashPrefill80WhyNot(fs) == "":
 			// sm_80 on: the whole attention in one kernel on m16n8k16.
 			if pf.flash = comp(kernels.FlashPrefill80(fs)); pf.flash != nil {
 				pf.fGroups, pf.fWidth = kernels.FlashPrefill80Groups(fs), kernels.FlashPrefill80Threads
 				pf.flash80 = true
 			}
+		case g.tileF32():
+			// The collective tiles where they lower and FlashPrefill80 does
+			// not run: Metal, and a CUDA card it refuses.
+			tile()
 		case !g.NoVolta && (hd == 64 || hd == 128) && rows%kernels.FlashPrefill70Rows == 0 && g.sm70():
 			if pf.flash = comp(kernels.FlashPrefill70(fs)); pf.flash != nil {
 				pf.fGroups, pf.fWidth = kernels.FlashPrefill70Groups(fs), kernels.FlashPrefill70Threads
