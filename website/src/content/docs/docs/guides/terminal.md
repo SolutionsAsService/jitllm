@@ -90,4 +90,10 @@ Every block of the open model and where it runs, the decode rate over the last s
 
 The same settings as the desktop app, in the same file: sampling, the seed, the chat template, the system prompt, the prompt cache on disk, the devices, the context and the model folders (the first is where conversions go). `tab` and `shift+tab` move between fields, `enter` on the last field saves, and `esc` throws the changes away.
 
+## Which engine
+
+The right end of the bottom line always says which engine the app drives: `Embedded · API off`, or `Embedded · API on :8080` while it serves the API. The command palette (`ctrl+k`) lists it too, and opens Settings from it.
+
+Turning the API on where a `jitllmd` already answers is refused, and the line names the address to connect to instead. Starting the app while a `jitllmd` runs says so as well: the two engines share the GPU's memory.
+
 The screenshots on this page are the app running Qwen3-30B-A3B for real, in a 130-column terminal.

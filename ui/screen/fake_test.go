@@ -4,7 +4,8 @@ package screen
 // otherwise. Package mock is the full stand-in; this package's own tests
 // cannot import it (mock imports screen).
 type fakeEngine struct {
-	load func(string)
+	load   func(string)
+	unload func(string)
 	run  func(func()) bool
 	send func(ChatRequest)
 	stop func()
@@ -18,6 +19,11 @@ func (f *fakeEngine) Load(p string) {
 	}
 }
 func (f *fakeEngine) Use(string)       {}
+func (f *fakeEngine) Unload(p string) {
+	if f.unload != nil {
+		f.unload(p)
+	}
+}
 func (f *fakeEngine) SetPriority(bool) {}
 func (f *fakeEngine) Relocate(int)     {}
 func (f *fakeEngine) Run(job func()) bool {

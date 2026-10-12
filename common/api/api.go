@@ -14,12 +14,13 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/jitllm/jitllm/internal/localserver"
 	"github.com/jitllm/jitllm/server"
 )
 
 // DefaultAddr is loopback only: turning the API on must not open it to the
 // network unless the address says so.
-const DefaultAddr = "127.0.0.1:8080"
+const DefaultAddr = localserver.DefaultAddr
 
 // Server is a running API.
 type Server struct {
@@ -67,25 +68,42 @@ func (s *Server) Close() {
 // Toggle brings cur in line with a setting: off closes it, on starts one, and
 // on with a different address restarts it. It returns what now runs (nil when
 // off) and a line for the front end's status.
-func Toggle(cur *Server, on bool, addr string, e *server.Engine) (*Server, string) {
+//
+// A jitllmd already answering at the address refuses the start: two engines
+// on one machine share its GPU memory, and the app would be a second engine
+// nobody asked for. held is that service, so the front end can offer to
+// connect to it instead; it is the zero Info otherwise.
+func Toggle(cur *Server, on bool, addr string, e *server.Engine) (s *Server, msg string, held localserver.Info) {
 	if addr == "" {
 		addr = DefaultAddr
 	}
 	if cur != nil && on && cur.asked == addr {
-		return cur, "API on http://" + cur.Addr()
+		return cur, "API on http://" + cur.Addr(), held
 	}
 	if cur != nil {
 		cur.Close()
 	}
 	if !on {
 		if cur == nil {
-			return nil, ""
+			return nil, "", held
 		}
-		return nil, "API off"
+		return nil, "API off", held
+	}
+	if in, err := localserver.Probe(context.Background(), addr); err == nil {
+		return nil, Refusal(in), in
 	}
 	s, err := Start(addr, e)
 	if err != nil {
-		return nil, "API not started: " + err.Error()
+		return nil, "API not started: " + err.Error(), held
 	}
-	return s, "API on http://" + s.Addr()
+	return s, "API on http://" + s.Addr(), held
+}
+
+// Refusal is the line that says why the API did not start beside in.
+func Refusal(in localserver.Info) string {
+	v := ""
+	if in.Version != "" {
+		v = " " + in.Version
+	}
+	return "API not started: jitllmd" + v + " already serves " + in.Addr + "; connect to it instead"
 }

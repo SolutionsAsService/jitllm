@@ -61,6 +61,7 @@ func actions(r *root) []action {
 		{"go", "Discover models to download", "f3", go2(scrDiscover)},
 		{"go", "Engine cockpit", "f4", go2(scrEngine)},
 		{"go", "Settings", "f5", go2(scrSettings)},
+		{"engine", r.env.badge(), "", go2(scrSettings)},
 		{"chat", "New chat", "ctrl+n", func(r *root) tea.Cmd { return tea.Batch(r.chat.newChat(), show(scrChat)) }},
 		{"chat", "Previous chat", "ctrl/⌥+↑", func(r *root) tea.Cmd { return tea.Batch(r.chat.step(-1), show(scrChat)) }},
 		{"chat", "Next chat", "ctrl/⌥+↓", func(r *root) tea.Cmd { return tea.Batch(r.chat.step(1), show(scrChat)) }},
