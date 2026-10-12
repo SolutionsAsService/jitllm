@@ -285,6 +285,41 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '')
         </div>
       </section>
 
+      <section id="api" class="band">
+        <div class="col sec">
+          <div class="head">
+            <div>
+              <h2 class="h2">The server</h2>
+              <p class="desc">One binary, <code>jitllmd</code>, many models and many sessions at once. Applications reach it through APIs they already speak: point a client at <code>http://127.0.0.1:8080/v1</code> and use the model's id as its name.</p>
+            </div>
+            <a class="more" href={`${base}/docs/guides/serve/`}>API guide <span aria-hidden="true">→</span></a>
+          </div>
+          <div class="three">
+            <div class="panel api">
+              <span class="num">OpenAI-compatible</span>
+              <code class="route">POST /v1/chat/completions</code>
+              <p>Chat, completions, embeddings, Batches and Files, streamed, with tool calls in each model's own format (24 families) and <code>tool_choice</code> enforced by constrained decoding.</p>
+            </div>
+            <div class="panel api">
+              <span class="num">Anthropic-compatible</span>
+              <code class="route">POST /v1/messages</code>
+              <p>The messages endpoint, streamed, with tool use and pictures through <code>image</code> blocks on vision models, for clients written against Anthropic's API.</p>
+            </div>
+            <div class="panel api">
+              <span class="num">Connect API</span>
+              <code class="route">models · sessions · devices</code>
+              <p>A control plane: load and unload models, create, park and resume sessions, move blocks between devices, and <code>/metrics</code> for Prometheus.</p>
+            </div>
+          </div>
+          <ul class="models server">
+            <li><b>Continuous batching</b><span>On the CPU and the GPU, prompts fed in chunks beside running decodes, with KV-aware admission.</span></li>
+            <li><b>Fairness</b><span><code>-fairness 0-100</code> time-slices sessions through the card by parking them to the host and back, with per-request priority.</span></li>
+            <li><b>Structured output</b><span>From a JSON schema, plus log-probabilities and <code>n</code> choices from one prefill.</span></li>
+            <li><b>Decision answers</b><span>One question against fixed labels through <code>/v1/systemone</code>.</span></li>
+          </ul>
+        </div>
+      </section>
+
       <section id="jlm" class="col sec">
         <div class="split">
           <div>
@@ -416,40 +451,6 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '')
         </ul>
       </section>
 
-      <section id="api" class="band">
-        <div class="col sec">
-          <div class="head">
-            <div>
-              <h2 class="h2">The server</h2>
-              <p class="desc">One binary, <code>jitllmd</code>, many models and many sessions at once. Applications reach it through APIs they already speak: point a client at <code>http://127.0.0.1:8080/v1</code> and use the model's id as its name.</p>
-            </div>
-            <a class="more" href={`${base}/docs/guides/serve/`}>API guide <span aria-hidden="true">→</span></a>
-          </div>
-          <div class="three">
-            <div class="panel api">
-              <span class="num">OpenAI-compatible</span>
-              <code class="route">POST /v1/chat/completions</code>
-              <p>Chat, completions, embeddings, Batches and Files, streamed, with tool calls in each model's own format (24 families) and <code>tool_choice</code> enforced by constrained decoding.</p>
-            </div>
-            <div class="panel api">
-              <span class="num">Anthropic-compatible</span>
-              <code class="route">POST /v1/messages</code>
-              <p>The messages endpoint, streamed, with tool use and pictures through <code>image</code> blocks on vision models, for clients written against Anthropic's API.</p>
-            </div>
-            <div class="panel api">
-              <span class="num">Connect API</span>
-              <code class="route">models · sessions · devices</code>
-              <p>A control plane: load and unload models, create, park and resume sessions, move blocks between devices, and <code>/metrics</code> for Prometheus.</p>
-            </div>
-          </div>
-          <ul class="models server">
-            <li><b>Continuous batching</b><span>On the CPU and the GPU, prompts fed in chunks beside running decodes, with KV-aware admission.</span></li>
-            <li><b>Fairness</b><span><code>-fairness 0-100</code> time-slices sessions through the card by parking them to the host and back, with per-request priority.</span></li>
-            <li><b>Structured output</b><span>From a JSON schema, plus log-probabilities and <code>n</code> choices from one prefill.</span></li>
-            <li><b>Decision answers</b><span>One question against fixed labels through <code>/v1/systemone</code>.</span></li>
-          </ul>
-        </div>
-      </section>
 
       <section id="models" class="col sec">
         <div class="head">
