@@ -40,14 +40,8 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '')
           <span class="brand-mark" data-pixel="word" aria-hidden="true"></span>
         </a>
         <nav class="nav" aria-label="Primary">
-          <a href="#os">Why</a>
-          <a href="#numbers">Numbers</a>
-          <a href="#engine">Engine</a>
-          <a href="#jlm">.jlm</a>
-          <a href="#install">Install</a>
-          <a href="#api">Server</a>
-          <a href="#agents">Agents</a>
-          <a href="#models">Models</a>
+          <a href="#apps">About</a>
+          <a href="#engine">Internals</a>
           <a href={`${base}/docs/`}>Docs</a>
         </nav>
         <div class="bar-tools">
@@ -65,14 +59,8 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '')
       </div>
       <nav class="menu" id="menu" hidden aria-label="Mobile">
         <div class="col">
-          <a href="#os">Why</a>
-          <a href="#numbers">Numbers</a>
-          <a href="#engine">Engine</a>
-          <a href="#jlm">.jlm</a>
-          <a href="#install">Install</a>
-          <a href="#api">Server</a>
-          <a href="#agents">Agents</a>
-          <a href="#models">Models</a>
+          <a href="#apps">About</a>
+          <a href="#engine">Internals</a>
           <a href={`${base}/docs/`}>Docs</a>
           <a href="https://github.com/jitllm/jitllm">GitHub ↗</a>
         </div>
@@ -153,6 +141,108 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '')
         </div>
       </section>
 
+      <section id="apps" class="col sec">
+        <div class="head">
+          <div>
+            <h2 class="h2">One engine, every way in</h2>
+            <p class="desc">Each program is one self-contained binary, for Linux, macOS and Windows on x86-64 and arm64. GPUs need only their driver.</p>
+          </div>
+        </div>
+        <ul class="models apps">
+          <li><b>Server</b><span><code>jitllmd</code>: many models and many sessions at once, behind OpenAI, Anthropic and Connect APIs.</span></li>
+          <li><b>CLI</b><span><code>jitllm</code>: convert GGUF or Hugging Face weights and run a model from the command line.</span></li>
+          <li><b>Desktop</b><span><code>jitllm-desktop</code>: downloads, conversion, chat and a live view of the blocks.</span></li>
+          <li><b>TUI</b><span><code>jitllm-tui</code>: the same screens in a terminal, over SSH too.</span></li>
+          <li><b>Embed</b><span>The engine as a Go library, inside your own program.</span></li>
+        </ul>
+      </section>
+
+      <section id="desktop" class="col sec">
+        <div class="head">
+          <div>
+            <h2 class="h2">A desktop app on the same engine</h2>
+            <p class="desc">Model downloads, conversion, text and image chat, and a live view of where each block of the model sits, in one window. The engine runs inside the app's own process.</p>
+          </div>
+          <a class="more" href={`${base}/docs/guides/desktop/`}>The desktop app <span aria-hidden="true">→</span></a>
+        </div>
+        <div class="panel shots" data-shots>
+          <div class="bench-tabs seg" role="tablist" aria-label="Desktop app screens"><button type="button" role="tab" id="shot-tab-chat" aria-controls="shot-chat" aria-selected="true">Chat</button><button type="button" role="tab" id="shot-tab-models" aria-controls="shot-models" aria-selected="false">Models</button><button type="button" role="tab" id="shot-tab-machine" aria-controls="shot-machine" aria-selected="false">Machine</button><button type="button" role="tab" id="shot-tab-discover" aria-controls="shot-discover" aria-selected="false">Discover</button></div>
+          <figure class="shot" id="shot-chat" role="tabpanel" aria-labelledby="shot-tab-chat">
+            <img class="shot-dark" src={`${base}/shots/chat-dark.png`} width="1440" height="900" loading="lazy" alt="The jitllm desktop app, Chat screen" />
+            <img class="shot-light" src={`${base}/shots/chat-light.png`} width="1440" height="900" loading="lazy" alt="The jitllm desktop app, Chat screen" />
+            <figcaption>Qwen3-30B-A3B, a 30B mixture of experts, answering on a laptop with a 4 GB GPU: one block on the card, the rest on the CPU, its experts paged from disk.</figcaption>
+          </figure>
+          <figure class="shot" id="shot-models" role="tabpanel" aria-labelledby="shot-tab-models" hidden>
+            <img class="shot-dark" src={`${base}/shots/models-dark.png`} width="1440" height="900" loading="lazy" alt="The jitllm desktop app, Models screen" />
+            <img class="shot-light" src={`${base}/shots/models-light.png`} width="1440" height="900" loading="lazy" alt="The jitllm desktop app, Models screen" />
+            <figcaption>The models in your folders, with what each one is and whether it fits, fits on the GPU or pages from disk.</figcaption>
+          </figure>
+          <figure class="shot" id="shot-machine" role="tabpanel" aria-labelledby="shot-tab-machine" hidden>
+            <img class="shot-dark" src={`${base}/shots/machine-dark.png`} width="1440" height="900" loading="lazy" alt="The jitllm desktop app, Machine screen" />
+            <img class="shot-light" src={`${base}/shots/machine-light.png`} width="1440" height="900" loading="lazy" alt="The jitllm desktop app, Machine screen" />
+            <figcaption>Where the 30B is: a block on the GPU, 47 on the host, its pages filling a 10.31 GiB budget, and every page the pager has read.</figcaption>
+          </figure>
+          <figure class="shot" id="shot-discover" role="tabpanel" aria-labelledby="shot-tab-discover" hidden>
+            <img class="shot-dark" src={`${base}/shots/discover-smartest-dark.png`} width="1440" height="900" loading="lazy" alt="The jitllm desktop app, Discover screen" />
+            <img class="shot-light" src={`${base}/shots/discover-smartest-light.png`} width="1440" height="900" loading="lazy" alt="The jitllm desktop app, Discover screen" />
+            <figcaption>Models this machine runs well, ranked for it, with an expected rate and whether each fits, before anything is downloaded. From the app's mock mode.</figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <section id="terminal" class="col sec">
+        <div class="head">
+          <div>
+            <h2 class="h2">And in a terminal</h2>
+            <p class="desc">The same screens in a terminal, over SSH too, sharing the desktop app's settings and chats. The arrow keys move the model's blocks between the CPU and the GPU, and the conversation keeps its history across the move.</p>
+          </div>
+          <a class="more" href={`${base}/docs/guides/terminal/`}>The terminal app <span aria-hidden="true">→</span></a>
+        </div>
+        <div class="panel shots" data-shots>
+          <div class="bench-tabs seg" role="tablist" aria-label="Terminal app screens"><button type="button" role="tab" id="tui-tab-chat" aria-controls="tui-chat" aria-selected="true">Chat</button><button type="button" role="tab" id="tui-tab-engine" aria-controls="tui-engine" aria-selected="false">Engine</button><button type="button" role="tab" id="tui-tab-models" aria-controls="tui-models" aria-selected="false">Models</button><button type="button" role="tab" id="tui-tab-discover" aria-controls="tui-discover" aria-selected="false">Discover</button></div>
+          <figure class="shot" id="tui-chat" role="tabpanel" aria-labelledby="tui-tab-chat">
+            <img src={`${base}/shots/tui-chat.png`} width="1430" height="880" loading="lazy" alt="The jitllm terminal app, Chat screen" />
+            <figcaption>Qwen3-30B-A3B answering on a laptop with a 4 GB GPU, the engine beside the conversation.</figcaption>
+          </figure>
+          <figure class="shot" id="tui-engine" role="tabpanel" aria-labelledby="tui-tab-engine" hidden>
+            <img src={`${base}/shots/tui-engine.png`} width="1430" height="880" loading="lazy" alt="The jitllm terminal app, Engine screen" />
+            <figcaption>Every block and where it runs, the rate over time, memory and the pager. The arrow keys move the seam.</figcaption>
+          </figure>
+          <figure class="shot" id="tui-models" role="tabpanel" aria-labelledby="tui-tab-models" hidden>
+            <img src={`${base}/shots/tui-models.png`} width="1430" height="880" loading="lazy" alt="The jitllm terminal app, Models screen" />
+            <figcaption>The models in your folders, each one's header read without loading it.</figcaption>
+          </figure>
+          <figure class="shot" id="tui-discover" role="tabpanel" aria-labelledby="tui-tab-discover" hidden>
+            <img src={`${base}/shots/tui-discover.png`} width="1430" height="880" loading="lazy" alt="The jitllm terminal app, Discover screen" />
+            <figcaption>The catalog ranked for this machine, from fastest to smartest, with whether each model fits.</figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <section id="models" class="col sec">
+        <div class="head">
+          <div>
+            <h2 class="h2">Bring the models you want</h2>
+            <p class="desc">Convert from GGUF or Hugging Face once, then run the <code>.jlm</code> anywhere jitllm runs.</p>
+          </div>
+          <a class="more" href={`${base}/docs/reference/models/`}>All models <span aria-hidden="true">→</span></a>
+        </div>
+        <ul class="models">
+          <li><b>Llama</b><span>Llama 2 · Llama 3 · Llama 4 · Mistral · Ministral · SmolLM</span></li>
+          <li><b>Qwen</b><span>Qwen2 · Qwen3 · Qwen3.5 · Qwen3 MoE · Qwen3 Next · Qwen1.5 MoE</span></li>
+          <li><b>Gemma</b><span>Gemma 1 · Gemma 2 · Gemma 3 · Gemma 3n · Gemma 4</span></li>
+          <li><b>DeepSeek</b><span>DeepSeek V2 · V3 · V3.2 · V4 · Kimi K2 · Moonlight</span></li>
+          <li><b>GLM · Kimi</b><span>GLM-4 · GLM-4.5 · GLM-4.7-Flash · Kimi Linear · Kimi-K3</span></li>
+          <li><b>Mixtures</b><span>gpt-oss · MiniMax M2 · M3 · OLMoE · Mixtral · DBRX · Ling · dots.llm1 · ERNIE 4.5</span></li>
+          <li><b>State space</b><span>Mamba · Mamba-2 · Jamba · Falcon-H1 · Granite 4.0-H · Nemotron-H · LFM2</span></li>
+          <li><b>Phi</b><span>Phi-2 · Phi-3 · Phi-3.5-MoE · Phi-4</span></li>
+          <li><b>More families</b><span>Granite · Command-R · Hunyuan · OLMo · EXAONE · Seed-OSS · Apertus · Falcon · StableLM · Nemotron · StarCoder</span></li>
+          <li><b>Vision</b><span>Qwen2-VL · Qwen2.5-VL · Qwen3-VL · GLM-4.xV · Gemma 3/3n/4 · InternVL · MiniCPM-V · Pixtral · Llama 4 · Phi-4 · Kimi-VL · SmolVLM · LLaVA</span></li>
+          <li><b>Embeddings</b><span>BERT · nomic-bert · Qwen3-Embedding · EmbeddingGemma</span></li>
+          <li><b>Formats</b><span>GGUF · Hugging Face safetensors → .jlm</span></li>
+        </ul>
+      </section>
+
       <section class="col sec" aria-labelledby="analogy-title">
         <div class="split">
           <div>
@@ -171,6 +261,23 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '')
             <div class="map-row" role="row"><span role="cell">executable</span><span role="cell">the <code>.jlm</code> container</span></div>
             <div class="map-row" role="row"><span role="cell">system calls</span><span role="cell">OpenAI, Anthropic, Connect APIs</span></div>
           </div>
+        </div>
+      </section>
+
+      <section id="jlm" class="col sec">
+        <div class="split">
+          <div>
+            <p class="eyebrow">The executable format</p>
+            <h2 class="h2 jlm-title">Convert once. Page cheaply forever.</h2>
+            <p class="lede">An OS loads programs from a format built for loading. <code>.jlm</code> is that for models: GGUF or Hugging Face weights, with their quantization preserved, laid out once so evicting and reloading them during inference never repeats the preparation.</p>
+            <p class="lede">One file carries the weights, configuration, tokenizer, chat templates and optional vision tower, for the CLI, the server, the desktop app and the Go library alike.</p>
+            <a class="more" href={`${base}/docs/reference/jlm/`}>The format <span aria-hidden="true">→</span></a>
+          </div>
+          <ul class="points">
+            <li><span class="pix sm" data-pixel="box" aria-hidden="true"></span><div><b>No repacking on page-in</b><p>Quantized weights are stored in the layout the GPU backends share, so a reload is a read.</p></div></li>
+            <li><span class="pix sm" data-pixel="probe" aria-hidden="true"></span><div><b>Straight to the needed bytes</b><p>Predictable block offsets and addressable expert ranges let the pager fetch only what a token uses.</p></div></li>
+            <li><span class="pix sm" data-pixel="chip" aria-hidden="true"></span><div><b>One layout, every device</b><p>CUDA, Vulkan and Metal read the same container, so execution can move between backends and reuse it.</p></div></li>
+          </ul>
         </div>
       </section>
 
@@ -214,23 +321,42 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '')
         <Versus />
       </section>
 
-
-      <section id="principles" class="col sec">
+      <section id="install" class="col sec">
         <div class="head">
           <div>
-            <h2 class="h2">Five principles, each held by a test</h2>
-            <p class="desc">Every architecture, kernel and path keeps all five.</p>
+            <h2 class="h2">Install jitllm</h2>
+            <p class="desc">One self-contained binary per program, for Linux, macOS and Windows on x86-64 and arm64. GPU backends use the drivers already on the machine; jitllm finds them at run time.</p>
           </div>
-          <a class="more" href={`${base}/docs/#five-principles`}>What they mean <span aria-hidden="true">→</span></a>
+          <a class="more" href={`${base}/docs/install/`}>Full guide <span aria-hidden="true">→</span></a>
         </div>
-        <ul class="models principles">
-          <li><b>JIT</b><span>Every kernel is emitted at run time for the device in front of it.</span></li>
-          <li><b>No Go compute</b><span>No arithmetic a token runs is a Go loop: a missing kernel is a basic generated one, never a fallback.</span></li>
-          <li><b>Relocation</b><span>Any block, its KV pages and its recurrent state move between devices mid-conversation, with the same answer.</span></li>
-          <li><b>Paging</b><span>A model that does not fit pages; a budget below the model re-reads, with the same answer.</span></li>
-          <li><b>Low to no Go allocation</b><span>A warm token allocates nothing on the Go heap; weights and frames live off it.</span></li>
-        </ul>
+        <Downloads />
+        <div class="two">
+          <div class="panel step">
+            <div class="step-head"><span class="pix sm" data-pixel="probe" aria-hidden="true"></span><h3>Install and fetch a model</h3></div>
+            <p>Install the CLI and the server from the latest release, then convert Qwen3-30B-A3B, a 30B mixture of experts that uses 3B per token (18.6 GB to download). On Windows: <code>irm https://jitllm.org/install.ps1 | iex</code>.</p>
+            <div class="cmd">
+              <div class="cmd-head"><span>shell</span><button class="copy" type="button" data-copy>Copy</button></div>
+<pre><code><span class="p">$</span> curl -fsSL https://jitllm.org/install.sh | sh
+<span class="p">$</span> mkdir -p models
+<span class="p">$</span> jitllm convert -o models qwen3-30b-a3b models/qwen3.jlm</code></pre>
+            </div>
+          </div>
+          <div class="panel step">
+            <div class="step-head"><span class="pix sm" data-pixel="bolt" aria-hidden="true"></span><h3>Serve and stream</h3></div>
+            <p>Start the API server with automatic device selection, then stream a chat from another terminal.</p>
+            <div class="cmd">
+              <div class="cmd-head"><span>shell</span><button class="copy" type="button" data-copy>Copy</button></div>
+<pre><code><span class="p">$</span> jitllmd serve -addr 127.0.0.1:8080 -models ./models \
+    -load qwen3.jlm -id qwen3 -devices auto
+<span class="p">$</span> curl http://127.0.0.1:8080/v1/chat/completions \
+    -H 'Content-Type: application/json' \
+    -d '&#123;"model":"qwen3","stream":true,
+         "messages":[&#123;"role":"user","content":"Hi"&#125;]&#125;'</code></pre>
+            </div>
+          </div>
+        </div>
       </section>
+
 
       <section id="engine" class="band">
         <div class="col sec">
@@ -320,178 +446,6 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '')
         </div>
       </section>
 
-      <section id="jlm" class="col sec">
-        <div class="split">
-          <div>
-            <p class="eyebrow">The executable format</p>
-            <h2 class="h2 jlm-title">Convert once. Page cheaply forever.</h2>
-            <p class="lede">An OS loads programs from a format built for loading. <code>.jlm</code> is that for models: GGUF or Hugging Face weights, with their quantization preserved, laid out once so evicting and reloading them during inference never repeats the preparation.</p>
-            <p class="lede">One file carries the weights, configuration, tokenizer, chat templates and optional vision tower, for the CLI, the server, the desktop app and the Go library alike.</p>
-            <a class="more" href={`${base}/docs/reference/jlm/`}>The format <span aria-hidden="true">→</span></a>
-          </div>
-          <ul class="points">
-            <li><span class="pix sm" data-pixel="box" aria-hidden="true"></span><div><b>No repacking on page-in</b><p>Quantized weights are stored in the layout the GPU backends share, so a reload is a read.</p></div></li>
-            <li><span class="pix sm" data-pixel="probe" aria-hidden="true"></span><div><b>Straight to the needed bytes</b><p>Predictable block offsets and addressable expert ranges let the pager fetch only what a token uses.</p></div></li>
-            <li><span class="pix sm" data-pixel="chip" aria-hidden="true"></span><div><b>One layout, every device</b><p>CUDA, Vulkan and Metal read the same container, so execution can move between backends and reuse it.</p></div></li>
-          </ul>
-        </div>
-      </section>
-
-      <section id="install" class="col sec">
-        <div class="head">
-          <div>
-            <h2 class="h2">Install jitllm</h2>
-            <p class="desc">One self-contained binary per program, for Linux, macOS and Windows on x86-64 and arm64. GPU backends use the drivers already on the machine; jitllm finds them at run time.</p>
-          </div>
-          <a class="more" href={`${base}/docs/install/`}>Full guide <span aria-hidden="true">→</span></a>
-        </div>
-        <Downloads />
-        <div class="two">
-          <div class="panel step">
-            <div class="step-head"><span class="pix sm" data-pixel="probe" aria-hidden="true"></span><h3>Install and fetch a model</h3></div>
-            <p>Install the CLI and the server from the latest release, then convert Qwen3-30B-A3B, a 30B mixture of experts that uses 3B per token (18.6 GB to download). On Windows: <code>irm https://jitllm.org/install.ps1 | iex</code>.</p>
-            <div class="cmd">
-              <div class="cmd-head"><span>shell</span><button class="copy" type="button" data-copy>Copy</button></div>
-<pre><code><span class="p">$</span> curl -fsSL https://jitllm.org/install.sh | sh
-<span class="p">$</span> mkdir -p models
-<span class="p">$</span> jitllm convert -o models qwen3-30b-a3b models/qwen3.jlm</code></pre>
-            </div>
-          </div>
-          <div class="panel step">
-            <div class="step-head"><span class="pix sm" data-pixel="bolt" aria-hidden="true"></span><h3>Serve and stream</h3></div>
-            <p>Start the API server with automatic device selection, then stream a chat from another terminal.</p>
-            <div class="cmd">
-              <div class="cmd-head"><span>shell</span><button class="copy" type="button" data-copy>Copy</button></div>
-<pre><code><span class="p">$</span> jitllmd serve -addr 127.0.0.1:8080 -models ./models \
-    -load qwen3.jlm -id qwen3 -devices auto
-<span class="p">$</span> curl http://127.0.0.1:8080/v1/chat/completions \
-    -H 'Content-Type: application/json' \
-    -d '&#123;"model":"qwen3","stream":true,
-         "messages":[&#123;"role":"user","content":"Hi"&#125;]&#125;'</code></pre>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section id="desktop" class="col sec">
-        <div class="head">
-          <div>
-            <h2 class="h2">A desktop app on the same engine</h2>
-            <p class="desc">Model downloads, conversion, text and image chat, and a live view of where each block of the model sits, in one window. The engine runs inside the app's own process.</p>
-          </div>
-          <a class="more" href={`${base}/docs/guides/desktop/`}>The desktop app <span aria-hidden="true">→</span></a>
-        </div>
-        <div class="panel shots" data-shots>
-          <div class="bench-tabs seg" role="tablist" aria-label="Desktop app screens"><button type="button" role="tab" id="shot-tab-chat" aria-controls="shot-chat" aria-selected="true">Chat</button><button type="button" role="tab" id="shot-tab-models" aria-controls="shot-models" aria-selected="false">Models</button><button type="button" role="tab" id="shot-tab-machine" aria-controls="shot-machine" aria-selected="false">Machine</button><button type="button" role="tab" id="shot-tab-discover" aria-controls="shot-discover" aria-selected="false">Discover</button></div>
-          <figure class="shot" id="shot-chat" role="tabpanel" aria-labelledby="shot-tab-chat">
-            <img class="shot-dark" src={`${base}/shots/chat-dark.png`} width="1440" height="900" loading="lazy" alt="The jitllm desktop app, Chat screen" />
-            <img class="shot-light" src={`${base}/shots/chat-light.png`} width="1440" height="900" loading="lazy" alt="The jitllm desktop app, Chat screen" />
-            <figcaption>Qwen3-30B-A3B, a 30B mixture of experts, answering on a laptop with a 4 GB GPU: one block on the card, the rest on the CPU, its experts paged from disk.</figcaption>
-          </figure>
-          <figure class="shot" id="shot-models" role="tabpanel" aria-labelledby="shot-tab-models" hidden>
-            <img class="shot-dark" src={`${base}/shots/models-dark.png`} width="1440" height="900" loading="lazy" alt="The jitllm desktop app, Models screen" />
-            <img class="shot-light" src={`${base}/shots/models-light.png`} width="1440" height="900" loading="lazy" alt="The jitllm desktop app, Models screen" />
-            <figcaption>The models in your folders, with what each one is and whether it fits, fits on the GPU or pages from disk.</figcaption>
-          </figure>
-          <figure class="shot" id="shot-machine" role="tabpanel" aria-labelledby="shot-tab-machine" hidden>
-            <img class="shot-dark" src={`${base}/shots/machine-dark.png`} width="1440" height="900" loading="lazy" alt="The jitllm desktop app, Machine screen" />
-            <img class="shot-light" src={`${base}/shots/machine-light.png`} width="1440" height="900" loading="lazy" alt="The jitllm desktop app, Machine screen" />
-            <figcaption>Where the 30B is: a block on the GPU, 47 on the host, its pages filling a 10.31 GiB budget, and every page the pager has read.</figcaption>
-          </figure>
-          <figure class="shot" id="shot-discover" role="tabpanel" aria-labelledby="shot-tab-discover" hidden>
-            <img class="shot-dark" src={`${base}/shots/discover-smartest-dark.png`} width="1440" height="900" loading="lazy" alt="The jitllm desktop app, Discover screen" />
-            <img class="shot-light" src={`${base}/shots/discover-smartest-light.png`} width="1440" height="900" loading="lazy" alt="The jitllm desktop app, Discover screen" />
-            <figcaption>Models this machine runs well, ranked for it, with an expected rate and whether each fits, before anything is downloaded. From the app's mock mode.</figcaption>
-          </figure>
-        </div>
-      </section>
-
-      <section id="terminal" class="col sec">
-        <div class="head">
-          <div>
-            <h2 class="h2">And in a terminal</h2>
-            <p class="desc">The same screens in a terminal, over SSH too, sharing the desktop app's settings and chats. The arrow keys move the model's blocks between the CPU and the GPU, and the conversation keeps its history across the move.</p>
-          </div>
-          <a class="more" href={`${base}/docs/guides/terminal/`}>The terminal app <span aria-hidden="true">→</span></a>
-        </div>
-        <div class="panel shots" data-shots>
-          <div class="bench-tabs seg" role="tablist" aria-label="Terminal app screens"><button type="button" role="tab" id="tui-tab-chat" aria-controls="tui-chat" aria-selected="true">Chat</button><button type="button" role="tab" id="tui-tab-engine" aria-controls="tui-engine" aria-selected="false">Engine</button><button type="button" role="tab" id="tui-tab-models" aria-controls="tui-models" aria-selected="false">Models</button><button type="button" role="tab" id="tui-tab-discover" aria-controls="tui-discover" aria-selected="false">Discover</button></div>
-          <figure class="shot" id="tui-chat" role="tabpanel" aria-labelledby="tui-tab-chat">
-            <img src={`${base}/shots/tui-chat.png`} width="1430" height="880" loading="lazy" alt="The jitllm terminal app, Chat screen" />
-            <figcaption>Qwen3-30B-A3B answering on a laptop with a 4 GB GPU, the engine beside the conversation.</figcaption>
-          </figure>
-          <figure class="shot" id="tui-engine" role="tabpanel" aria-labelledby="tui-tab-engine" hidden>
-            <img src={`${base}/shots/tui-engine.png`} width="1430" height="880" loading="lazy" alt="The jitllm terminal app, Engine screen" />
-            <figcaption>Every block and where it runs, the rate over time, memory and the pager. The arrow keys move the seam.</figcaption>
-          </figure>
-          <figure class="shot" id="tui-models" role="tabpanel" aria-labelledby="tui-tab-models" hidden>
-            <img src={`${base}/shots/tui-models.png`} width="1430" height="880" loading="lazy" alt="The jitllm terminal app, Models screen" />
-            <figcaption>The models in your folders, each one's header read without loading it.</figcaption>
-          </figure>
-          <figure class="shot" id="tui-discover" role="tabpanel" aria-labelledby="tui-tab-discover" hidden>
-            <img src={`${base}/shots/tui-discover.png`} width="1430" height="880" loading="lazy" alt="The jitllm terminal app, Discover screen" />
-            <figcaption>The catalog ranked for this machine, from fastest to smartest, with whether each model fits.</figcaption>
-          </figure>
-        </div>
-      </section>
-
-      <section id="apps" class="col sec">
-        <div class="head">
-          <div>
-            <h2 class="h2">One engine, every way in</h2>
-            <p class="desc">Each program is one self-contained binary, for Linux, macOS and Windows on x86-64 and arm64. GPUs need only their driver.</p>
-          </div>
-        </div>
-        <ul class="models apps">
-          <li><b>Server</b><span><code>jitllmd</code>: many models and many sessions at once, behind OpenAI, Anthropic and Connect APIs.</span></li>
-          <li><b>CLI</b><span><code>jitllm</code>: convert GGUF or Hugging Face weights and run a model from the command line.</span></li>
-          <li><b>Desktop</b><span><code>jitllm-desktop</code>: downloads, conversion, chat and a live view of the blocks.</span></li>
-          <li><b>TUI</b><span><code>jitllm-tui</code>: the same screens in a terminal, over SSH too.</span></li>
-          <li><b>Embed</b><span>The engine as a Go library, inside your own program.</span></li>
-        </ul>
-      </section>
-
-
-      <section id="models" class="col sec">
-        <div class="head">
-          <div>
-            <h2 class="h2">Bring the models you want</h2>
-            <p class="desc">Convert from GGUF or Hugging Face once, then run the <code>.jlm</code> anywhere jitllm runs.</p>
-          </div>
-          <a class="more" href={`${base}/docs/reference/models/`}>All models <span aria-hidden="true">→</span></a>
-        </div>
-        <ul class="models">
-          <li><b>Llama</b><span>Llama 2 · Llama 3 · Llama 4 · Mistral · Ministral · SmolLM</span></li>
-          <li><b>Qwen</b><span>Qwen2 · Qwen3 · Qwen3.5 · Qwen3 MoE · Qwen3 Next · Qwen1.5 MoE</span></li>
-          <li><b>Gemma</b><span>Gemma 1 · Gemma 2 · Gemma 3 · Gemma 3n · Gemma 4</span></li>
-          <li><b>DeepSeek</b><span>DeepSeek V2 · V3 · V3.2 · V4 · Kimi K2 · Moonlight</span></li>
-          <li><b>GLM · Kimi</b><span>GLM-4 · GLM-4.5 · GLM-4.7-Flash · Kimi Linear · Kimi-K3</span></li>
-          <li><b>Mixtures</b><span>gpt-oss · MiniMax M2 · M3 · OLMoE · Mixtral · DBRX · Ling · dots.llm1 · ERNIE 4.5</span></li>
-          <li><b>State space</b><span>Mamba · Mamba-2 · Jamba · Falcon-H1 · Granite 4.0-H · Nemotron-H · LFM2</span></li>
-          <li><b>Phi</b><span>Phi-2 · Phi-3 · Phi-3.5-MoE · Phi-4</span></li>
-          <li><b>More families</b><span>Granite · Command-R · Hunyuan · OLMo · EXAONE · Seed-OSS · Apertus · Falcon · StableLM · Nemotron · StarCoder</span></li>
-          <li><b>Vision</b><span>Qwen2-VL · Qwen2.5-VL · Qwen3-VL · GLM-4.xV · Gemma 3/3n/4 · InternVL · MiniCPM-V · Pixtral · Llama 4 · Phi-4 · Kimi-VL · SmolVLM · LLaVA</span></li>
-          <li><b>Embeddings</b><span>BERT · nomic-bert · Qwen3-Embedding · EmbeddingGemma</span></li>
-          <li><b>Formats</b><span>GGUF · Hugging Face safetensors → .jlm</span></li>
-        </ul>
-      </section>
-
-      <section id="go" class="col sec">
-        <div class="split">
-          <div>
-            <h2 class="h2">Why Go?</h2>
-            <p class="lede">Most inference engines are written in C, C++ or Rust, and some of the best work is. The choice here is practical.</p>
-            <p class="lede">The hot paths are generated machine code either way; Go carries the parts around them (paging, placement, scheduling).</p>
-          </div>
-          <ul class="points">
-            <li><span class="pix sm" data-pixel="bolt" aria-hidden="true"></span><div><b>Made for writing a JIT</b><p>It is the language the author knows best for writing a JIT: emitting machine code, mapping it executable and calling into it.</p></div></li>
-            <li><span class="pix sm" data-pixel="chip" aria-hidden="true"></span><div><b>Portable</b><p>One toolchain cross-compiles every target, and with no cgo there is no C toolchain or vendor SDK per target.</p></div></li>
-            <li><span class="pix sm" data-pixel="probe" aria-hidden="true"></span><div><b>Fast to compile, fast to experiment</b><p>Most of this engine was found by trying an idea and measuring it.</p></div></li>
-            <li><span class="pix sm" data-pixel="box" aria-hidden="true"></span><div><b>Built for servers</b><p>Go's networking and synchronization let <code>jitllmd</code> serve many sessions at once, batch them in one step loop and time-slice them fairly, in one process with no framework. A warm decode token allocates nothing, so the collector never touches the hot path.</p></div></li>
-          </ul>
-        </div>
-      </section>
-
       <section id="agents" class="band">
         <div class="col sec">
           <div class="head">
@@ -521,6 +475,7 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '')
           <p class="method">The OpenAI- and Anthropic-compatible APIs work with the SDKs and agent frameworks as they are, and a forced tool call is a call. For an agent changing jitllm, <a href="https://github.com/jitllm/jitllm/blob/main/AGENTS.md">AGENTS.md</a> holds the project's binding rules, the model list is generated from the converter, and the model-free suite reports a missing model or device as a skip, never as a pass.</p>
         </div>
       </section>
+
     </main>
 
     <footer class="foot">

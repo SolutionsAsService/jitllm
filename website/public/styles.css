@@ -469,3 +469,6 @@ p code, .desc code { color: var(--text); background: var(--surface-2); padding: 
 @media (min-width: 1100px) { .models.engine { grid-template-columns: repeat(3, 1fr); } }
 @media (min-width: 1024px) { .models.apps { grid-template-columns: repeat(5, 1fr); } }
 .models.server { margin-top: 1rem; }
+.band:has(+ .band) { border-bottom: 0; } .band + .band { border-top: 0; }
+.bar-in { position: relative; }
+@media (min-width: 900px) { .nav { position: absolute; left: 50%; transform: translateX(-50%); margin-left: 0; } }
