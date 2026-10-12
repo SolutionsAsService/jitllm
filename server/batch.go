@@ -113,6 +113,9 @@ type stepLoop struct {
 	// prompt is in.
 	parkDropsLogits bool
 	onStarted       func(*row)
+	// beforeQueueWait, when set, sees each row after it is submitted and
+	// before its request waits for admission.
+	beforeQueueWait func(*row)
 	// parkFault makes every park of a time slice fail, as a device that
 	// cannot take a session's history home does.
 	parkFault error
@@ -1141,6 +1144,9 @@ func (e *Engine) generateBatched(ctx context.Context, lp *stepLoop, s *Session, 
 		return err
 	}
 	defer s.queuePos.Store(0)
+	if lp.beforeQueueWait != nil {
+		lp.beforeQueueWait(r)
+	}
 
 	// ---- the queue: until a row is free, the request can still leave.
 	var timeout <-chan time.Time
@@ -1152,7 +1158,15 @@ func (e *Engine) generateBatched(ctx context.Context, lp *stepLoop, s *Session, 
 	select {
 	case <-r.admitted:
 	case <-r.done:
-		return r.result.err
+		// A row the loop admitted and ran to its end before this select
+		// looked has both channels closed, and select picks either. Only a
+		// row that ended in the queue (the loop closed) ends here; one that
+		// ran drains its outbox and ends with its Finished event below.
+		select {
+		case <-r.admitted:
+		default:
+			return r.result.err
+		}
 	case <-ctx.Done():
 		if lp.withdraw(r) {
 			return ctx.Err()
