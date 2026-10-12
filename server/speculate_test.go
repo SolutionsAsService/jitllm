@@ -115,6 +115,13 @@ func TestSpeculationRefusesAContinuePastItsRound(t *testing.T) {
 // postOAText is a chat completion's text.
 func postOAText(t *testing.T, base, body string) string {
 	t.Helper()
+	text, _ := postOAChat(t, base, body)
+	return text
+}
+
+// postOAChat is a chat completion's text and its finish_reason.
+func postOAChat(t *testing.T, base, body string) (text, finish string) {
+	t.Helper()
 	resp, err := http.Post(base+"/v1/chat/completions", "application/json", strings.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
@@ -132,10 +139,11 @@ func postOAText(t *testing.T, base, body string) string {
 			Message struct {
 				Content string `json:"content"`
 			} `json:"message"`
+			FinishReason string `json:"finish_reason"`
 		} `json:"choices"`
 	}
 	if err := json.Unmarshal(b, &out); err != nil || len(out.Choices) != 1 {
 		t.Fatalf("%s: %v in %s", body, err, b)
 	}
-	return out.Choices[0].Message.Content
+	return out.Choices[0].Message.Content, out.Choices[0].FinishReason
 }

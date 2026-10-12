@@ -189,14 +189,33 @@ func TestStructuredGateDiscriminates(t *testing.T) {
 func TestResponseFormatOverHTTP(t *testing.T) {
 	sm := structuredModels[1]
 	_, _, c := loadedEngine(t, sm.file, sm.id, LoadOptions{})
-	for seed := range 4 {
-		out := postOAText(t, c.url, fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":"Give me a JSON `+
+	// A json_object grammar allows any text inside a string, so a sampled
+	// reply can run to max_tokens before the object closes. The contract is
+	// that it never ends unfinished without saying so: finish_reason "stop"
+	// means a complete object, "length" means the cut.
+	var finished int
+	for seed := range 8 {
+		out, finish := postOAChat(t, c.url, fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":"Give me a JSON `+
 			`object about a city."}],"max_tokens":300,"temperature":1,"seed":%d,"response_format":`+
 			`{"type":"json_object"}}`, sm.id, seed))
 		var m map[string]any
-		if err := json.Unmarshal([]byte(out), &m); err != nil {
-			t.Fatalf("json_object: %q is not an object: %v", out, err)
+		err := json.Unmarshal([]byte(out), &m)
+		switch finish {
+		case "stop":
+			if err != nil {
+				t.Fatalf("json_object seed %d: finish_reason stop but %q is not an object: %v", seed, out, err)
+			}
+			finished++
+		case "length":
+			if err == nil {
+				t.Fatalf("json_object seed %d: finish_reason length but %q is a complete object", seed, out)
+			}
+		default:
+			t.Fatalf("json_object seed %d: finish_reason %q", seed, finish)
 		}
+	}
+	if finished == 0 {
+		t.Fatal("json_object: no reply closed its object within max_tokens, so the stop path is not covered")
 	}
 	out := postOAText(t, c.url, fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":"Describe a person."}],`+
 		`"max_tokens":400,"temperature":1,"seed":7,"response_format":{"type":"json_schema","json_schema":`+
