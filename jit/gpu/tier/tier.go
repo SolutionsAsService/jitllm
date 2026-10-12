@@ -164,6 +164,19 @@ type Config struct {
 	// (kernels.RoPEQKVPaged's three writers): the per-op reference path, the
 	// A/B arm and the bisection switch for a fused kernel.
 	NoFuse bool
+	// NoActFuse keeps the decode matvecs reading an operand quantized by a
+	// launch of its own (Quantize, RMSNormQuantRows) instead of building it in
+	// their prologue (kernels.ActIn): the A/B arm and bisection switch for
+	// the operand prologue alone. NoFuse turns it off too.
+	NoActFuse bool
+	// ActInPrefetch is how many weight words each thread of an operand-prologue
+	// matvec prefetches before its prologue (kernels.ActIn.Prefetch): 0 is the
+	// default (8), -1 none.
+	ActInPrefetch int
+	// ActInSites picks which matvecs take the operand prologue, a bit each:
+	// 1 q/k/v, 2 the attention output, 4 gate and up, 8 down; 0 is the
+	// default set. The A/B and bisection switch per site.
+	ActInSites int
 	// NoMMA refuses the warp matrix instruction, leaving the dp4a tile. It is
 	// the bisection switch for a wrong answer that only the matrix path shows.
 	NoMMA bool
@@ -825,6 +838,10 @@ type Stats struct {
 	// several (kernels.RoPEQKVPaged), not graph replays: the selection check
 	// that the fused form ran rather than its parts.
 	FusedLaunches int
+	// ActInLaunches counts encoded matvec launches that built their own operand
+	// (kernels.ActIn), and ActInSaved the norm or quantize launches they
+	// replaced: the selection check that the prologue ran.
+	ActInLaunches, ActInSaved int
 	// PagedLaunches counts encoded paged-attention launches: the check that a
 	// paged run read its history through the pool.
 	PagedLaunches int
@@ -1160,6 +1177,8 @@ func (s *Stats) add(o Stats) {
 	s.AttnMMA = s.AttnMMA || o.AttnMMA
 	s.FlashLaunches += o.FlashLaunches
 	s.FusedLaunches += o.FusedLaunches
+	s.ActInLaunches += o.ActInLaunches
+	s.ActInSaved += o.ActInSaved
 	s.PagedLaunches += o.PagedLaunches
 	s.PagedPrefillLaunches += o.PagedPrefillLaunches
 	s.PagedStagedLaunches += o.PagedStagedLaunches

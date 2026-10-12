@@ -374,8 +374,13 @@ func rmsNormRowsAs(k, rows int, eps float32, addOne, add bool, window int, warp 
 	b.SetPhi(i2, b.Add(ir.U32, i2, step))
 	b.EndLoop()
 	if window > 0 {
-		quantPhase(b, k, rows, window, r, tid, scale, pW, pA, pAX, shMax, shSum, addOne,
-			func(idx ir.Value) ir.Value { return value(idx, false) })
+		quantPhase(b, k, rows, window, g, r, tid, pA, pAX, shMax, shSum, func(at ir.Value) ir.Value {
+			w := b.Load(ir.F32, pW, at, 0)
+			if addOne {
+				w = b.Add(ir.F32, w, b.ConstF32(1))
+			}
+			return b.Mul(ir.F32, b.Mul(ir.F32, value(at, false), scale), w)
+		})
 	}
 	if f16 != nil {
 		// Output word wd of row r is thread tid's in iteration j, wd = tid +
@@ -407,9 +412,12 @@ func rmsNormRowsAs(k, rows int, eps float32, addOne, add bool, window int, warp 
 // thread owns word tid + j*RMSNormGroup in iteration j, so a window of
 // consecutive words is consecutive threads in one iteration, and every index
 // comes from the clamped word as in Quantize (RULE 13).
-func quantPhase(b *ir.Builder, k, rows, window int, r, tid, scale, pW, pA, pAX, shMax, shSum ir.Value,
-	addOne bool, value func(ir.Value) ir.Value) {
-	const g = RMSNormGroup
+//
+// g is the workgroup width, a multiple of the window's span of words, and
+// elem(at) is element at's value as quantized: the norm's output, or the
+// input itself where no norm leads (matVec's operand prologue).
+func quantPhase(b *ir.Builder, k, rows, window, g int, r, tid, pA, pAX, shMax, shSum ir.Value,
+	elem func(at ir.Value) ir.Value) {
 	const wpb = 8
 	nw := k / 4
 	nbAll := rows * k / 32
@@ -424,12 +432,7 @@ func quantPhase(b *ir.Builder, k, rows, window int, r, tid, scale, pW, pA, pAX, 
 		base := b.Mul(ir.U32, word, b.Const(ir.U32, 4))
 		var v [4]ir.Value
 		for i := range v {
-			at := b.Add(ir.U32, base, b.Const(ir.U32, int64(i)))
-			w := b.Load(ir.F32, pW, at, 0)
-			if addOne {
-				w = b.Add(ir.F32, w, b.ConstF32(1))
-			}
-			v[i] = b.Mul(ir.F32, b.Mul(ir.F32, value(at), scale), w)
+			v[i] = elem(b.Add(ir.U32, base, b.Const(ir.U32, int64(i))))
 		}
 		b.Store(shMax, tid, amaxOf(b, v[:]), 0)
 		b.Barrier()

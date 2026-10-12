@@ -197,6 +197,8 @@ type layer struct {
 	qkv             backend.Kernel
 	qkvBlocks, qkvW int
 	qkvBias         [3]bool // which segments the kernel takes a bias for
+	// qkvIn is qkv normalising and quantizing its own operand (fuseActIn).
+	qkvIn backend.Kernel
 	// mlaQK is MLA's query projection (q, or q_a under a q LoRA) and kv_a in
 	// one launch, and shGU the shared expert's gate and up: two matvecs over
 	// one activation each, built by fuseQKV like qkv. nil where declined.
@@ -1074,6 +1076,17 @@ type mv struct {
 	// ActMul launch goes. nil elsewhere, and on a split whose last pass is a
 	// reduce (which would have to apply it instead).
 	gated backend.Kernel
+	// resIn, gatedIn and kernIn are res, gated and kern building their own
+	// operand (kernels.ActIn) from the float row: pIn [pNW] in pA/pAX's
+	// place. Built by fuseActIn; nil where the block cannot take them.
+	resIn, gatedIn, kernIn backend.Kernel
+	// resActIn is res forming act(gate)*up and quantizing it in its prologue
+	// (kernels.ActIn.Gated), for an FFN whose up projection has no gated form.
+	resActIn backend.Kernel
+	// wantGated marks the FFN up projection that takes a gated variant
+	// whenever its split allows one, so a retune to an in-group split builds
+	// it even where the first split had none.
+	wantGated bool
 	// redN is how many outputs red sums on a batched twin that splits k: every
 	// row of every token column (ragMV).
 	redN int
@@ -2998,6 +3011,9 @@ func (g *devTier) prepLayer(sid uint64, li int, p *nn.LayerPlan, w *nn.LayerWeig
 		if i == 5 && e <= 1 && bias[i] == nil && !ungatedFFN(p) && k.kern != nil && k.rowt <= 1 &&
 			(p.Act == kernels.ActSiLU || p.Act == kernels.ActGELU) {
 			k.gated = g.gatedKernel(k.q, k.k, k.rows, k.split, k.group, p.Act)
+			// nil at a partial-writing split; the retune builds it once the
+			// split it picks has a final-row form.
+			k.wantGated = true
 		}
 		*ms[i] = k
 	}
@@ -6059,6 +6075,8 @@ type graphKey struct {
 	// noFuse is Config.NoFuse: the fused kernels and their parts are two
 	// launch sequences, and verify -ab fuse flips it every round.
 	noFuse bool
+	// noActFuse is Config.NoActFuse, verify -ab actfuse's switch.
+	noActFuse bool
 }
 
 // canRecord reports whether this device's sessions can capture a launch
@@ -6526,7 +6544,7 @@ func (g *devTier) layersOnce(sid uint64, bs *blockScratch, lo, hi, pos int, x, c
 		ragHead = head.WantedRows(nrow)
 	}
 	key := graphKey{lo, hi, nCap, R, head != nil, g.TableSplit, g.ScalarSoftmax, g.flashOn(), g.KVF16,
-		ropeDev, argmax, sampleK, samplePen, pick, ragN, ragRuns, par, pagedVar, ragHead, hNormID, sid, g.NoFuse}
+		ropeDev, argmax, sampleK, samplePen, pick, ragN, ragRuns, par, pagedVar, ragHead, hNormID, sid, g.NoFuse, g.NoActFuse}
 	if _, live := g.recs[key]; !live {
 		for k, r := range g.recs {
 			older := k
@@ -6923,6 +6941,33 @@ func (g *devTier) layersSession(s backend.Session) {
 		lamv(m, m.gated, m.rows*m.split, r.qs, dOf(r), r.sc, bs.a, bs.ax, dst, gate)
 		return true
 	}
+	// mvIn launches one of m's operand-prologue kernels (fuseActIn): the
+	// float row src, and the norm weight nw where a norm leads, in the
+	// operand's place; extra is the residual (res) or the gate (gated).
+	mvIn := func(m mv, k backend.Kernel, r *resident, dst, src, nw, extra backend.Buf) {
+		out := dst
+		if m.split > 1 && !m.group {
+			out = g.partBuf
+		}
+		n := m.rows * m.split
+		if m.rowt > 1 && k != m.gatedIn {
+			n /= m.rowt
+		}
+		var arr [8]backend.Buf
+		bufs := append(arr[:0], r.qs, r.d, r.sc, src)
+		if nw != nil {
+			bufs = append(bufs, nw)
+		}
+		bufs = append(bufs, out)
+		if extra != nil {
+			bufs = append(bufs, extra)
+		}
+		lamv(m, k, n, bufs...)
+		if m.split > 1 && !m.group {
+			lc.la(m.red, m.rows, g.partBuf, dst)
+		}
+		g.ActInLaunches++
+	}
 	// mvid launches an indexed matvec: the same buffers plus the selection,
 	// and rows*slots*split threads rather than rows. The kernel takes pSel
 	// after pOut, so the argument order here is the parameter order there.
@@ -7080,7 +7125,20 @@ func (g *devTier) layersSession(s backend.Session) {
 				if l.k3 != nil {
 					ain = g.k3AttnIn(lc, bs, l, R)
 				}
-				if voltaOnly && !skip["norm"] {
+				// The operand prologue (fuseActIn): q/k/v normalise and quantize
+				// the block input themselves, and the norm launch goes. Only
+				// where q/k/v run as the fused launch below (qkvIn) or as
+				// their three launches (qkvSep), and nothing else reads the
+				// normed row (bs.h).
+				qkvPro := R == 1 && rag == nil && g.actInOn() && l.k3 == nil && !l.mla && l.clampB == nil &&
+					l.kvSrc == li && !l.vFromK && !g.TableSplit && l.altRouter == nil && bs.normVar == nil &&
+					l.nAttnB == nil && l.nAttn != nil && !voltaOnly && !skip["norm"] && !skip["quant"] && !skip["qkvo"]
+				qkvIn := qkvPro && l.qkv != nil && l.qkvIn != nil &&
+					l.qkvBias == [3]bool{l.mvq.bias != nil, l.mvk.bias != nil, l.mvv.bias != nil}
+				qkvSep := qkvPro && l.qkv == nil && l.mvq.kernIn != nil
+				if qkvIn || qkvSep {
+					g.ActInSaved++
+				} else if voltaOnly && !skip["norm"] {
 					// The norm writes the first projection's binary16 operand
 					// too, and the memo tells its GEMM so.
 					nk, conv := backend.Kernel(nil), backend.Kernel(nil)
@@ -7167,6 +7225,10 @@ func (g *devTier) layersSession(s backend.Session) {
 							// grew it on the heap every block.
 							var bufArr [17]backend.Buf
 							bufs := append(bufArr[:0], bs.a, bs.ax)
+							if qkvIn {
+								kern, bufs = l.qkvIn, append(bufArr[:0], ain, l.nAttn)
+								g.ActInLaunches++
+							}
 							for _, sg := range []struct {
 								m   mv
 								r   *resident
@@ -7195,6 +7257,10 @@ func (g *devTier) layersSession(s backend.Session) {
 								fsrc = bs.cin
 								mvrun(pr.m, pr.r, pr.out)
 							}
+						} else if qkvSep {
+							mvIn(l.mvq, l.mvq.kernIn, l.wq, bs.q, ain, l.nAttn, l.mvq.bias)
+							mvIn(l.mvk, l.mvk.kernIn, l.wk, bs.k, ain, l.nAttn, l.mvk.bias)
+							mvIn(l.mvv, l.mvv.kernIn, l.wv, bs.v, ain, l.nAttn, l.mvv.bias)
 						} else {
 							mvrun(l.mvq, l.wq, bs.q)
 							mvrun(l.mvk, l.wk, bs.k)
@@ -7631,7 +7697,15 @@ func (g *devTier) layersSession(s backend.Session) {
 						lc.la(bs.sigMul, R*qdim, bs.ogate, bs.xb, bs.ogated)
 						aSrc = bs.ogated
 					}
-					if voltaOnly {
+					// The attention output projection quantizing its own
+					// operand (fuseActIn), with the residual add it already
+					// carries.
+					oIn := R == 1 && rag == nil && g.actInOn() && l.mvo.resIn != nil && !voltaOnly && l.clampB == nil &&
+						!skip["quant"] && !skip["qkvo"] && l.nPostAttn == nil && !l.withAttn && !resScaled && !skip["add"] &&
+						l.altRouter == nil && l.k3 == nil && !(g.TableSplit && l.mvo.alt != nil) && l.mvo.k == qdim
+					if oIn {
+						g.ActInSaved++
+					} else if voltaOnly {
 						fsrc = aSrc
 						g.QuantSkipped++
 					} else if l.clampB != nil {
@@ -7641,7 +7715,10 @@ func (g *devTier) layersSession(s backend.Session) {
 					} else if !skip["quant"] {
 						lc.la(bs.quantQ, kernels.QuantizeThreads(R*qdim/32), aSrc, bs.a, bs.ax)
 					}
-					if !skip["qkvo"] {
+					if oIn {
+						mvIn(l.mvo, l.mvo.resIn, l.wo, bs.x2, aSrc, nil, bs.x)
+						attnFused = true
+					} else if !skip["qkvo"] {
 						// x2 = x + Wo*attn in one launch where nothing sits
 						// between the projection and the residual add.
 						if !(l.nPostAttn == nil && !l.withAttn && !resScaled && !skip["add"] && l.altRouter == nil && l.k3 == nil &&
@@ -7686,6 +7763,15 @@ func (g *devTier) layersSession(s backend.Session) {
 
 			// --- feed-forward
 			quantDone := false
+			// The operand prologue (fuseActIn): gate and up normalise and
+			// quantize the stream themselves, and the down projection
+			// quantizes act(gate)*up; the FFN norm and its quantize go. Only
+			// on a plain gated FFN, where nothing else reads the normed row.
+			ffnIn := R == 1 && rag == nil && g.actInOn() && l.mvg.kernIn != nil && (l.mvu.gatedIn != nil || l.mvu.kernIn != nil) &&
+				!voltaOnly && !skipFFN && !skip["norm"] && !skip["quant"] && !skip["actmul"] && bs.normVar == nil &&
+				l.nFFNB == nil && l.nFFN != nil && l.nResid == nil && l.router == nil && l.clampB == nil &&
+				!l.nonCausal && !l.sparse && l.k3 == nil && l.ds4 == nil && l.altRouter == nil && !p.Parallel &&
+				!ungatedFFN(p) && !(g.TableSplit && (l.mvg.alt != nil || l.mvu.alt != nil))
 			// The FFN norm's fused form where the block runs binary16 GEMMs:
 			// it writes the first FFN projection's operand too.
 			var ffnNorm, ffnConv backend.Kernel
@@ -7753,7 +7839,10 @@ func (g *devTier) layersSession(s backend.Session) {
 				if !skip["add"] && !attnFused {
 					addRes(bs.x, aout, bs.x2)
 				}
-				if !voltaOnly && !skip["norm"] && !skip["quant"] && bs.rmsQ != nil && bs.normVar == nil && l.nFFNB == nil &&
+				if ffnIn {
+					g.ActInSaved++
+					quantDone = true
+				} else if !voltaOnly && !skip["norm"] && !skip["quant"] && bs.rmsQ != nil && bs.normVar == nil && l.nFFNB == nil &&
 					l.nFFN != nil {
 					laRows(bs.rmsQ, bs.x2, l.nFFN, bs.h, bs.a, bs.ax)
 					fsrc = bs.h // what la records for a quantize: float weights read it
@@ -8125,20 +8214,39 @@ func (g *devTier) layersSession(s backend.Session) {
 						lc.la(bs.clampK[9+2*s], R*p.NFFN, pr.out, l.clampB, pr.cl)
 					}
 					gIn, uIn = bs.gClamp, bs.uClamp
+				} else if ffnIn {
+					mvIn(l.mvg, l.mvg.kernIn, l.gate, bs.g, bs.x2, l.nFFN, nil)
 				} else if !ungated {
 					mvrun(l.mvg, l.gate, bs.g)
 					// Gemma 3n's sparse lead: the gate's gaussian top-k.
 					gIn = g.emitGauss(lc, bs, l, R)
 				}
-				gated := !ungated && l.clampB == nil && !skip["actmul"] && mvgate(l.mvu, l.up, bs.act, gIn)
-				if !gated && l.clampB == nil {
-					mvrun(l.mvu, l.up, bs.u)
+				gated := false
+				switch {
+				case ffnIn && l.mvu.gatedIn != nil:
+					mvIn(l.mvu, l.mvu.gatedIn, l.up, bs.act, bs.x2, l.nFFN, gIn)
+					gated = true
+				case ffnIn:
+					mvIn(l.mvu, l.mvu.kernIn, l.up, bs.u, bs.x2, l.nFFN, nil)
+				default:
+					gated = !ungated && l.clampB == nil && !skip["actmul"] && mvgate(l.mvu, l.up, bs.act, gIn)
+					if !gated && l.clampB == nil {
+						mvrun(l.mvu, l.up, bs.u)
+					}
 				}
+				// The down projection building its own operand (fuseActIn):
+				// quantizing act(gate)*up where up wrote it (downIn), or
+				// forming it from gate and up as it quantizes (downAct).
+				downOK := R == 1 && rag == nil && g.actInOn() && !voltaOnly && l.clampB == nil && l.nPostFFN == nil &&
+					!resScaled && !skip["add"] && !skip["quantf"] && !skip["actmul"] && l.k3 == nil && !l.nonCausal &&
+					!(g.TableSplit && l.mvd.alt != nil) && l.mvd.k == nffn
+				downIn := downOK && gated && l.mvd.resIn != nil
+				downAct := downOK && ffnIn && !gated && l.mvd.resActIn != nil
 				// The activation writes the down projection's operand where it
 				// can: binary16 for a binary16 GEMM, int8 for the rest.
 				var actConv backend.Kernel
-				quantDoneF := false
-				if !skip["actmul"] && !gated && !ungated && l.clampB == nil {
+				quantDoneF := downAct
+				if !skip["actmul"] && !gated && !ungated && l.clampB == nil && !downAct {
 					if voltaOnly {
 						if ak, conv, n := g.actF16For(bs, l.mvd, R); ak != nil {
 							lc.la(ak, n, gIn, uIn, g.f16Buf)
@@ -8173,10 +8281,20 @@ func (g *devTier) layersSession(s backend.Session) {
 					lc.la(bs.clampK[12], R*p.NFFN, bs.act, l.clampB, bs.cin)
 					lc.la(bs.quantF, kernels.QuantizeThreads(R*p.NFFN/32), bs.cin, bs.a, bs.ax)
 					fsrc = bs.cin
-				} else if !skip["quantf"] && !quantDoneF {
+				}
+				if downIn || downAct {
+					g.ActInSaved++
+				} else if !voltaOnly && l.clampB == nil && !skip["quantf"] && !quantDoneF {
 					lc.la(bs.quantF, kernels.QuantizeThreads(R*nffn/32), bs.act, bs.a, bs.ax)
 				}
-				if l.clampB == nil && l.nPostFFN == nil && !resScaled && !skip["add"] && l.k3 == nil && mvres(l.mvd, l.down, bs.x, bs.x2) {
+				if downIn {
+					mvIn(l.mvd, l.mvd.resIn, l.down, bs.x, bs.act, nil, bs.x2)
+					ffnFused = true
+				} else if downAct {
+					// pIn is the gate's row and the norm-weight slot carries up's.
+					mvIn(l.mvd, l.mvd.resActIn, l.down, bs.x, gIn, uIn, bs.x2)
+					ffnFused = true
+				} else if l.clampB == nil && l.nPostFFN == nil && !resScaled && !skip["add"] && l.k3 == nil && mvres(l.mvd, l.down, bs.x, bs.x2) {
 					ffnFused = true
 				} else {
 					mvrun(l.mvd, l.down, bs.mvOut)

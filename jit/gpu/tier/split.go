@@ -550,7 +550,7 @@ func (g *devTier) retuneDecode() {
 			if u.m.res != nil {
 				u.m.res = g.kernelMode(key.q, key.k, key.rows, best, 1, true, bestGrp)
 			}
-			if u.m.gated != nil {
+			if u.m.gated != nil || u.m.wantGated {
 				u.m.gated = g.gatedKernel(key.q, key.k, key.rows, best, bestGrp, g.bs.p.Act)
 			}
 		}
@@ -1091,6 +1091,7 @@ func groupsOf(threads, split int, grp bool) int {
 // reduction, or projections that read different activations. MLA, recurrent
 // and vision blocks never reach it with three plain decode matvecs.
 func (g *devTier) fuseQKV(l *layer) {
+	defer g.fuseActIn(l)
 	g.fuseMoE(l)
 	l.mlaQK, l.shGU = nil, nil
 	if l.mla {

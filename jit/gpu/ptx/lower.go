@@ -426,6 +426,13 @@ func Lower(k *ir.Kernel, target string) (string, error) {
 			b.Op("mov.u32 %v,WARP_SZ;", r)
 			reg[v] = r
 
+		case ir.OpPrefetch:
+			if !shared[a0] {
+				ad := b.Reg(B64)
+				b.Op("mad.wide.u32 %v,%v,4,%v;", ad, reg[a1], reg[a0])
+				b.Op("prefetch.global.L2 [%v];", ad)
+			}
+
 		case ir.OpLoop:
 			// Loop-carried values are initialised BEFORE the label, which needs
 			// a scan forward to the matching EndLoop.

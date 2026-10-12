@@ -468,6 +468,8 @@ func (l *lowerer) block(lo, hi int) error {
 			l.val[v] = l.laneID
 		case ir.OpSubgroupSize:
 			l.val[v] = l.sgSize
+		case ir.OpPrefetch:
+			// SPIR-V has no prefetch; the hint lowers to nothing.
 		case ir.OpTileLoad, ir.OpTileSplat, ir.OpTileMMA, ir.OpTileStore:
 			if err := l.tileOp(o, v); err != nil {
 				return fmt.Errorf("spirv: op %d: %w", i, err)

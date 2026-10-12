@@ -186,6 +186,13 @@ const (
 	OpShuffle
 	OpLaneID
 	OpSubgroupSize
+	// OpPrefetch asks for the line holding element Args[1] of the global
+	// buffer Args[0] to be brought into the cache ahead of a load: a hint
+	// with no result and no effect on any value, so a backend with no such
+	// instruction emits nothing. PTX lowers it as prefetch.global.L2. It lets
+	// a kernel start its weight stream before a prologue whose barriers would
+	// otherwise hold it back (kernels.ActIn).
+	OpPrefetch
 	nKind
 )
 
@@ -199,7 +206,7 @@ var kindName = [nKind]string{
 	"select", "loop", "endloop", "phi", "shuffle.xor", "shared", "barrier", "mma", "mma.get",
 	"tile.load", "tile.splat", "tile.mma", "tile.store", "sub.f16x2", "fma.f16x2",
 	"loadv", "loadv.get", "storev", "funnel",
-	"subgroup.reduce", "subgroup.broadcast", "shuffle", "laneid", "subgroup.size",
+	"subgroup.reduce", "subgroup.broadcast", "shuffle", "laneid", "subgroup.size", "prefetch",
 }
 
 func (k Kind) String() string { return kindName[k] }
