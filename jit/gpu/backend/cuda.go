@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -73,6 +74,10 @@ type cudaDev struct {
 	// posted routes every call through the owner goroutine instead of running
 	// it inline; Opts.CUDAPosted, fixed at open.
 	posted bool
+	// maxRegs is Opts.CUDAMaxRegs, fixed at open; res is what each compiled
+	// kernel cost (ResourceReporter).
+	maxRegs int
+	res     resLedger
 	// reqFree is Session's free list; see Session.
 	reqMu   sync.Mutex
 	reqFree []*sessReq
@@ -122,7 +127,7 @@ func OpenCUDAWith(ord int, opts Opts) (Device, error) {
 		return nil, o.err
 	}
 	ownedDevices.Add(1)
-	return &cudaDev{d: o.d, reqs: reqs, owner: o.tid, posted: opts.CUDAPosted}, nil
+	return &cudaDev{d: o.d, reqs: reqs, owner: o.tid, posted: opts.CUDAPosted, maxRegs: opts.CUDAMaxRegs}, nil
 }
 
 // Session batches a sequence of device calls into ONE ownership hop.
@@ -856,7 +861,13 @@ func (c *cudaDev) UnifiedMemory() bool { return c.d.Integrated() }
 var (
 	_ HostImport = (*cudaDev)(nil)
 	_ Unified    = (*cudaDev)(nil)
+
+	_ ResourceReporter = (*cudaDev)(nil)
 )
+
+// KernelResources is every kernel this card compiled, as the driver reports
+// ptxas's allocation of it.
+func (c *cudaDev) KernelResources() []KernelResources { return c.res.list() }
 
 // UnpinHost gives PinHost's memory back.
 func (c *cudaDev) UnpinHost(b []byte) { c.do(func() { cuda.FreeHost(b) }) }
@@ -887,11 +898,25 @@ func (c *cudaDev) Compile(k *ir.Kernel) (Kernel, error) {
 	if err != nil {
 		return nil, err
 	}
+	if c.maxRegs > 0 {
+		src = strings.Replace(src, ")\n{\n", fmt.Sprintf(")\n.maxnreg %d\n{\n", c.maxRegs), 1)
+	}
 	var m *cuda.Module
+	var a cuda.Attrs
+	var attrsOK bool
 	err = errCUDAClosed
-	c.do(func() { m, err = c.d.Load(src, k.Name) })
+	c.do(func() {
+		if m, err = c.d.Load(src, k.Name); err == nil {
+			a, attrsOK = m.Attrs(k.Group[0])
+		}
+	})
 	if err != nil {
 		return nil, err
+	}
+	if attrsOK {
+		c.res.note(KernelResources{Name: k.Name, API: "cuda", Group: k.Group[0], Regs: a.Regs,
+			SpillBytes: a.Local, SharedBytes: a.Shared, MaxGroup: a.MaxThreads,
+			Resident: a.Blocks, ResidentThreads: a.Blocks * k.Group[0], MaxThreads: c.d.MaxThreadsPerSM()})
 	}
 	return &cudaKern{m: m, dev: c, name: k.Name, group: k.Group}, nil
 }
