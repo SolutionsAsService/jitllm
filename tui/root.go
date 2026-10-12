@@ -56,7 +56,7 @@ type helpKeys []key.Binding
 func (k helpKeys) ShortHelp() []key.Binding  { return k }
 func (k helpKeys) FullHelp() [][]key.Binding { return [][]key.Binding{k} }
 
-func newRoot(f *front, e *engine.Engine, cfg *config.Config, dirs []string) *root {
+func newRoot(f *front, e engine.Driver, cfg *config.Config, dirs []string) *root {
 	env := &env{
 		f: f, e: e, cfg: cfg, dirs: dirs, keys: newGlobalKeys(), tele: &telemetry{},
 		spin: spinner.New(spinner.WithSpinner(spinner.MiniDot), spinner.WithStyle(sBrand)),

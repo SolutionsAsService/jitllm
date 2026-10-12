@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/jitllm/jitllm/common/engine"
 	"github.com/sahilm/fuzzy"
 )
 
@@ -94,6 +95,9 @@ func actions(r *root) []action {
 			action{"engine", "Every block on the host", "home", func(*root) tea.Cmd { return seamTo(0) }},
 			action{"engine", fmt.Sprintf("Half on the device (%d)", n/2), "", func(*root) tea.Cmd { return seamTo(n / 2) }},
 		)
+	}
+	if rem, ok := r.env.e.(*engine.Remote); ok && r.env.where.Lost {
+		as = append(as, action{"engine", "Reconnect to jitllmd at " + r.env.where.Addr, "", func(*root) tea.Cmd { rem.Reconnect(); return nil }})
 	}
 	return append(as, action{"app", "Quit", "ctrl+c", func(r *root) tea.Cmd { return r.quit() }})
 }

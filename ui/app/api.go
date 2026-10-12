@@ -87,17 +87,6 @@ func (s *Shell) OfferService(in localserver.Info, why string) {
 	s.Confirm(title, why+" Connect to it instead?", "Connect", func() { s.ConnectTo(addr) })
 }
 
-// WarnBeside shows that the window's own engine runs beside the service in,
-// with the warning core.Beside wrote, and offers to connect where it can.
-func (s *Shell) WarnBeside(in localserver.Info, warning string) {
-	p := Problem{Title: "Two engines on this computer", Detail: warning}
-	if s.ConnectTo != nil {
-		addr := in.Addr
-		p.Action, p.Do = "Connect to it", func() { s.ConnectTo(addr) }
-	}
-	s.Report(p)
-}
-
 // Badge is the engine line the window always shows (core.Badge): which
 // engine, and the API's state or the service's address and version.
 func (s *Shell) Badge() state.ReadonlySignal[string] {

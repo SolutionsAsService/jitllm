@@ -60,6 +60,12 @@ type Config struct {
 	API     bool   `json:"api"`
 	APIAddr string `json:"api_addr"`
 
+	// Engine is which engine the app runs: auto (a jitllmd that answers at
+	// ServiceAddr, else its own), embedded or service (engine.Mode*). Empty
+	// is auto. ServiceAddr empty is the login service's address.
+	Engine      string `json:"engine"`
+	ServiceAddr string `json:"service_addr"`
+
 	// CLIOffered is set once the macOS app has offered to put its
 	// command-line programs on PATH, so the offer is made on the first
 	// launch only; the settings page keeps the choice reachable after.
