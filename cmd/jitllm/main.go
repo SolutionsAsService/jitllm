@@ -12,6 +12,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
@@ -27,6 +28,7 @@ import (
 	"github.com/jitllm/jitllm/engine/sched"
 	"github.com/jitllm/jitllm/format/quant"
 	"github.com/jitllm/jitllm/internal/cmd/goheap"
+	"github.com/jitllm/jitllm/internal/localserver"
 
 	"os/exec"
 
@@ -1452,6 +1454,10 @@ func runCmd(args []string) error {
 		"write a CPU profile here; `go tool pprof` then separates the generated "+
 			"kernels from the pool's spin and from the pager's reads")
 	spec := addSpecFlags(fs)
+	addr := fs.String("addr", localserver.DefaultAddr,
+		"the jitllmd a model NAME is run through when one answers there (see -embedded)")
+	embedded := fs.Bool("embedded", false,
+		"run in this process even when a jitllmd answers; a path, or any flag about this process's engine, does too")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -1494,6 +1500,18 @@ func runCmd(args []string) error {
 	} else if *system != "" {
 		return fmt.Errorf("-system needs -chat: without a template there is no system turn to put it in")
 	}
+	svc, path, err := runTarget(context.Background(), fs.Arg(0), *addr, *embedded, engineFlags(fs, remoteFlags), os.Stderr)
+	if err != nil {
+		return err
+	}
+	if svc != nil {
+		r := newRemoteRun(*addr, fs.Arg(0), *n, *system, fs, samplingFlags{temp: *temp, topP: *topP,
+			minP: *minP, repPen: *repPen, topK: *topK, seed: *seed})
+		if interactive {
+			return r.repl(os.Stdin, os.Stdout)
+		}
+		return r.once(*chat, prompt, os.Stdout)
+	}
 	// -relocate is on by default: without it, a card that cannot grow its
 	// history demotes every block to the host rather than one. A -devices list
 	// without the host keeps it off, and asking for it there is an error.
@@ -1527,7 +1545,7 @@ func runCmd(args []string) error {
 	} else if *placeStrict {
 		return fmt.Errorf("-placement-strict needs -placement")
 	}
-	return run(fs.Arg(0), prompt, *n, *depth, *dev, *layers, *vram, *maxmem, *grow, *tuneSeam, *noFallback, *relocate, sm, *imgPath, topts, cs, *kvCache, *kvCacheMax, *kvBudget, place, specOpts)
+	return run(path, prompt, *n, *depth, *dev, *layers, *vram, *maxmem, *grow, *tuneSeam, *noFallback, *relocate, sm, *imgPath, topts, cs, *kvCache, *kvCacheMax, *kvBudget, place, specOpts)
 }
 
 // tokenizerOption turns a -tokenizer path into the tok.Option it names, plus the

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jitllm/jitllm/engine/model"
+	"github.com/jitllm/jitllm/internal/localserver"
 )
 
 // embedCmd is `jitllm embed <model.jlm> <text...>`: the text's pooled,
@@ -28,6 +30,8 @@ func embedCmd(args []string) error {
 	lines := fs.Bool("lines", false, "embed every line of stdin instead of the text arguments")
 	dev := fs.String("devices", "auto", "where the blocks run, as run's -devices")
 	layers := fs.Int("gpu-layers", -1, "cap the blocks offered to the device; -1 fits as many as the card holds")
+	addr := fs.String("addr", localserver.DefaultAddr, "the jitllmd a model NAME is embedded through when one answers there")
+	embedded := fs.Bool("embedded", false, "embed in this process even when a jitllmd answers")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -35,10 +39,29 @@ func embedCmd(args []string) error {
 		return err
 	}
 	if fs.NArg() < 1 || (fs.NArg() < 2 && !*lines) {
-		return fmt.Errorf("usage: jitllm embed [-ids] [-lines] <model.jlm> <text...>")
+		return fmt.Errorf("usage: jitllm embed [-ids] [-lines] <model.jlm|NAME> <text...>")
+	}
+	svc, path, err := runTarget(context.Background(), fs.Arg(0), *addr, *embedded, engineFlags(fs, embedRemoteFlags), os.Stderr)
+	if err != nil {
+		return err
+	}
+	if svc != nil {
+		texts := []string{strings.Join(fs.Args()[1:], " ")}
+		if *lines {
+			texts = texts[:0]
+			sc := bufio.NewScanner(os.Stdin)
+			sc.Buffer(make([]byte, 1<<20), 1<<26)
+			for sc.Scan() {
+				texts = append(texts, sc.Text())
+			}
+			if err := sc.Err(); err != nil {
+				return err
+			}
+		}
+		return embedRemote(*addr, fs.Arg(0), texts, os.Stdout)
 	}
 	t0 := time.Now()
-	m, err := model.Open(fs.Arg(0), loadOpts(nil, 0)...)
+	m, err := model.Open(path, loadOpts(nil, 0)...)
 	if err != nil {
 		return err
 	}

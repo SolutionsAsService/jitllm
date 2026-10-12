@@ -227,30 +227,34 @@ macOS and Windows on x86-64 and arm64. GPUs need only their driver.
 ## Quick start
 
 ```sh
-# Fetch Qwen3-30B-A3B from the catalog and convert it (18.6 GB): a mixture of
-# experts with 30B weights and 3B used per token. With less memory than it
-# needs, it pages from disk.
-mkdir -p models
-jitllm convert -o models qwen3-30b-a3b models/qwen3.jlm
+# Fetch Qwen3-30B-A3B from the catalog and convert it (18.6 GB) into the
+# models folder: a mixture of experts with 30B weights and 3B used per token.
+# With less memory than it needs, it pages from disk.
+jitllm convert qwen3-30b-a3b
 
-# Ask it something from the command line. It thinks first, then answers.
-jitllm run -chat models/qwen3.jlm "Why is the sky blue?"
+# Chat with it. The installed service loads it on first use; with no service
+# running, jitllm runs it in its own process instead and says so.
+jitllm run qwen3-30b-a3b
 
-# Or serve it.
-jitllmd serve -addr 127.0.0.1:8080 -models ./models \
-  -load qwen3.jlm -id qwen3 -devices auto
+# Or ask once.
+jitllm run -chat qwen3-30b-a3b "Why is the sky blue?"
 ```
 
-From another terminal:
+On Linux the install script starts `jitllmd` as a systemd user service on
+`127.0.0.1:8080`; the macOS app and the Windows installer offer the same at
+login, and `jitllmd service install` does it on any of them. Every model in
+the models folder is available to it by name, loaded on demand:
 
 ```sh
 curl http://127.0.0.1:8080/v1/chat/completions \
   -H 'Content-Type: application/json' \
-  -d '{"model":"qwen3","messages":[{"role":"user","content":"Why is the sky blue?"}],"stream":true}'
+  -d '{"model":"qwen3-30b-a3b","messages":[{"role":"user","content":"Why is the sky blue?"}],"stream":true}'
 ```
 
-Flags go before the model path. `jitllm <command>` with no arguments prints the
-usage.
+`jitllmd service status` shows the service, `jitllmd models -alias
+FILE=NAME` gives a model another name, and `jitllm run path/to/model.jlm`
+runs a file directly. Flags go before the model. `jitllm <command>` with no
+arguments prints the usage.
 
 **Bring GGUF or Hugging Face (safetensors) weights**, from the catalog or your
 own files. See the [CLI and conversion guide](docs/cli.md) for inputs and flags,

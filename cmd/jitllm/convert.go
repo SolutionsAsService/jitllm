@@ -14,6 +14,7 @@ import (
 	"github.com/jitllm/jitllm/convert"
 	"github.com/jitllm/jitllm/convert/hf"
 	"github.com/jitllm/jitllm/format/jlm"
+	"github.com/jitllm/jitllm/internal/localserver"
 )
 
 // convertCmd writes a GGUF (or a safetensors model) as a jlm container.
@@ -217,7 +218,29 @@ func convertCmd(args []string) error {
 			float64(pad)/(1<<20), float64(allPages)/(1<<30),
 			100*float64(pad)/float64(allPages))
 	}
+	aliasCatalogName(fs.Args(), dst)
 	return nil
+}
+
+// aliasCatalogName gives a container converted from a catalog name that name
+// as an alias in the models folder, so `jitllm convert qwen3-8b` is followed
+// by `jitllm run qwen3-8b` rather than the file's own name. A name another
+// container already answers to is left alone.
+func aliasCatalogName(args []string, dst string) {
+	if len(args) == 0 || libraryArgs(args)[0] == args[0] {
+		return
+	}
+	dir := defaultModelDir()
+	if filepath.Clean(filepath.Dir(dst)) != filepath.Clean(dir) {
+		return
+	}
+	added, err := localserver.AddAlias(dir, filepath.Base(dst), args[0])
+	switch {
+	case err != nil:
+		fmt.Fprintf(os.Stderr, "         alias %s not kept: %v\n", args[0], err)
+	case added:
+		fmt.Fprintf(os.Stderr, "alias    %s (jitllm run %s)\n", args[0], args[0])
+	}
 }
 
 // splitPart is llama.cpp's gguf-split naming, NAME-00001-of-00003.gguf.
