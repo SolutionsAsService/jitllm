@@ -85,9 +85,8 @@ func convertCmd(args []string) error {
 			"lives in the model directory", src, mmproj)
 	}
 	// The default output is derived AFTER the fetch (see defaultDest).
-	beside := false
 	if dst == "" {
-		if dst, beside, err = defaultDest(src, *outDir); err != nil {
+		if dst, err = defaultDest(src, *outDir); err != nil {
 			return err
 		}
 	}
@@ -110,10 +109,6 @@ func convertCmd(args []string) error {
 		fmt.Fprintf(os.Stderr, "convert  %s + %s -> %s\n", src, mmproj, dst)
 	} else {
 		fmt.Fprintf(os.Stderr, "convert  %s -> %s\n", src, dst)
-	}
-	if beside {
-		fmt.Fprintf(os.Stderr, "         no model directory here, so it lands beside the "+
-			"source; set JITLLM_MODELS or pass -o to write it elsewhere\n")
 	}
 	t0 := time.Now()
 	var h *jlm.Header
@@ -270,23 +265,17 @@ func sourceBytes(src string) (int64, error) {
 
 // defaultDest is where a conversion with no output path writes: into -o's
 // directory when one is given, whatever the source is (a local file as much as
-// a download), otherwise into the model directory (defaultModelDir:
-// JITLLM_MODELS, or the models disk the repo's links point at) whatever disk
-// the source is on. With neither on this host it lands beside the source, and
-// beside says so.
-func defaultDest(src, outDir string) (dst string, beside bool, err error) {
-	if outDir != "" {
-		if err := os.MkdirAll(outDir, 0o755); err != nil {
-			return "", false, fmt.Errorf("jitllm convert: -o %s: %w", outDir, err)
-		}
-		return convert.DestFor(src, outDir), false, nil
+// a download), otherwise into the models folder every front end and jitllmd
+// read (defaultModelDir), created on first use, whatever disk the source is
+// on.
+func defaultDest(src, outDir string) (string, error) {
+	dir, what := outDir, "-o "+outDir
+	if dir == "" {
+		dir = defaultModelDir()
+		what = "the models folder " + dir
 	}
-	dir := defaultModelDir()
-	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
-		// Say so: defaultModelDir resolves the relative name "models", so
-		// from a directory without one the container lands beside the
-		// source, possibly a multi-GB file on the main disk.
-		return convert.DestFor(src, ""), true, nil
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("jitllm convert: %s: %w", what, err)
 	}
-	return convert.DestFor(src, dir), false, nil
+	return convert.DestFor(src, dir), nil
 }

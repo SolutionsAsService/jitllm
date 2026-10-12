@@ -14,6 +14,23 @@
 | `jitllm verify` | compare a device run with the host, position by position |
 | `jitllm asm Q4_K` | disassemble a generated CPU kernel |
 
+## The models folder
+
+jitllm, jitllmd, the desktop app and the terminal app share one models
+folder:
+
+| System | Folder |
+|---|---|
+| Linux | `$XDG_DATA_HOME/jitllm/models` (`~/.local/share/jitllm/models`) |
+| macOS | `~/Library/Application Support/jitllm/models` |
+| Windows | `%LOCALAPPDATA%\jitllm\models` |
+
+`JITLLM_MODELS` replaces it, and `jitllmd serve -models DIR` replaces it for
+one server. `jitllm convert NAME` with no output path writes the container
+there, creating the folder. A `models` folder in the working directory, where
+earlier releases looked, is still searched by name, after the folder above;
+nothing in it is moved.
+
 ## Convert a model
 
 ```sh
