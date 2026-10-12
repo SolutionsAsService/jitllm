@@ -374,7 +374,7 @@ func TestRunRefusesToGuessBetweenSeveralModels(t *testing.T) {
 // what it means to `jitllmd serve`.
 func TestBaseURLMeansTheSameThingOnBothSidesOfTheBinary(t *testing.T) {
 	ok := []struct{ in, want string }{
-		{"", "http://localhost:8080"},
+		{"", "http://127.0.0.1:8080"},
 		{":8080", "http://localhost:8080"},
 		{":9090", "http://localhost:9090"},
 		{"localhost:8080", "http://localhost:8080"},

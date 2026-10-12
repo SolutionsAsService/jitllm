@@ -51,6 +51,10 @@ func gpuOptions() []tier.Option {
 	if n := num("JITLLM_CUDA_MAXREGS"); n > 0 {
 		o = append(o, tier.WithCUDAMaxRegs(n))
 	}
+	// The batched GEMM's spilling tiles, refused by default (tier.Config.SpillingTiles).
+	if str("JITLLM_GPU_SPILLING_TILES") == "1" {
+		o = append(o, tier.WithConfig(func(c *tier.Config) { c.SpillingTiles = true }))
+	}
 	if set("JITLLM_GPU_VERBOSE") {
 		o = append(o, tier.WithVerbose(true))
 	}

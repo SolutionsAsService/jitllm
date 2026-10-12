@@ -1373,6 +1373,14 @@ func (g *devTier) stagedGemm(m mv, ntok int, tiles []kernels.VoltaTile, f16k, fi
 				if err != nil {
 					k = nil
 				}
+				// A tile the compiler could not fit in the register file is
+				// passed over for the next that divides the shape: on sm_70
+				// q6_k's m4n4 k2 tile hits 255 registers and spills.
+				if r, ok := backend.KernelResourcesOf(k); k != nil && ok && r.SpillBytes > 0 && !g.SpillingTiles {
+					k.Close()
+					k = nil
+					g.SpillRefused++
+				}
 				if g.ragK == nil {
 					g.ragK = map[ragKey]backend.Kernel{}
 				}
