@@ -2,10 +2,13 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"connectrpc.com/connect"
 
+	"github.com/jitllm/jitllm/internal/capabilities"
+	"github.com/jitllm/jitllm/internal/localserver"
 	v1 "github.com/jitllm/jitllm/server/gen/jitllm/v1"
 )
 
@@ -103,22 +106,46 @@ func (s *TelemetryService) snapshot(modelID, sessionID string) *v1.GetStatsRespo
 	return out
 }
 
+// GetServerInfo is what a client checks before it relies on this server: the
+// build, the control plane's compatibility version, the platform, the models
+// folder, the devices and the capability manifest.
 func (s *TelemetryService) GetServerInfo(ctx context.Context, req *connect.Request[v1.GetServerInfoRequest]) (*connect.Response[v1.GetServerInfoResponse], error) {
-	var backends []string
-	if devs, err := s.E.Devices(false); err == nil {
-		for _, d := range devs {
-			if d.Available {
-				backends = append(backends, d.ID)
-			}
-		}
-	}
-	return connect.NewResponse(&v1.GetServerInfoResponse{Info: &v1.ServerInfo{
+	id := capabilities.Identity(s.E.cfg.Version)
+	info := &v1.ServerInfo{
 		Version:           s.E.cfg.Version,
+		Revision:          id.Revision,
+		Modified:          id.Modified,
+		ApiVersion:        localserver.APIVersion,
+		Os:                id.OS,
+		Arch:              id.Arch,
 		ModelDirectory:    s.E.ModelDir(),
 		StartedUnixMillis: s.E.started.UnixMilli(),
 		UptimeMillis:      millis(time.Since(s.E.started)),
-		AvailableBackends: backends,
 		LoadedModels:      int32(len(s.E.Models())),
 		OpenSessions:      int32(len(s.E.Sessions())),
-	}}), nil
+		Features:          Features(),
+	}
+	if devs, err := s.E.Devices(false); err == nil {
+		for _, d := range devs {
+			if d.Available {
+				info.AvailableBackends = append(info.AvailableBackends, d.ID)
+			}
+			info.Devices = append(info.Devices, s.E.pbDevice(d))
+		}
+	}
+	m, err := capabilities.WithAPI(s.E.cfg.Version, API())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	m.ServerAPI = localserver.APIVersion
+	b, err := json.Marshal(m)
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	info.CapabilitiesJson = string(b)
+	return connect.NewResponse(&v1.GetServerInfoResponse{Info: info}), nil
 }
+
+// Features names what this server does beyond the manifest, for a client to
+// switch its own features on by. A name is added, never renamed.
+func Features() []string { return []string{"server_info"} }

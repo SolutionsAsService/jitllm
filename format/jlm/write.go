@@ -663,6 +663,7 @@ func (l *layout) write(dst string, src *Source) (*Header, error) {
 		go fetch(start)
 	}
 	var dirty uint64
+	every := journalSpacing(total)
 	for i := start; i < len(es); i++ {
 		e := &es[i]
 		got := <-next
@@ -677,7 +678,7 @@ func (l *layout) write(dst string, src *Source) (*Header, error) {
 			return nil, err
 		}
 		dirty += n
-		if journal && (dirty >= journalEvery || i+1 == len(es)) {
+		if journal && (dirty >= every || i+1 == len(es)) {
 			// The count is written only after the bytes it vouches for are
 			// on the disk, so a journal never claims a tensor a crash lost.
 			if err := out.Sync(); err != nil {
@@ -769,6 +770,14 @@ func writeTensor(out *os.File, e *Entry, raw []byte, expPageSize uint64) (uint64
 // most a resumed write does twice. A variable so a gate can journal every
 // tensor.
 var journalEvery uint64 = 1 << 30
+
+// journalSpacing is journalEvery for a container of total bytes, closer for
+// a small one: a write journalled only at its end is never resumed, and a
+// model of a few hundred MB is still minutes of a slow link. A thirty-second
+// of the container keeps the syncs few.
+func journalSpacing(total uint64) uint64 {
+	return min(journalEvery, max(total/32, 64<<10))
+}
 
 // journalSuffix follows the part's name: out.jlm.part.resume.
 const journalSuffix = ".resume"

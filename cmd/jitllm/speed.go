@@ -129,6 +129,7 @@ func speedCmd(args []string) error {
 				return 0, 0, perr
 			}
 		}
+		backend.CUDAKernelTimes() // clear: only the timed prompt is reported
 		g0 := readGC()
 		t0 := time.Now()
 		// The timer stops when Prefill returns: it hands back the last row's
@@ -151,7 +152,10 @@ func speedCmd(args []string) error {
 		if timed && *cpuProf != "" {
 			pprof.StopCPUProfile()
 		}
-		ppOn, spills, fails := st.GPULayers(), st.Spills(), st.DeviceDemotions()
+		if timed && err == nil {
+			printKernelTimes("a prompt", 1)
+		}
+		ppOn, spills, fails, tails := st.GPULayers(), st.Spills(), st.DeviceDemotions(), st.TailRowChunks()
 		moves := st.Relocations() + st.Reclaims()
 		st.Close()
 		if err != nil {
@@ -242,6 +246,10 @@ func speedCmd(args []string) error {
 			fmt.Printf("device %s: prompt on %d/%d blocks, decode on %d, %d spill(s), %d relocation(s)+reclaim(s), %s\n", name,
 				ppOn, m.Cfg.NLayer, st2.GPULayers(), spills+st2.Spills(),
 				moves+st2.Relocations()+st2.Reclaims(), deviceStats(d))
+			if tails > 0 {
+				// engine/model/tailrows.go
+				fmt.Printf("prompt: %d few-row chunk(s) ran as a ragged step\n", tails)
+			}
 		}
 		// A demotion moves the blocks to the host mid-run: the rate is then the
 		// host's, and printing it without saying so is a wrong row.
@@ -374,8 +382,10 @@ func sessionsRun(attach func(int) (*model.State, error), prompt []int32, k, n, r
 
 // printKernelTimes prints and clears the per-kernel device time CUDA recorded
 // (JITLLM_CUDA_KERNEL_TIMING=1), per unit over steps units; it prints nothing
-// when nothing was recorded. The times are event nodes inside captured
-// graphs, so JITLLM_GPU_GRAPH=0 records none.
+// when nothing was recorded. A decode token's are event nodes inside its
+// captured graph; a prompt's are an event pair around each launch, since a
+// prompt chunk is not captured (scripts/kshim.c with KSHIM_DIRECT=1 takes the
+// same of llama.cpp's prompt).
 func printKernelTimes(unit string, steps int) {
 	us, cnt := backend.CUDAKernelTimes()
 	if len(us) == 0 {

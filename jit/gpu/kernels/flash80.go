@@ -76,7 +76,18 @@ func FlashPrefill80WhyNot(s FlashPrefill70Shape) string {
 // writes FlashAttentionMerge's partials (each query's sums, maximum and
 // sum), which also applies sinks; Splits 0 writes the output. Launch
 // FlashPrefill80Groups groups of FlashPrefill80Threads.
-func FlashPrefill80(s FlashPrefill70Shape) (*ir.Kernel, error) {
+func FlashPrefill80(s FlashPrefill70Shape) (*ir.Kernel, error) { return flashPrefill80(s, false) }
+
+// FlashPrefill80K8 is FlashPrefill80 on sm_75's binary16 instruction,
+// m16n8k8: each m16n8k16 product is two, the A fragment's first two
+// registers (rows g and g+8 at k pair q) against B's first, then its last two
+// (k pair q+4) against B's second -- the k16 fragments are the k8 ones side
+// by side, so nothing is staged or loaded differently. sm_75 otherwise runs a
+// prompt's attention on sm_70's m8n8k4 (FlashPrefill70), which Turing
+// executes at a fraction of its tensor rate. Its name ends in _k8.
+func FlashPrefill80K8(s FlashPrefill70Shape) (*ir.Kernel, error) { return flashPrefill80(s, true) }
+
+func flashPrefill80(s FlashPrefill70Shape, k8 bool) (*ir.Kernel, error) {
 	if why := FlashPrefill80WhyNot(s); why != "" {
 		return nil, fmt.Errorf("kernels: FlashPrefill80: %s", why)
 	}
@@ -99,8 +110,20 @@ func FlashPrefill80(s FlashPrefill70Shape) (*ir.Kernel, error) {
 	nd := hd / 8 / ds // a warp's output n-tiles
 	ksteps := hd / 16
 	sh := ir.MMAShape{M: 16, N: 8, K: 16, Kind: ir.MMAF16}
+	name := fmt.Sprintf("flashprefill80paged_d%d_s%d", hd, s.Splits)
+	if k8 {
+		name += "_k8"
+	}
 
-	b := ir.New(fmt.Sprintf("flashprefill80paged_d%d_s%d", hd, s.Splits), [3]int{FlashPrefill80Threads, 1, 1})
+	b := ir.New(name, [3]int{FlashPrefill80Threads, 1, 1})
+	// mma is one m16n8k16 product, or its two m16n8k8 halves.
+	mma := func(a, bf, acc []ir.Value) []ir.Value {
+		if !k8 {
+			return b.MMA(sh, a, bf, acc)
+		}
+		h := ir.MMAShape{M: 16, N: 8, K: 8, Kind: ir.MMAF16}
+		return b.MMA(h, a[2:4], bf[1:2], b.MMA(h, a[0:2], bf[0:1], acc))
+	}
 	pQ := b.Param("pQ", ir.F32)
 	pK := b.Param("pK", ir.F32)
 	pV := b.Param("pV", ir.F32)
@@ -277,7 +300,7 @@ func FlashPrefill80(s FlashPrefill70Shape) (*ir.Kernel, error) {
 		kRow := b.Add(ir.U32, b.Mul(ir.U32, b.Add(ir.U32, lg, c(int64(8*j))), c(int64(qs))), lt)
 		for ks := 0; ks < ksteps; ks++ {
 			bf := []ir.Value{b.Load(ir.U32, shK, kRow, int64(8*ks)), b.Load(ir.U32, shK, kRow, int64(8*ks+4))}
-			sacc[j] = b.MMA(sh, qfrag(ks), bf, sacc[j])
+			sacc[j] = mma(qfrag(ks), bf, sacc[j])
 		}
 	}
 	// The transform, then each row's running maximum and sum over its quad.
@@ -342,7 +365,7 @@ func FlashPrefill80(s FlashPrefill70Shape) (*ir.Kernel, error) {
 		for n := 0; n < nd; n++ {
 			vRow := b.Add(ir.U32, b.Mul(ir.U32, b.Add(ir.U32, b.Add(ir.U32, lg, dimBase), c(int64(8*n))), c(int64(vs))), lt)
 			bf := []ir.Value{b.Load(ir.U32, shV, vRow, int64(8*kk)), b.Load(ir.U32, shV, vRow, int64(8*kk+4))}
-			od[n] = b.MMA(sh, a, bf, od[n])
+			od[n] = mma(a, bf, od[n])
 		}
 	}
 	for n := range o {

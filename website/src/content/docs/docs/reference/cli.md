@@ -12,13 +12,17 @@ Every size, on `jitllm` and `jitllmd` alike, is a byte count or a number with a 
 | Command | What it does |
 |---|---|
 | `jitllm hardware` | the CPU tier, every GPU each backend can open, and the spendable memory |
+| `jitllm doctor [-json] [MODEL.jlm]` | whether this machine and build can run, and a container if given; exit 0 ok, 2 something missing (each with a next step), 1 the inspection failed. It downloads nothing and runs no kernel |
+| `jitllm capabilities [-json]` | what this build converts, runs and serves: architectures, projectors, quantization, backends and where each is verified, every API route and field, and the combinations refused |
 | `jitllm library [-refs]` | the catalog `convert` fetches by name; `-refs` prints sizes and `hf://` references for scripts |
-| `jitllm convert [-o DIR] [-q8] SOURCE [MMPROJ] OUT.jlm` | write a container from a GGUF, a Hugging Face directory or URL, or a catalog name. See [Convert models](/docs/guides/convert/). |
-| `jitllm run [flags] MODEL.jlm PROMPT...` | generate |
+| `jitllm convert [flags] SOURCE [MMPROJ] [OUT.jlm]` | write a container from a GGUF, a Hugging Face directory or URL, or a catalog name. See [Convert models](/docs/guides/convert/). |
+| `jitllm run [flags] MODEL.jlm [PROMPT...]` | generate; with no prompt, an [interactive chat](/docs/guides/run/#interactive-chat), or the prompt read from piped stdin |
 | `jitllm embed [-lines] [-ids] MODEL.jlm TEXT...` | print an embedding model's normalised vector as JSON |
+| `jitllm decide [flags] MODEL.jlm REQUEST.json\|-` | a decision model's answers to a `/v1/systemone` request body, printed as the server would return them |
 | `jitllm speed [flags] MODEL.jlm` | prompt and generation rates, warmed, as `llama-bench` measures them; or time to first token, or sessions decoded together |
 | `jitllm batch [flags] MODEL.jlm PROMPT...` | decode many sequences together on one device and report the aggregate rate |
 | `jitllm verify [flags] MODEL.jlm` | run on the CPU and a device and report where their logits differ |
+| `jitllm bench [-tokenizer FILE] MODEL.jlm` | one-core decode on the generated kernels, as a fraction of a memory read rate measured in the same process |
 | `jitllm tokenize [-tokenizer FILE] MODEL TEXT...` | print token ids |
 | `jitllm info FILE.gguf` | a GGUF's keys and tensors, before converting it |
 | `jitllm asm Q4_0\|Q8_0\|Q4_K[x4]` | disassemble the x86-64 kernel generated for a format on this machine |
@@ -47,7 +51,7 @@ Every size, on `jitllm` and `jitllmd` alike, is a byte count or a number with a 
 | `-kv-budget SIZE` | 0 | KV history held in memory; older pages spill to `-kv-cache` and come back when read. 0 is unbounded |
 | `-depth N` | 0 | pad the prompt to N tokens, to measure decode at that context length |
 | `-tokenizer FILE` | | a `tokenizer.json` whose pre-tokenizer replaces the model's |
-| `-spec mtp` | | speculative decoding: draft with the model's own multi-token-prediction block and verify the drafts in one pass; see [Speculative decoding](/docs/guides/run/#speculative-decoding) |
+| `-spec MODE` | | speculative decoding, verified in one pass: `mtp` drafts with the model's own multi-token-prediction block, `lookup` with the tokens that followed the sequence's last n-gram earlier in it (any model, greedy only), `auto` the first of the two the model can use; see [Speculative decoding](/docs/guides/run/#speculative-decoding) |
 | `-spec-k N` | 0 | tokens drafted a round; 0 chooses each round from the measured acceptance and timing |
 | `-spec-min-p F` | 0 | stop a round's drafting at the first draft below this probability |
 | `-spec-rollback MODE` | `auto` | how a hybrid's recurrent state is taken back after a rejected draft: `auto`, `rows` or `replay` |
@@ -74,7 +78,7 @@ Every size, on `jitllm` and `jitllmd` alike, is a byte count or a number with a 
 
 | Flag | Default | Meaning |
 |---|---|---|
-| `-devices SPEC` | `gpu` | the one device every block and the head go on |
+| `-devices SPEC` | `gpu:0` | the one device every block and the head go on |
 | `-batch N` | 16 | sequences decoded together |
 | `-n N` | 128 | tokens per sequence |
 | `-logits` | off | read every row's logits back and pick on the host, the path a sampled request takes, instead of the device's argmax |
@@ -91,18 +95,27 @@ Every size, on `jitllm` and `jitllmd` alike, is a byte count or a number with a 
 | `-prefill N` | 0 | also compare the batched prefill of N tokens |
 | `-verify` | off | recompute every served matrix product on the host and report disagreements |
 | `-vram SIZE`, `-maxmem SIZE` | automatic | device and host budgets |
-| `-ab ARM` | | run a paired A/B of one engine choice instead (`split`, `submit`, `head`, `graph`, `softmax`, `ropetab`, `attnchunk`, `attnpair`), with `-rounds N` and `-depth N` |
+| `-ab ARM` | | run a paired A/B of one engine choice instead (`split`, `submit`, `head`, `graph`, `softmax`, `fuse`, `ropetab`, `attnchunk`, `attnpair`), with `-rounds N` (default 21) and `-depth N` |
 
-### convert, embed, library, tokenize
+### convert, embed, decide, library, tokenize, capabilities, doctor
 
 | Command | Flag | Meaning |
 |---|---|---|
-| `convert` | `-o DIR` | where a downloaded GGUF lands (default `JITLLM_MODELS`) |
+| `convert` | `-o DIR` | where the container, and a downloaded source, land. Without it and without `OUT.jlm`, the container goes into `JITLLM_MODELS` (or `./models`), or beside its source when that directory does not exist |
 | | `-q8` | safetensors only: store every weight matrix as Q8_0 |
+| | `-chat-template FILE` | store this file's chat template(s) in place of the source's: a `tokenizer_config.json`, a `chat_template.json`, a `.jinja` file or a model directory |
+| | `-plan` | safetensors only: read the shards' headers (by range, for a repository) and print the container the conversion would write, its size, tensor count and anything it would refuse, without converting |
 | `embed` | `-lines` | embed each line of stdin, loading the model once |
 | | `-ids` | print the token ids to stderr |
+| `embed`, `decide` | `-devices SPEC`, `-gpu-layers N` | as for `run` |
+| `decide` | `-lines` | answer each line of stdin as one request, loading the model once |
+| | `-max-seq N` | the longest prompt one question may render to, in tokens (default 8192) |
+| | `-repeat N` | answer each request N times, to tell a cold call from a warm one |
+| | `-cpuprofile FILE` | a CPU profile of the answering, not the load |
 | `library` | `-refs` | name, size in bytes and `hf://` references, one per line |
-| `tokenize` | `-tokenizer FILE` | as for `run` |
+| `tokenize`, `bench` | `-tokenizer FILE` | as for `run` |
+| `capabilities` | `-json` | the whole manifest as JSON (the same document as the repository's `docs/capabilities.json`, with this build's version) |
+| `doctor` | `-json` | the report as JSON on stdout; logs go to stderr |
 
 ## jitllmd
 
@@ -110,9 +123,9 @@ Every size, on `jitllm` and `jitllmd` alike, is a byte count or a number with a 
 |---|---|
 | `jitllmd serve [flags]` | run the server |
 | `jitllmd run [flags] PROMPT...` | stream a generation from a running server |
-| `jitllmd models` | list, load and unload models |
+| `jitllmd models` | list, describe, load and unload models |
 | `jitllmd devices` | the server's hardware and spendable memory |
-| `jitllmd sessions` | create, list, reset and close sessions |
+| `jitllmd sessions` | create, list, describe, reset and close sessions |
 | `jitllmd place` | read and move a session's blocks, tune its seam, and re-budget a model's pager |
 | `jitllmd stats` | engine counters, once or streamed |
 
@@ -123,7 +136,7 @@ Every client command takes `-addr` (`host:port`, `:port` or a full URL; default 
 | Flag | Default | Meaning |
 |---|---|---|
 | `-addr` | `:8080` | listen address |
-| `-models DIR` | a developer path | directory scanned by the model list and used to resolve a bare model name. Always pass it. |
+| `-models DIR` | `JITLLM_MODELS`, else `models` | directory scanned by the model list and used to resolve a bare model name |
 | `-load FILE` | | a `.jlm` to load at startup, absolute or relative to `-models` |
 | `-id NAME` | derived | the model name clients send |
 | `-devices SPEC` | CPU only | devices for `-load`, in the [device grammar](/docs/guides/devices/#the-device-grammar) |
@@ -168,6 +181,7 @@ Every client command takes `-addr` (`host:port`, `:port` or a full URL; default 
 | `-continue` | continue from the session's position instead of prefilling from scratch |
 | `-chat`, `-system TEXT` | apply the model's chat template, with a system message |
 | `-n N` | tokens to generate (default: until the model ends its reply or fills the session's context) |
+| `-ignore-eos` | keep generating past an end-of-generation token, up to `-n` or the end of the context; stop strings still stop |
 | `-stop A,B` | stop strings |
 | `-temp`, `-top-k`, `-top-p`, `-min-p`, `-repeat-penalty`, `-repeat-last-n`, `-seed` | sampling, as for `jitllm run` |
 | `-queue-timeout MS` | how long to wait for a device another session holds; 0 waits indefinitely |
@@ -215,11 +229,12 @@ Every client command takes `-addr` (`host:port`, `:port` or a full URL; default 
 
 ## Environment
 
-Read by `jitllm` only; `jitllmd` and the Go packages read no environment variables.
+Read by `jitllm`. `jitllmd` reads only `JITLLM_MODELS` (the default of `-models`) and, to find ROCm, `JITLLM_ROCM` and on Windows `HIP_PATH`; the Go packages read none.
 
 | Variable | Effect |
 |---|---|
-| `JITLLM_MODELS` | default directory for downloaded models |
+| `JITLLM_MODELS` | default directory for downloaded models and converted containers |
+| `JITLLM_ROCM` | the ROCm library directory for the native AMD backend (on Windows, `HIP_PATH`'s `bin` is the default) |
 | `HF_TOKEN` | token for private or gated Hugging Face repositories (`HUGGING_FACE_HUB_TOKEN` and `~/.cache/huggingface/token` also work) |
 | `JITLLM_GPU_STREAM=1` | place mixture blocks without their expert banks and upload only the chosen experts each token |
 | `JITLLM_ARENA=BYTES` | bound the host copy that streamed blocks are uploaded from; unset, a streaming placement sizes it |

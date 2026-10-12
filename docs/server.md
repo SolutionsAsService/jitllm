@@ -11,7 +11,19 @@
 | OpenAI-compatible | `POST /v1/chat/completions`, `POST /v1/completions`, `GET /v1/models`, `POST /v1/embeddings` (floats or base64), `/v1/files`, `/v1/batches` |
 | Anthropic-compatible | `POST /v1/messages` (named SSE events) |
 | Connect RPC | `ModelService`, `InferenceService` (`Generate`, `Complete`, `Cancel`, `Embed`), `SessionService`, `PlacementService`, `DeviceService`, `TelemetryService` |
-| Health | `GET /healthz` |
+| jitllm | `POST /v1/systemone` (a decision model's answers), `GET /v1/capabilities` (the manifest, [capabilities.md](capabilities.md)), `GET /metrics` (Prometheus) |
+| Health | `GET /healthz`, `GET /health` |
+
+A client checks what it is talking to before it relies on it:
+`TelemetryService.GetServerInfo` returns the version and revision, the
+control plane's compatibility version (`api_version`), the OS and
+architecture, the models folder, every device, the capability manifest that
+`GET /v1/capabilities` serves (`capabilities_json`, which also carries
+`server_api`) and a list of named `features`. The API version changes only
+when a field changes meaning or goes away; a client built for another number
+refuses with a message naming both. `server/client.Discover` is that check
+for a Go front end, and `internal/localserver.Probe` the same check over
+`/v1/capabilities` for the root module's CLI.
 
 Both compatible APIs stream and take `tools`: the tool list is rendered by the
 model's own chat template, and calls come back as OpenAI `tool_calls` or

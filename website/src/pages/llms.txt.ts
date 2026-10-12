@@ -11,7 +11,8 @@ const summary =
 const notes = [
   'The engine reads only `.jlm` containers: `jitllm convert <gguf|hf-dir|hf://repo|catalog-name> out.jlm` makes one, and a GGUF given to the engine is refused with that command.',
   'Put flags before the model path; a flag after it is refused.',
-  '`jitllmd serve` serves `POST /v1/chat/completions`, `/v1/completions`, `/v1/embeddings`, `GET /v1/models` (OpenAI), `POST /v1/messages` (Anthropic) and `GET /healthz` on one address.',
+  '`jitllmd serve` serves `POST /v1/chat/completions`, `/v1/completions`, `/v1/embeddings`, `GET /v1/models` (OpenAI), `POST /v1/messages` (Anthropic) `GET /v1/capabilities` and `GET /healthz` on one address.',
+  '`jitllm capabilities -json` (or `GET /v1/capabilities`) says what this build converts, runs and serves; `jitllm doctor -json [model.jlm]` says whether this machine can run, with a next step for each thing missing (exit 0 ok, 2 missing, 1 error).',
   'Every recipe below is run as a test against a real server; start with one when integrating.',
   'Every page is also served as Markdown: replace a page\'s trailing slash with `.md`.',
 ]

@@ -43,6 +43,12 @@ jitllm convert -q8 path/to/hf-model-dir models/model-q8.jlm
 
 `-q8` applies to safetensors only; a GGUF keeps the quantization it was published with.
 
+To see what a safetensors model would become before converting it, `-plan` reads only the shards' headers (by range, for a repository on the Hub) and prints the container's size, its tensor count and anything the conversion would refuse:
+
+```sh
+jitllm convert -plan hf://HuggingFaceTB/SmolLM2-360M-Instruct
+```
+
 ## From a URL
 
 `convert` downloads a Hugging Face reference first. A download resumes if interrupted, is checked against the Hub's SHA-256, and is skipped when the file is already present and complete.
@@ -61,7 +67,7 @@ jitllm convert hf://HuggingFaceTB/SmolLM2-360M-Instruct models/smollm2-hf.jlm
 
 A safetensors repository converts where it lives: tensor ranges are streamed from the Hub, so you do not download every shard first.
 
-`-o DIR` is where a downloaded GGUF lands; without it, `JITLLM_MODELS` sets the default. For a private or gated repository set `HF_TOKEN` (`HUGGING_FACE_HUB_TOKEN` and `~/.cache/huggingface/token` are read too).
+`-o DIR` is where the container and a downloaded source land. The output path is optional: without it, the container is named after its source and written to `-o`, or to `JITLLM_MODELS` (`./models` when unset), or beside the source when that directory does not exist. For a private or gated repository set `HF_TOKEN` (`HUGGING_FACE_HUB_TOKEN` and `~/.cache/huggingface/token` are read too).
 
 ## What goes into a container
 
@@ -76,6 +82,15 @@ Everything inference needs is in the one file; the source can be deleted.
 ## When to convert again
 
 A container carries a version number. When a new jitllm changes the layout, it refuses an old container by name instead of misreading it; convert again from the source, which takes seconds to minutes. There is deliberately no backward compatibility: a container is a cache of its source, not an archive.
+
+## Another chat template
+
+A GGUF's chat template is whatever its converter copied, and the publisher's own is often newer. `-chat-template` stores another in its place: a `tokenizer_config.json`, a `chat_template.json`, a `.jinja` file or a model directory. Named templates (`tool_use`, `rag`) come along, and a file with no template, or one that does not compile, is refused.
+
+```sh
+jitllm convert -chat-template Mistral-7B-Instruct-v0.3/tokenizer_config.json \
+  Mistral-7B-Instruct-v0.3-Q4_K_M.gguf models/mistral.jlm
+```
 
 ## Tokenizer overrides
 

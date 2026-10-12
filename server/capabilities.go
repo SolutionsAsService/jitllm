@@ -12,6 +12,7 @@ import (
 
 	"github.com/jitllm/jitllm/engine/model"
 	"github.com/jitllm/jitllm/internal/capabilities"
+	"github.com/jitllm/jitllm/internal/localserver"
 )
 
 // The server's half of the capability manifest (internal/capabilities). The
@@ -102,6 +103,7 @@ func (e *Engine) serveCapabilities(w http.ResponseWriter, r *http.Request) {
 		oaFail(w, http.StatusInternalServerError, err.Error(), "server_error")
 		return
 	}
+	m.ServerAPI = localserver.APIVersion
 	writeJSON(w, http.StatusOK, m)
 }
 

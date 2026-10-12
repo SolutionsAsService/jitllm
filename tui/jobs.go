@@ -1,9 +1,12 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/charmbracelet/bubbles/progress"
 	tea "github.com/charmbracelet/bubbletea"
@@ -25,6 +28,9 @@ type jobs struct {
 	running, done            bool
 	// dst is the container the job writes, opened when it is done.
 	dst string
+
+	mu   sync.Mutex
+	stop context.CancelFunc // a running download's
 }
 
 // jobMsg is one step of the running job, from its goroutine.
@@ -93,8 +99,9 @@ func (j *jobs) convertSteps(cleanup func()) convertjob.Progress {
 	}
 }
 
-// download fetches a library model, converts it on the engine's queue and
-// removes the GGUF it fetched, as the window's Discover tab does.
+// download turns a library model into its container, converting the GGUF as
+// it streams from the Hub, as the window's Discover tab does
+// ([discover.Get]). cancel stops it, keeping what it wrote.
 func (j *jobs) download(lm library.Model) tea.Cmd {
 	dir := discover.Dir(j.env.dirs)
 	dst := discover.ContainerFor(dir, lm)
@@ -104,26 +111,48 @@ func (j *jobs) download(lm library.Model) tea.Cmd {
 	if !j.start(lm.Title, "downloading", dst) {
 		return notify("a job is running: wait for " + j.title)
 	}
-	token := hf.FindToken(os.Getenv, os.UserHomeDir)
+	ctx, cancel := context.WithCancel(context.Background())
+	j.mu.Lock()
+	j.stop = cancel
+	j.mu.Unlock()
+	hub := discover.Hub{
+		Endpoint: j.env.hub,
+		Token:    hf.FindToken(os.Getenv, os.UserHomeDir),
+		// The fallback's conversion goes on the engine's queue, where it
+		// cannot overlap a decode; Get waits for it.
+		Convert: func(job func()) bool {
+			done := make(chan struct{})
+			if !j.env.e.Run(func() { defer close(done); job() }) {
+				return false
+			}
+			<-done
+			return true
+		},
+	}
 	go func() {
-		got, err := discover.Download(lm, dir, token, discover.HubFetch, func(f float64) {
-			j.send(jobMsg{stage: "downloading", frac: f, label: fmt.Sprintf("%.0f%% of %s", 100*f, lm.Title)})
+		defer cancel()
+		line, err := discover.Get(ctx, lm, dir, hub, func(s discover.Step) {
+			j.send(jobMsg{stage: s.Stage, frac: s.Fraction, label: s.Label})
 		})
-		if err != nil {
+		switch {
+		case errors.Is(err, context.Canceled):
+			j.send(jobMsg{err: "stopped: enter on " + lm.Title + " carries on where it stopped", done: true})
+		case err != nil:
 			j.send(jobMsg{err: discover.FailMessage(lm, err), done: true})
-			return
-		}
-		plan, err := convertjob.Plan(got.Request(dst))
-		if err != nil {
-			j.send(jobMsg{err: err.Error(), done: true})
-			return
-		}
-		j.send(jobMsg{stage: "converting"})
-		if !j.env.e.Run(func() { convertjob.Run(plan, j.convertSteps(got.Cleanup)) }) {
-			j.send(jobMsg{err: "the engine is busy: try again in a moment", done: true})
+		default:
+			j.send(jobMsg{frac: 1, label: line, done: true})
 		}
 	}()
 	return j.bar.SetPercent(0)
+}
+
+// cancel stops a running download.
+func (j *jobs) cancel() {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if j.stop != nil {
+		j.stop()
+	}
 }
 
 func (j *jobs) Update(msg tea.Msg) tea.Cmd {
