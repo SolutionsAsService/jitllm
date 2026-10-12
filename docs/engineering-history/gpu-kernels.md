@@ -5483,6 +5483,29 @@ the time sits, not a rate:
 - **The KV prewarm** moves the pool's growth into placement: 100-200 ms more
   placement on the laptop, and the first prompt reads as warm.
 
+### sm_75's prompt attention on m16n8k8
+
+FlashPrefill80 is m16n8k16, which sm_75 does not have, so a T4's prompt
+attention ran FlashPrefill70 on sm_70's m8n8k4, which Turing executes well
+under its m16n8 rate. The m16n8k16 fragments are the m16n8k8 ones side by
+side: A's four registers are rows g and g+8 at k pair q, then at k pair q+4,
+and B's two are k pair q, then q+4. So each k16 product is two k8 ones, and
+nothing is staged or loaded differently (kernels.FlashPrefill80K8, `_k8` in
+the name). The tier takes it where f16GemmK is 8 and the row block divides
+the chunk. Otherwise sm_70's pair still serves.
+
+On a T4, per-kernel device time of a warm 512-token prompt:
+
+    Llama-3.1-8B Q4_K_M   flashprefill70paged_d128  20.1 ms  ->  flashprefill80paged_d128_k8  13.9 ms
+    Llama-3.2-1B Q4_K_M   flashprefill70paged_d64    4.1 ms  ->  flashprefill80paged_d64_k8    2.7 ms
+
+The prompt's wall rate did not resolve it. The pairs read 0.98-1.04 on the
+8B and 0.91-1.07 on the 1B, with the card going from 1590 to 945 MHz within
+the job; the A/A pairs drifted as far. llama.cpp's flash attention on the
+same card ran 13.5 ms for the 8B prompt. The kernel gate
+(TestPagedFlashPrefill80) runs the k8 form on every card with m16n8k8,
+sm_75 and sm_86 alike, and fails with B's two registers swapped.
+
 ### A warm 514-token prompt, kernel by kernel, against llama.cpp on a T4
 
 `jitllm speed` prints JITLLM_CUDA_KERNEL_TIMING's split for the timed prompt
