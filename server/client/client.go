@@ -15,7 +15,6 @@ import (
 
 	"connectrpc.com/connect"
 
-	"github.com/jitllm/jitllm/internal/capabilities"
 	"github.com/jitllm/jitllm/internal/localserver"
 	v1 "github.com/jitllm/jitllm/server/gen/jitllm/v1"
 	"github.com/jitllm/jitllm/server/gen/jitllm/v1/jitllmv1connect"
@@ -79,12 +78,13 @@ func (c *Conn) Has(feature string) bool {
 	return c.Info != nil && slices.Contains(c.Info.GetFeatures(), feature)
 }
 
-// Capabilities decodes the server's capability manifest.
-func (c *Conn) Capabilities() (capabilities.Manifest, error) {
-	var m capabilities.Manifest
+// Capabilities decodes the server's capability manifest (GET
+// /v1/capabilities, internal/capabilities.Manifest) into v. It takes the
+// caller's type so this thin client does not import the manifest's package,
+// which reaches the converter.
+func (c *Conn) Capabilities(v any) error {
 	if c.Info == nil {
-		return m, nil
+		return nil
 	}
-	err := json.Unmarshal([]byte(c.Info.GetCapabilitiesJson()), &m)
-	return m, err
+	return json.Unmarshal([]byte(c.Info.GetCapabilitiesJson()), v)
 }

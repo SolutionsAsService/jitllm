@@ -9,6 +9,7 @@ import (
 
 	"connectrpc.com/connect"
 
+	"github.com/jitllm/jitllm/internal/capabilities"
 	"github.com/jitllm/jitllm/internal/localserver"
 	"github.com/jitllm/jitllm/server"
 	"github.com/jitllm/jitllm/server/client"
@@ -41,7 +42,8 @@ func TestDiscoverReadsServerInfo(t *testing.T) {
 	if !c.Has("server_info") {
 		t.Errorf("features %v lack server_info", i.GetFeatures())
 	}
-	m, err := c.Capabilities()
+	var m capabilities.Manifest
+	err = c.Capabilities(&m)
 	if err != nil || m.Schema == 0 || len(m.Architectures) == 0 || m.ServerAPI != localserver.APIVersion {
 		t.Fatalf("capabilities: %v, schema %d, %d architectures, api %d", err, m.Schema, len(m.Architectures), m.ServerAPI)
 	}
