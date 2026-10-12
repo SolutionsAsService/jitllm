@@ -23,7 +23,7 @@ jitllm run -maxmem 4G models/model.jlm "Hello"
 jitllmd serve -load model.jlm -maxmem 12G
 ```
 
-With no budget on Linux, jitllm takes 80% of the smaller of the process's cgroup memory limit and the system's available memory; the rest is headroom for the KV cache and scratch buffers. On macOS and Windows there is no automatic budget: weights stay resident unless you set one.
+With no budget, jitllm takes 80% of the memory available: on Linux the smaller of the process's cgroup memory limit and the system's available memory, on macOS and Windows what the system reports as available. The rest is headroom for the KV cache and scratch buffers.
 
 The budget is charged for what a block actually uses, not for the largest block in the model, so a model whose blocks differ in size fits as many as the bytes allow.
 

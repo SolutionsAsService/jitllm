@@ -5,13 +5,17 @@
 | Command | What it does |
 |---|---|
 | `jitllm hardware` | the CPU tier, the GPUs each backend sees, and their memory |
+| `jitllm doctor [-json] [model.jlm]` | can this machine and build run (and run this container); exit 0 ok, 2 missing, 1 error |
+| `jitllm capabilities [-json]` | what this build converts, runs and serves ([capabilities.md](capabilities.md)) |
 | `jitllm library` | the models `convert` can fetch by name |
 | `jitllm convert` | GGUF, a Hugging Face directory, a URL or a catalog name to `.jlm` |
-| `jitllm run` | generate, with `-chat`, `-image`, sampling, devices and placement |
+| `jitllm run` | generate, with `-chat`, `-image`, sampling, devices and placement; with no prompt an interactive chat, or the prompt from piped stdin |
 | `jitllm embed` | an embedding model's normalised vector |
+| `jitllm decide` | a decision model's answers to a `/v1/systemone` request |
 | `jitllm tokenize` / `info` | the token ids of a text / a GGUF's metadata |
 | `jitllm speed` / `batch` | prompt and decode rates, and batched decode |
 | `jitllm verify` | compare a device run with the host, position by position |
+| `jitllm bench` | one-core decode as a fraction of a memory read rate measured in the same process |
 | `jitllm asm Q4_K` | disassemble a generated CPU kernel |
 
 ## Convert a model
@@ -36,9 +40,10 @@
 
 | Flag | Meaning |
 |---|---|
-| `-o DIR` | where a downloaded model lands |
+| `-o DIR` | where the container and a downloaded source land; the output path is optional |
 | `-q8` | safetensors only: store weight matrices as Q8_0 |
 | `-chat-template FILE` | store this file's chat template(s) in place of the source's |
+| `-plan` | safetensors only: print the container the conversion would write, from the shards' headers, without converting |
 
 The container carries the configuration, tokenizer, stop tokens, chat templates
 and any vision tower, in the layout the kernels read, so a page-in is a copy and
@@ -53,3 +58,8 @@ ends at the end of its turn:
 ./jitllm run -chat -system "Explain things with simple examples." \
   -temp 0.7 -top-p 0.9 -n 256 models/smollm2.jlm "What is recursion?"
 ```
+
+With no prompt and a terminal on stdin, `run` holds a conversation through the
+model's chat template: `/help`, `/clear`, `/bye` (or Ctrl+D) to leave, Ctrl+C
+to stop a reply, a trailing `\` or a `"""` block for several lines. A pipe or
+file on stdin is read whole as the prompt instead.

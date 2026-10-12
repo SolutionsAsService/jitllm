@@ -33,9 +33,9 @@ On CUDA the graph already pays for launches, so fusion is not the main decode le
 
 Three kinds, in order of how far they reach:
 
-1. **Pairwise kernel fusion.** One kernel does what two did, so the intermediate never leaves registers or cache. The norm writes the matmul's quantized input (shipped); the activation and gate product write the down projection's input (shipped); on CUDA, q's rotation, k's rotation into its KV page and v's copy into its page are one launch (in progress, branch `gpu-cuda-fuse`, bit-identical to the three kernels it replaces).
-2. **Fused host regions.** The pool's workers join once per run and each op becomes a *phase*: one store publishes it, and completion is counted in chunks rather than workers. The kernels, chunks and order are the per-op path's, so the logits are the same bits. Llama-3.2-1B goes from 218 regions a token to 1 region and 218 phases (in progress, branch `host-fused-runs`).
-3. **Collectives in the IR.** Subgroup (simdgroup) reductions, broadcasts and shuffles, lowered to PTX, SPIR-V, MSL and AMDGPU, and tensor-core tiles on `mma.sync`. These let a fused kernel pass data between threads in registers instead of through memory (in progress, PR #80).
+1. **Pairwise kernel fusion.** One kernel does what two did, so the intermediate never leaves registers or cache. The norm writes the matmul's quantized input (shipped); the activation and gate product write the down projection's input (shipped); on CUDA, q's rotation, k's rotation into its KV page and v's copy into its page are one launch (shipped, bit-identical to the three kernels it replaces).
+2. **Fused host regions.** The pool's workers join once per run and each op becomes a *phase*: one store publishes it, and completion is counted in chunks rather than workers. The kernels, chunks and order are the per-op path's, so the logits are the same bits. Llama-3.2-1B goes from 218 regions a token to 1 region and 218 phases (in progress, not yet on main).
+3. **Collectives in the IR.** Subgroup (simdgroup) reductions, broadcasts and shuffles, lowered to PTX, SPIR-V, MSL and AMDGPU, and tensor-core tiles on `mma.sync`. These let a fused kernel pass data between threads in registers instead of through memory (shipped in the IR; the fused kernels that use them are still to come).
 
 <Shuffle />
 
@@ -45,16 +45,16 @@ Three kinds, in order of how far they reach:
 
 Consecutive resident blocks on one device run as one unit, with no Go between them:
 
-- **Host:** one fused region per token across the resident host run plus the head (in progress, `host-fused-runs`). Nothing is compiled for a run, so after a relocation, eviction or seam move the next token's runs simply follow the new placement.
+- **Host:** one fused region per token across the resident host run plus the head (in progress, not yet on main). Nothing is compiled for a run, so after a relocation, eviction or seam move the next token's runs simply follow the new placement.
 - **CUDA:** the device's resident range is one submission, captured as a CUDA graph and re-captured when the range changes (shipped).
 - **What ends a run:** a block on another device, or a block whose page has to be read first. With a two-frame page budget a host token runs one run per block read.
 
 ## What it keeps
 
-- **Per-op kernels stay the reference.** Every fused path is gated against them: `TestFusedBlocksMatchPerOp` holds fused host decode to the same logit bits on every principle fixture, resident and paged; the CUDA fused writer is gated kernel-to-parts and a whole decode fused against per op, every block placed and on a partial seam.
-- **The gates were run against violations.** A phase published before its predecessor finished fails `TestFusedPhaseOrder`; workers dropping chunks fail the model gate at token 0.
+- **Per-op kernels stay the reference.** Every fused path is gated against them: the CUDA fused writer kernel-to-parts (`TestRoPEQKVPagedMatchesItsParts`) and a whole decode fused against per op, every block placed and on a partial seam (`TestFusedDecodeMatchesPerOp`); the fused host regions, on their branch, to the same logit bits on every principle fixture, resident and paged.
+- **The gates are run against violations.** On the host branch, a phase published before its predecessor finished fails the phase-order gate, and workers dropping chunks fail the model gate at token 0.
 - **Relocation, paging, batching and sessions are untouched.** The principle gates (`TestLayerRelocatesToAnotherDevice`, `TestPagingDoesNotChangeTheAnswer`, `TestDecodeDoesNotAllocate` and the rest in AGENTS.md) run with fusion on. A host crew shared with another session is not fused, by choice, and neither are prefill and the batched step, whose regions carry far more work each.
-- **It is switchable.** `JITLLM_FUSE=0` runs decode one region per op, for A/B and bisection.
+- **It is switchable.** `jitllm verify -ab fuse` times CUDA's fused launches against their parts in a paired A/B, on the same captured graphs.
 
 ## Numbers
 

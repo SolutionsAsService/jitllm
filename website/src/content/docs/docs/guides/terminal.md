@@ -52,7 +52,7 @@ The saved chats, the transcript, the prompt, and at the right the engine: the op
 | `ctrl+t` | show or fold the reasoning |
 | `ctrl+y` | copy the last reply |
 | `ctrl+n` | a new chat |
-| `ctrl+↑` `ctrl+↓` | the previous and next chat |
+| `ctrl+↑` `ctrl+↓`, or `⌥↑` `⌥↓` (`alt`) | the previous and next chat; on macOS, where Mission Control takes `ctrl+↑`, use Option |
 | `pgup` `pgdn` | scroll the transcript |
 
 A prompt starting with `/` is a command, completed with `tab`:
@@ -72,7 +72,7 @@ A prompt starting with `/` is a command, completed with `tab`:
 
 <img src="/shots/tui-models.png" width="1430" height="880" alt="The terminal app's Models screen: the converted models with their quantization and size, and the selected model's details" />
 
-The `.jlm` files in your model folders and the GGUF and safetensors files beside them, with what each is, its quantization and size, and which are open. The selected file's details are read from its header without loading it: architecture, blocks, width, context, vocabulary, page size, and whether it carries a chat template and a vision tower. `enter` loads a container, converts a source into one, or rebuilds a container an older version wrote; `ctrl+x` closes it. Type to filter.
+The `.jlm` files in your model folders and the GGUF and safetensors files beside them, with what each is, its quantization and size, and which are open. The selected file's details are read from its header without loading it: architecture, blocks, width, context, vocabulary, page size, and whether it carries a chat template and a vision tower. `enter` loads a container, converts a source into one, or rebuilds a container an older version wrote; `ctrl+x` unloads it. Several models stay loaded at once, each tagged **loaded** here and marked in the chat's sidebar; loading another unloads nothing, and only `ctrl+x` (or **Unload** in the command palette, which also offers **Chat with** for each) removes one. Type to filter.
 
 ## Discover
 
