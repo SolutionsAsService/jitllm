@@ -77,8 +77,10 @@ func (g *devTier) tuneActIn() {
 			saveCache(g.kb.cacheDir, "gpuactin", ck, v)
 		}
 	}
+	// The verdicts of this tune, not a sum over retunes: a retune after the
+	// seam grows decides the same keys again.
+	g.ActInTimed, g.ActInKept = len(keys), 0
 	for _, key := range keys {
-		g.ActInTimed++
 		if g.actInWin[key] {
 			g.ActInKept++
 		}

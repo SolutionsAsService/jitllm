@@ -69,7 +69,11 @@ func (g *devTier) fuseActIn(l *layer) {
 		}
 		key := fmt.Sprintf("qkv/%v/%d/%v", segs, l.mvq.split, l.mvq.group)
 		if on(actInQKV, key) {
-			l.qkvIn, l.actInKeys[0] = g.segInKernel(segs, l.mvq.split, l.mvq.group, norm), key
+			// A key only beside a kernel: tuneActIn times every keyed site's
+			// prologue, and a declined one (ErrGroupTooWide) has none.
+			if l.qkvIn = g.segInKernel(segs, l.mvq.split, l.mvq.group, norm); l.qkvIn != nil {
+				l.actInKeys[0] = key
+			}
 		}
 	}
 	// q, k and v one launch each, where they are not one launch together.
@@ -94,12 +98,16 @@ func (g *devTier) fuseActIn(l *layer) {
 	}
 	if s, ok := res(l.mvo, quant); ok {
 		if key := fmt.Sprintf("o/%v", s); on(actInO, key) {
-			l.mvo.resIn, l.actInKeys[1] = g.inKernel(s), key
+			if l.mvo.resIn = g.inKernel(s); l.mvo.resIn != nil {
+				l.actInKeys[1] = key
+			}
 		}
 	}
 	if s, ok := res(l.mvd, quant); ok && l.mvu.gated != nil {
 		if key := fmt.Sprintf("d/%v", s); on(actInDown, key) {
-			l.mvd.resIn, l.actInKeys[2] = g.inKernel(s), key
+			if l.mvd.resIn = g.inKernel(s); l.mvd.resIn != nil {
+				l.actInKeys[2] = key
+			}
 		}
 	}
 	if sites&actInGateUp == 0 || ungatedFFN(p) || !plain(l.mvg) || !plain(l.mvu) || l.mvg.bias != nil || l.mvu.bias != nil {
