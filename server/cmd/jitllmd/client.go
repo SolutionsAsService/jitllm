@@ -21,13 +21,14 @@ import (
 
 	"connectrpc.com/connect"
 
+	"github.com/jitllm/jitllm/internal/localserver"
 	v1 "github.com/jitllm/jitllm/server/gen/jitllm/v1"
 	"github.com/jitllm/jitllm/server/gen/jitllm/v1/jitllmv1connect"
 )
 
 // defaultAddr keeps the common case short: a daemon on this host, on the
 // address `jitllmd serve` itself defaults to.
-const defaultAddr = "localhost:8080"
+const defaultAddr = localserver.DefaultAddr
 
 // cli is where a verb writes. It is a struct rather than os.Stdout/os.Stderr
 // so a gate can drive a verb in process and watch stdout arrive, telling a
