@@ -6070,3 +6070,26 @@ partial-writing split ran act(gate)*up as its own launch for good
 (`mv.wantGated`). And a CUDA kernel whose registers allow fewer threads than
 its workgroup failed at launch (T4, the q/k/v prologue at 1024 threads); the
 compile now refuses it with `backend.ErrGroupTooWide`.
+
+### The prologue decided per card by measurement
+
+Five T4 rows read 0.982-0.994 with actInPays' V100-fitted constants: a small
+regression, not noise. `tuneActIn` replaced the constants: after the decode
+retune it times each site's two launches against its prologue over up to 16
+placed blocks, interleaved, and keeps the prologue only under 0.99 (cached per
+binary, device and shape). Its verdicts:
+
+    V100 1B   q/k/v 0.88 and 0.86, attention output 0.71: kept; down 1.04-1.07: dropped
+    V100 8B   q/k/v 0.95: kept; attention output 0.997, down 1.12-2.4: dropped
+    T4 1B     1 of 5 sites kept
+    T4 8B     none kept
+
+and the in-process A/B after it (JITLLM_GPU_TUNE=1, n=20, A/A first):
+
+    V100 1B   A/A 1.0047 (IQR 2.2%)   1.0327 (2.6%), 1.0337 (2.8%)
+    V100 8B   A/A 1.0026 (2.6%)       1.0072 (1.8%), 1.0063 (1.9%)
+    T4 1B     A/A 1.0050 (2.0%)       1.0106 (2.2%), 1.0091 (2.3%)
+    T4 8B     no site kept, both arms one launch sequence: 0.9920 (2.4%), 1.0016 (1.3%)
+
+The T4 8B A/A run did not complete (the process panicked before the row);
+with no site kept its two passes are themselves a same-sequence control.
