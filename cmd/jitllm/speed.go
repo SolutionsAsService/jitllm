@@ -129,6 +129,7 @@ func speedCmd(args []string) error {
 				return 0, 0, perr
 			}
 		}
+		backend.CUDAKernelTimes() // clear: only the timed prompt is reported
 		g0 := readGC()
 		t0 := time.Now()
 		// The timer stops when Prefill returns: it hands back the last row's
@@ -150,6 +151,9 @@ func speedCmd(args []string) error {
 		}
 		if timed && *cpuProf != "" {
 			pprof.StopCPUProfile()
+		}
+		if timed && err == nil {
+			printKernelTimes("a prompt", 1)
 		}
 		ppOn, spills, fails, tails := st.GPULayers(), st.Spills(), st.DeviceDemotions(), st.TailRowChunks()
 		moves := st.Relocations() + st.Reclaims()
@@ -378,8 +382,10 @@ func sessionsRun(attach func(int) (*model.State, error), prompt []int32, k, n, r
 
 // printKernelTimes prints and clears the per-kernel device time CUDA recorded
 // (JITLLM_CUDA_KERNEL_TIMING=1), per unit over steps units; it prints nothing
-// when nothing was recorded. The times are event nodes inside captured
-// graphs, so JITLLM_GPU_GRAPH=0 records none.
+// when nothing was recorded. A decode token's are event nodes inside its
+// captured graph; a prompt's are an event pair around each launch, since a
+// prompt chunk is not captured (scripts/kshim.c with KSHIM_DIRECT=1 takes the
+// same of llama.cpp's prompt).
 func printKernelTimes(unit string, steps int) {
 	us, cnt := backend.CUDAKernelTimes()
 	if len(us) == 0 {

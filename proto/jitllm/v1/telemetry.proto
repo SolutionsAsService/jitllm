@@ -28,6 +28,26 @@ message ServerInfo {
   repeated string available_backends = 5;
   int32 loaded_models = 6;
   int32 open_sessions = 7;
+  // The VCS revision the binary was built from ("unknown" when the toolchain
+  // embedded none), and whether the tree had local changes.
+  string revision = 8;
+  bool modified = 9;
+  // The control plane's compatibility version. It changes only when a field
+  // changes meaning or goes away -- adding one does not -- so a client built
+  // against a different number refuses rather than misreading the answers.
+  int32 api_version = 10;
+  // GOOS and GOARCH of the serving process.
+  string os = 11;
+  string arch = 12;
+  // Every device the server enumerated, with its spendable memory.
+  repeated Device devices = 13;
+  // The capability manifest (GET /v1/capabilities) as JSON: architectures,
+  // projectors, quantizations, backends and the HTTP routes this build
+  // serves. It carries its own schema number.
+  string capabilities_json = 14;
+  // Named features of this server a client switches its own on by, in
+  // addition to the manifest (for example "model_aliases").
+  repeated string features = 15;
 }
 
 message PoolStats {

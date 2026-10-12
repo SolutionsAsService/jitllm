@@ -615,6 +615,56 @@ fallback at every thread count. On a hybrid CPU an equal slice is wrong by a ker
 1.76x for the memory-bound decode matvec -- which is why `sched.Pool.drain` claims chunks dynamically
 and has no static path (its comment quotes the first and last).
 
+## The decode row's two boundaries: `jitllm run` against llama-bench's tg
+
+A CUDA board read `jitllm speed`'s warm decode faster than llama-bench (A100,
+Llama-3.2-1B Q4_K_M: 1,615 against 1,854 us a token) while the harness's
+decode row, which times `jitllm run`, read 0.98-1.00. What each arm times:
+
+- **llama-bench tg** creates the context untimed, runs one untimed warm-up
+  generation, then times its n tokens from a fresh KV at position 0.
+- **`jitllm run`** (vs-llamacpp.sh's decode arm) opens, places, prefills the
+  prompt, and times every token from the first decode: the decode timer
+  starts after the prompt, so open, placement, upload and the prompt are
+  outside it, and the first decode token of the session is inside it.
+
+Measured per token from `run` (a timer around each step of its decode loop,
+a local build; it is not in the tree), Llama-3.2-1B Q4_K_M unless said:
+
+    V100, cuda      token 1: 3.32-3.52 ms; tokens 2-7: 1.83-1.90; median after 8: 1.842-1.862
+                    jitllm speed tg128 on the same card: 1.83-1.86 ms (538-546 tok/s)
+    T4, cuda        token 1: 5.54-5.86 ms; tokens 2-7: 4.57-4.94; median after 8: 4.16-4.39
+                    jitllm speed tg128: 4.05-4.35 ms
+    T4, 8B Q4_K_M   token 1: 22.2-22.9 ms; tokens 2-7: 20.6-20.9; median 20.86-20.89
+                    jitllm speed tg128: 20.9-22.5 ms
+
+So on both cards `run` pays one thing per session that `speed` does not: its
+first decode token is 1.5 ms (V100) to 1.7 ms (T4) longer, which is the
+session's decode graph being captured (a recording is keyed by the session,
+graphKey.sid, and speed's untimed warm-up captured it). Over 128 tokens that
+is 0.5-0.7% of the row. After it, `run` and `speed` decode at the same rate
+within 1%. Nothing else is paid per token: the printing goroutine, the
+sampler and the greedy step are off the device's path at these rates.
+
+Two start-up costs found on the way, neither per token:
+
+- **A cold tune cache tunes only part of the decode in a `run` process.** The
+  background split tuner (tier.WithLazyTune) times a trial only after 50 ms of
+  device quiet, and a `run` has that only before its prompt: on a V100 with an
+  empty cache one `run` tuned 3 of the 1B's 6 decode shapes and a `speed`
+  process all 6. The rest run the table's split until a later process tunes
+  them. On the V100 the table's split decoded at the tuned rate (1,846 us a
+  token both ways); a card the table was not fitted on can differ.
+- **The first prompt compiles one kernel after the model is ready**
+  (`jitllm speed -ttft` refuses the row and names it): a staged prefill
+  attention variant (pagedscoresmma) at the first prompt's span, compiled when
+  a chunk first needs it rather than at placement (V100, -p 16 and -p 514).
+
+The A100 gap (run about 0.3 ms a token slower than speed) is not reproduced on
+a V100 or a T4, where the gap after the first token is under 0.1 ms. It is
+open: what settles it is the same per-token timer from `run` on the A100, one
+short job.
+
 ## The 0.90 and 0.70 readings, and the harness that produced them
 
 ★★★ **Llama-3.2-1B ON LINUX CPU IS A GATED WIN AT 1.0425 / 1.0436, TWO PASSES
